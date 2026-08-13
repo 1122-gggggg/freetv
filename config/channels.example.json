@@ -1,0 +1,9 @@
+[
+  {
+    "id": "demo-channel",
+    "number": 1,
+    "name": "Demo Channel",
+    "url": "https://example.com/live.m3u8",
+    "enabled": true
+  }
+]

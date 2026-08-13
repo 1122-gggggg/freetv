@@ -1,0 +1,21 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8765
+  },
+  "applications": {
+    "brave_path": "",
+    "edge_path": "",
+    "mpv_path": "",
+    "browser_path": ""
+  },
+  "urls": {
+    "youtube": "https://www.youtube.com/",
+    "netflix": "https://www.netflix.com/",
+    "browser": "https://www.google.com/"
+  },
+  "security": {
+    "pairing_code_ttl_seconds": 600,
+    "remote_token_bytes": 32
+  }
+}

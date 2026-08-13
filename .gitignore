@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Local controller data
+config/settings.json
+config/channels.json
+config/remotes.json
+logs/
+
+# Windows and editors
+.vscode/
+.idea/
+*.log
+Thumbs.db
+.DS_Store
