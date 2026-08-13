@@ -11,6 +11,7 @@ def test_health_reports_controller_and_dependency_availability() -> None:
     app = create_app(
         settings=settings,
         capabilities={"brave_available": True, "edge_available": True, "mpv_available": False},
+        frontend_available=False,
     )
 
     with TestClient(app) as client:

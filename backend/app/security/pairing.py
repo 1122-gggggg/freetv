@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import hmac
 import secrets
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from app.security.tokens import TokenStore
@@ -14,6 +16,12 @@ class PairingCodeInvalid(ValueError):
 
 class PairingCodeExpired(ValueError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class AuthenticatedRemoteSession:
+    token_key: bytes
+    expires_at: datetime
 
 
 class PairingService:
@@ -34,8 +42,8 @@ class PairingService:
 
     def rotate_code(self) -> str:
         code = self._code_factory()
-        if len(code) != 6 or not code.isdecimal():
-            raise ValueError("Pairing codes must be exactly six decimal digits.")
+        if not _is_ascii_pairing_code(code):
+            raise ValueError("Pairing codes must be exactly six ASCII digits.")
         self._code = code
         self._expires_at = self.now() + self._ttl
         return code
@@ -54,13 +62,40 @@ class PairingService:
             self._code = None
             self._expires_at = None
             raise PairingCodeExpired("Pairing code expired.")
-        if not isinstance(submitted_code, str) or not hmac.compare_digest(self._code, submitted_code):
+        if not _is_ascii_pairing_code(submitted_code) or not hmac.compare_digest(
+            self._code, submitted_code
+        ):
             raise PairingCodeInvalid("Pairing code is invalid.")
 
         self._code = None
         self._expires_at = None
         return self._tokens.issue_token()
 
+    def verify_token(self, token: str) -> bool:
+        return self._tokens.verify(token)
+
+    def authenticate_token(self, token: str) -> AuthenticatedRemoteSession | None:
+        expires_at = self._tokens.token_expires_at(token)
+        if expires_at is None:
+            return None
+        return AuthenticatedRemoteSession(self._token_key(token), expires_at)
+
+    def session_is_valid(self, session: AuthenticatedRemoteSession) -> bool:
+        return self.now() < session.expires_at and self._tokens.is_token_key_active(
+            session.token_key
+        )
+
+    def revoke_token(self, token: str) -> bool:
+        return self._tokens.revoke(token)
+
+    @staticmethod
+    def _token_key(token: str) -> bytes:
+        return hashlib.sha256(token.encode("utf-8")).digest()
+
     @staticmethod
     def _generate_code() -> str:
         return f"{secrets.randbelow(900_000) + 100_000:06d}"
+
+
+def _is_ascii_pairing_code(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 6 and value.isascii() and value.isdecimal()

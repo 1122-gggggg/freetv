@@ -7,7 +7,6 @@ from ctypes import wintypes
 from app.commands.ports import CommandExecutionError
 from app.protocol import Command, PointerAction, PointerActionMessage
 
-
 INPUT_MOUSE = 0
 INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
@@ -77,7 +76,9 @@ class WindowsInputController:
         if message.action is PointerAction.MOVE:
             self._send(self._mouse(message.dx, message.dy, 0, MOUSEEVENTF_MOVE))
         elif message.action is PointerAction.TAP:
-            self._send(self._mouse(0, 0, 0, MOUSEEVENTF_LEFTDOWN), self._mouse(0, 0, 0, MOUSEEVENTF_LEFTUP))
+            self._send(
+                self._mouse(0, 0, 0, MOUSEEVENTF_LEFTDOWN), self._mouse(0, 0, 0, MOUSEEVENTF_LEFTUP)
+            )
         elif message.action is PointerAction.DOUBLE_TAP:
             self._send(
                 self._mouse(0, 0, 0, MOUSEEVENTF_LEFTDOWN),
@@ -89,7 +90,9 @@ class WindowsInputController:
             wheel_delta = ctypes.c_uint32(message.dy * WHEEL_DELTA).value
             self._send(self._mouse(0, 0, wheel_delta, MOUSEEVENTF_WHEEL))
         else:  # pragma: no cover - Pydantic prevents unknown actions.
-            raise CommandExecutionError("invalid_pointer_action", "That touchpad action is not allowed.")
+            raise CommandExecutionError(
+                "invalid_pointer_action", "That touchpad action is not allowed."
+            )
 
     async def text(self, text: str) -> None:
         self._require_windows()
@@ -105,7 +108,10 @@ class WindowsInputController:
         self._require_windows()
         virtual_key = _COMMAND_KEYS.get(command)
         if virtual_key is None:
-            raise CommandExecutionError("unsupported_forward_command", "That control is not valid for the active application.")
+            raise CommandExecutionError(
+                "unsupported_forward_command",
+                "That control is not valid for the active application.",
+            )
         self._send(self._key(virtual_key, 0, 0), self._key(virtual_key, 0, KEYEVENTF_KEYUP))
 
     @staticmethod
@@ -119,13 +125,19 @@ class WindowsInputController:
     @staticmethod
     def _require_windows() -> None:
         if os.name != "nt":
-            raise CommandExecutionError("windows_only", "Windows input control is only available on Windows.")
+            raise CommandExecutionError(
+                "windows_only", "Windows input control is only available on Windows."
+            )
 
     @staticmethod
     def _send(*events: INPUT) -> None:
         if not events:
             return
         array = (INPUT * len(events))(*events)
-        sent = ctypes.windll.user32.SendInput(len(events), ctypes.byref(array), ctypes.sizeof(INPUT))
+        sent = ctypes.windll.user32.SendInput(
+            len(events), ctypes.byref(array), ctypes.sizeof(INPUT)
+        )
         if sent != len(events):
-            raise CommandExecutionError("windows_input_failed", "Windows did not accept the requested input.")
+            raise CommandExecutionError(
+                "windows_input_failed", "Windows did not accept the requested input."
+            )

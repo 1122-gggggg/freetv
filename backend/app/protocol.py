@@ -6,7 +6,6 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
-
 PROTOCOL_VERSION = 1
 REQUEST_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$"
 
@@ -80,7 +79,9 @@ class PointerActionMessage(WireModel):
 
 def sanitize_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value)
-    return "".join(character for character in normalized if not unicodedata.category(character).startswith("C"))
+    return "".join(
+        character for character in normalized if not unicodedata.category(character).startswith("C")
+    )
 
 
 class TextInputMessage(WireModel):

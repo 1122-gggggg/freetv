@@ -5,8 +5,9 @@ import os
 import shutil
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ServerSettings(BaseModel):
@@ -32,12 +33,21 @@ class UrlSettings(BaseModel):
     netflix: str = "https://www.netflix.com/"
     browser: str = "https://www.google.com/"
 
+    @field_validator("youtube", "netflix", "browser")
+    @classmethod
+    def validate_web_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("Configured URLs must use http or https and include a host.")
+        return value
+
 
 class SecuritySettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     pairing_code_ttl_seconds: int = Field(default=600, ge=60, le=3600)
     remote_token_bytes: int = Field(default=32, ge=24, le=64)
+    remote_token_ttl_days: int = Field(default=90, ge=1, le=365)
 
 
 class Settings(BaseModel):
@@ -68,7 +78,9 @@ def load_settings(path: Path | None = None) -> Settings:
     return Settings.model_validate(raw)
 
 
-def find_executable(configured_path: str, candidates: tuple[Path, ...], command: str) -> Path | None:
+def find_executable(
+    configured_path: str, candidates: tuple[Path, ...], command: str
+) -> Path | None:
     if configured_path:
         configured = Path(os.path.expandvars(configured_path)).expanduser()
         if configured.is_file():

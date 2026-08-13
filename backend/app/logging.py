@@ -22,12 +22,14 @@ class JsonFormatter(logging.Formatter):
 
 
 def configure_logging(level: int = logging.INFO) -> None:
+    application_logger = logging.getLogger("app")
+    application_logger.setLevel(level)
+    application_logger.propagate = False
+    if any(isinstance(handler.formatter, JsonFormatter) for handler in application_logger.handlers):
+        return
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter())
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-    root_logger.handlers.clear()
-    root_logger.addHandler(handler)
+    application_logger.addHandler(handler)
 
 
 def log_event(logger: logging.Logger, event: str, **fields: object) -> None:

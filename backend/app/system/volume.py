@@ -33,10 +33,13 @@ class WindowsVolumeController:
         if self._endpoint is not None:
             return self._endpoint
         if os.name != "nt":
-            raise CommandExecutionError("windows_only", "System volume control is only available on Windows.")
+            raise CommandExecutionError(
+                "windows_only", "System volume control is only available on Windows."
+            )
         try:
-            from comtypes import CLSCTX_ALL, CoInitialize
             from ctypes import POINTER, cast
+
+            from comtypes import CLSCTX_ALL, CoInitialize
             from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
             CoInitialize()
@@ -45,7 +48,9 @@ class WindowsVolumeController:
             self._endpoint = cast(interface, POINTER(IAudioEndpointVolume))
             return self._endpoint
         except Exception as error:
-            raise CommandExecutionError("volume_unavailable", "Windows system volume is unavailable.") from error
+            raise CommandExecutionError(
+                "volume_unavailable", "Windows system volume is unavailable."
+            ) from error
 
     @staticmethod
     def _read_state(endpoint: Any) -> tuple[int, bool]:

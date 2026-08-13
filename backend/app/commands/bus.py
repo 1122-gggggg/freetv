@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from app.commands.ports import (
@@ -20,6 +21,7 @@ class CommandOutcome:
     state: ControllerState
     error_code: str | None = None
     message: str | None = None
+    state_changed: bool = True
 
 
 _TILE_COMMANDS: dict[LauncherTile, Command] = {
@@ -67,38 +69,48 @@ class CommandBus:
         self._volume = volume
         self._input = input_controller
         self._power = power
+        self._command_lock = asyncio.Lock()
 
     async def dispatch_command(self, command: Command) -> CommandOutcome:
-        try:
-            return await self._dispatch_command(command)
-        except CommandExecutionError as error:
-            state = await self._state.update(error_message=error.message, status_message=None)
-            return CommandOutcome(False, state, error.code, error.message)
-        except Exception:
-            state = await self._state.update(
-                error_message="The controller could not complete that action.", status_message=None
-            )
-            return CommandOutcome(False, state, "controller_error", "The controller could not complete that action.")
+        async with self._command_lock:
+            try:
+                return await self._dispatch_command(command)
+            except CommandExecutionError as error:
+                state = await self._state.update(error_message=error.message, status_message=None)
+                return CommandOutcome(False, state, error.code, error.message)
+            except Exception:
+                state = await self._state.update(
+                    error_message="The controller could not complete that action.",
+                    status_message=None,
+                )
+                return CommandOutcome(
+                    False,
+                    state,
+                    "controller_error",
+                    "The controller could not complete that action.",
+                )
 
     async def dispatch_pointer(self, message: PointerActionMessage) -> CommandOutcome:
-        try:
-            await self._input.pointer(message)
-            state = await self._success_state()
-            return CommandOutcome(True, state)
-        except CommandExecutionError as error:
-            return await self._failure(error)
-        except Exception:
-            return await self._unknown_failure()
+        async with self._command_lock:
+            try:
+                self._require_external_input_target(await self._state.snapshot())
+                await self._input.pointer(message)
+                return await self._passive_success()
+            except CommandExecutionError as error:
+                return await self._failure(error)
+            except Exception:
+                return await self._unknown_failure()
 
     async def dispatch_text(self, message: TextInputMessage) -> CommandOutcome:
-        try:
-            await self._input.text(message.text)
-            state = await self._success_state()
-            return CommandOutcome(True, state)
-        except CommandExecutionError as error:
-            return await self._failure(error)
-        except Exception:
-            return await self._unknown_failure()
+        async with self._command_lock:
+            try:
+                self._require_external_input_target(await self._state.snapshot())
+                await self._input.text(message.text)
+                return await self._passive_success()
+            except CommandExecutionError as error:
+                return await self._failure(error)
+            except Exception:
+                return await self._unknown_failure()
 
     async def state_snapshot(self) -> ControllerState:
         return await self._state.snapshot()
@@ -124,7 +136,22 @@ class CommandBus:
             return CommandOutcome(True, state)
 
         if command in _LAUNCH_TARGETS:
-            await self._applications.open(_LAUNCH_TARGETS[command])
+            target = _LAUNCH_TARGETS[command]
+            if current.active_app is ActiveApp.LIVE_TV:
+                await self._player.close()
+                try:
+                    await self._applications.open(target)
+                except Exception:
+                    await self._applications.return_home()
+                    await self._state.update(
+                        active_app=ActiveApp.LAUNCHER,
+                        channel_number=None,
+                        channel_name=None,
+                        status_message=None,
+                    )
+                    raise
+            else:
+                await self._applications.open(target)
             state = await self._state.update(
                 active_app=_LAUNCH_TARGETS[command],
                 channel_number=None,
@@ -158,23 +185,25 @@ class CommandBus:
             return await self._dispatch_command(target)
 
         if command is Command.BACK and current.active_app is ActiveApp.LAUNCHER:
-            return CommandOutcome(True, await self._success_state())
+            return await self._passive_success()
 
         if command is Command.PLAY_PAUSE and current.active_app is ActiveApp.LIVE_TV:
             await self._player.toggle_pause()
-            return CommandOutcome(True, await self._success_state())
+            return await self._passive_success()
 
         if command is Command.NEXT and current.active_app is ActiveApp.LIVE_TV:
             await self._player.next()
-            return CommandOutcome(True, await self._success_state())
+            return await self._passive_success()
 
         if command is Command.PREVIOUS and current.active_app is ActiveApp.LIVE_TV:
             await self._player.previous()
-            return CommandOutcome(True, await self._success_state())
+            return await self._passive_success()
 
         if command in {Command.CHANNEL_UP, Command.CHANNEL_DOWN}:
             if current.active_app is not ActiveApp.LIVE_TV:
-                raise CommandExecutionError("live_tv_not_active", "Open Live TV before changing channels.")
+                raise CommandExecutionError(
+                    "live_tv_not_active", "Open Live TV before changing channels."
+                )
             direction = 1 if command is Command.CHANNEL_UP else -1
             channel_number, channel_name = await self._player.change_channel(direction)
             state = await self._state.update(
@@ -197,20 +226,42 @@ class CommandBus:
             level, muted = await self._volume.toggle_mute()
             return CommandOutcome(True, await self._success_state(volume=level, muted=muted))
 
-        await self._applications.forward_command(command)
-        return CommandOutcome(True, await self._success_state())
+        if current.active_app in {ActiveApp.YOUTUBE, ActiveApp.NETFLIX, ActiveApp.BROWSER}:
+            await self._applications.forward_command(command)
+            return await self._passive_success()
+        raise CommandExecutionError(
+            "command_not_supported", "That control is not available for the active application."
+        )
 
     async def _navigate(self, current: ControllerState, command: Command) -> CommandOutcome:
         if current.active_app is not ActiveApp.LAUNCHER:
-            await self._applications.forward_command(command)
-            return CommandOutcome(True, await self._success_state())
+            if current.active_app in {ActiveApp.YOUTUBE, ActiveApp.NETFLIX, ActiveApp.BROWSER}:
+                await self._applications.forward_command(command)
+                return await self._passive_success()
+            raise CommandExecutionError(
+                "command_not_supported", "That control is not available for the active application."
+            )
 
         focused_tile = _FOCUS_TRANSITIONS.get((current.focused_tile, command), current.focused_tile)
         state = await self._success_state(focused_tile=focused_tile)
         return CommandOutcome(True, state)
 
+    def _require_external_input_target(self, current: ControllerState) -> None:
+        if current.active_app not in {ActiveApp.YOUTUBE, ActiveApp.NETFLIX, ActiveApp.BROWSER}:
+            raise CommandExecutionError(
+                "input_target_not_active",
+                "Open a controller-managed browser before using remote input.",
+            )
+        self._applications.require_input_target(current.active_app)
+
     async def _success_state(self, **changes: object) -> ControllerState:
         return await self._state.update(error_message=None, **changes)
+
+    async def _passive_success(self) -> CommandOutcome:
+        state = await self._state.snapshot()
+        if state.error_message is not None:
+            return CommandOutcome(True, await self._success_state())
+        return CommandOutcome(True, state, state_changed=False)
 
     async def _failure(self, error: CommandExecutionError) -> CommandOutcome:
         state = await self._state.update(error_message=error.message, status_message=None)

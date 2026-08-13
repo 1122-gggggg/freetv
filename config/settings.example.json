@@ -16,6 +16,7 @@
   },
   "security": {
     "pairing_code_ttl_seconds": 600,
-    "remote_token_bytes": 32
+    "remote_token_bytes": 32,
+    "remote_token_ttl_days": 90
   }
 }

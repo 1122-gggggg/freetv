@@ -27,11 +27,11 @@ class ChildProcess(Protocol):
 
 class WindowController(Protocol):
     def find_window_for_pid(self, pid: int, timeout_seconds: float) -> int | None: ...
-
+    def window_belongs_to_process(self, handle: int, pid: int) -> bool: ...
     def minimize(self, handle: int) -> None: ...
-
     def maximize(self, handle: int) -> None: ...
-
+    def activate(self, handle: int) -> None: ...
+    def is_foreground(self, handle: int) -> bool: ...
     def bring_launcher_to_foreground(self) -> None: ...
 
 
@@ -74,7 +74,9 @@ class ApplicationManager:
 
     async def open(self, app: ActiveApp) -> None:
         if app not in {ActiveApp.YOUTUBE, ActiveApp.NETFLIX, ActiveApp.BROWSER}:
-            raise CommandExecutionError("unsupported_application", f"{app.value} is not opened by this launcher.")
+            raise CommandExecutionError(
+                "unsupported_application", f"{app.value} is not opened by this launcher."
+            )
 
         executable, url, app_name = self._launch_spec(app)
         if executable is None:
@@ -83,20 +85,24 @@ class ApplicationManager:
                 f"{app_name} is not installed or configured. Open Settings to configure it.",
             )
 
-        self._minimize_current_window()
         arguments = [executable.as_posix(), "--new-window", "--start-maximized", url]
         try:
             process = self._launch_process(arguments)
         except OSError as error:
-            raise CommandExecutionError("application_launch_failed", f"Could not open {app_name}.") from error
+            raise CommandExecutionError(
+                "application_launch_failed", f"Could not open {app_name}."
+            ) from error
 
         window_handle = await asyncio.to_thread(self._windows.find_window_for_pid, process.pid, 2.5)
         tracked = TrackedApplication(app=app, process=process, window_handle=window_handle)
+        self._minimize_current_window()
         self._children.append(tracked)
         self._current = tracked
         self._active_app = app
-        if window_handle is not None:
+        if window_handle is not None and self._tracked_window_is_owned(tracked):
             self._windows.maximize(window_handle)
+        else:
+            tracked.window_handle = None
         log_event(logger, "application_launched", app=app.value, process_id=process.pid)
 
     async def return_home(self) -> None:
@@ -106,9 +112,41 @@ class ApplicationManager:
         log_event(logger, "launcher_returned")
 
     async def forward_command(self, command: Command) -> None:
-        if self._active_app is ActiveApp.LAUNCHER:
-            raise CommandExecutionError("application_not_active", "Open an application before sending controls.")
+        self.require_input_target(self._active_app)
         self._input.send_command(command)
+
+    def require_input_target(self, app: ActiveApp) -> None:
+        if app not in {ActiveApp.YOUTUBE, ActiveApp.NETFLIX, ActiveApp.BROWSER}:
+            raise CommandExecutionError(
+                "input_target_not_active",
+                "Open a controller-managed browser before using remote input.",
+            )
+        tracked = self._current
+        if (
+            self._active_app is not app
+            or tracked is None
+            or tracked.app is not app
+            or not self._tracked_window_is_owned(tracked)
+        ):
+            raise CommandExecutionError(
+                "input_target_unavailable",
+                "The controller-managed application window is not available for remote input.",
+            )
+        assert tracked.window_handle is not None
+        self._windows.activate(tracked.window_handle)
+        if not self._tracked_window_is_owned(tracked):
+            raise CommandExecutionError(
+                "input_target_unavailable",
+                "The controller-managed application window is not available for remote input.",
+            )
+        if not self._windows.is_foreground(tracked.window_handle):
+            raise CommandExecutionError(
+                "input_target_not_foreground",
+                (
+                    "Bring the controller-opened application to the foreground "
+                    "before using remote input."
+                ),
+            )
 
     async def shutdown(self) -> None:
         for tracked in self._children:
@@ -132,8 +170,20 @@ class ApplicationManager:
         return browser, self._settings.urls.browser, "Configured browser"
 
     def _minimize_current_window(self) -> None:
-        if self._current is not None and self._current.window_handle is not None:
-            self._windows.minimize(self._current.window_handle)
+        if self._current is None or not self._tracked_window_is_owned(self._current):
+            return
+        assert self._current.window_handle is not None
+        self._windows.minimize(self._current.window_handle)
+
+    def _tracked_window_is_owned(self, tracked: TrackedApplication) -> bool:
+        if tracked.window_handle is None:
+            return False
+        try:
+            if tracked.process.poll() is not None:
+                return False
+        except OSError:
+            return False
+        return self._windows.window_belongs_to_process(tracked.window_handle, tracked.process.pid)
 
     @staticmethod
     def _default_process_launcher(arguments: list[str]) -> ChildProcess:

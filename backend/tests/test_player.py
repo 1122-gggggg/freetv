@@ -41,9 +41,27 @@ def write_channels(path: Path) -> None:
     path.write_text(
         json.dumps(
             [
-                {"id": "one", "number": 1, "name": "News", "url": "https://example.test/one.m3u8", "enabled": True},
-                {"id": "two", "number": 2, "name": "Sports", "url": "https://example.test/two.m3u8", "enabled": True},
-                {"id": "off", "number": 3, "name": "Off Air", "url": "https://example.test/off.m3u8", "enabled": False},
+                {
+                    "id": "one",
+                    "number": 1,
+                    "name": "News",
+                    "url": "https://example.test/one.m3u8",
+                    "enabled": True,
+                },
+                {
+                    "id": "two",
+                    "number": 2,
+                    "name": "Sports",
+                    "url": "https://example.test/two.m3u8",
+                    "enabled": True,
+                },
+                {
+                    "id": "off",
+                    "number": 3,
+                    "name": "Off Air",
+                    "url": "https://example.test/off.m3u8",
+                    "enabled": False,
+                },
             ]
         ),
         encoding="utf-8",
@@ -66,8 +84,20 @@ def test_channel_config_rejects_duplicate_numbers(tmp_path) -> None:
     path.write_text(
         json.dumps(
             [
-                {"id": "one", "number": 1, "name": "One", "url": "https://example.test/one.m3u8", "enabled": True},
-                {"id": "two", "number": 1, "name": "Two", "url": "https://example.test/two.m3u8", "enabled": True},
+                {
+                    "id": "one",
+                    "number": 1,
+                    "name": "One",
+                    "url": "https://example.test/one.m3u8",
+                    "enabled": True,
+                },
+                {
+                    "id": "two",
+                    "number": 1,
+                    "name": "Two",
+                    "url": "https://example.test/two.m3u8",
+                    "enabled": True,
+                },
             ]
         ),
         encoding="utf-8",
@@ -121,5 +151,30 @@ def test_mpv_missing_returns_explicit_error(tmp_path) -> None:
 
         with pytest.raises(CommandExecutionError, match="mpv is not installed"):
             await controller.open()
+
+    asyncio.run(scenario())
+
+
+def test_mpv_preserves_current_channel_when_load_command_fails(tmp_path) -> None:
+    async def scenario() -> None:
+        path = tmp_path / "channels.json"
+        write_channels(path)
+        channels = ChannelManager(load_channels(path))
+
+        def unavailable_ipc(_: list[object]) -> None:
+            raise OSError("pipe unavailable")
+
+        controller = MpvController(
+            channels,
+            mpv_path=Path("C:/Apps/mpv.exe"),
+            process_launcher=FakeLauncher(),
+            ipc_sender=unavailable_ipc,
+        )
+        await controller.open()
+
+        with pytest.raises(CommandExecutionError, match="mpv did not accept"):
+            await controller.change_channel(1)
+
+        assert channels.current.number == 1
 
     asyncio.run(scenario())

@@ -5,7 +5,6 @@ import os
 import time
 from ctypes import wintypes
 
-
 SW_MINIMIZE = 6
 SW_MAXIMIZE = 3
 SW_RESTORE = 9
@@ -25,6 +24,16 @@ class WindowsWindowController:
                 return None
             time.sleep(0.1)
 
+    def window_belongs_to_process(self, handle: int, pid: int) -> bool:
+        self._require_windows()
+        window_handle = wintypes.HWND(handle)
+        user32 = ctypes.windll.user32
+        if not user32.IsWindow(window_handle):
+            return False
+        process_id = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(window_handle, ctypes.byref(process_id))
+        return process_id.value == pid
+
     def minimize(self, handle: int) -> None:
         self._require_windows()
         ctypes.windll.user32.ShowWindow(wintypes.HWND(handle), SW_MINIMIZE)
@@ -34,6 +43,22 @@ class WindowsWindowController:
         user32 = ctypes.windll.user32
         user32.ShowWindow(wintypes.HWND(handle), SW_MAXIMIZE)
         user32.SetForegroundWindow(wintypes.HWND(handle))
+
+    def activate(self, handle: int) -> None:
+        self._require_windows()
+        user32 = ctypes.windll.user32
+        window_handle = wintypes.HWND(handle)
+        if user32.IsIconic(window_handle):
+            user32.ShowWindow(window_handle, SW_RESTORE)
+        user32.SetForegroundWindow(window_handle)
+
+    def is_foreground(self, handle: int) -> bool:
+        self._require_windows()
+        get_foreground_window = ctypes.windll.user32.GetForegroundWindow
+        get_foreground_window.argtypes = ()
+        get_foreground_window.restype = wintypes.HWND
+        current = get_foreground_window()
+        return int(current or 0) == handle
 
     def bring_launcher_to_foreground(self) -> None:
         self._require_windows()

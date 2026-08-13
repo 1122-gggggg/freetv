@@ -12,7 +12,7 @@ from typing import Protocol
 
 from app.commands.ports import CommandExecutionError
 from app.logging import log_event
-from app.player.channels import Channel, ChannelManager
+from app.player.channels import ChannelManager
 
 
 class ChildProcess(Protocol):
@@ -49,7 +49,8 @@ class MpvController:
         channel = self._channels.current
         if self._mpv_path is None:
             raise CommandExecutionError(
-                "mpv_not_found", "mpv is not installed or configured. Install mpv, then set its path in Settings."
+                "mpv_not_found",
+                "mpv is not installed or configured. Install mpv, then set its path in Settings.",
             )
 
         if self._process is not None and self._process.poll() is None:
@@ -91,9 +92,15 @@ class MpvController:
         await self._send_command(["playlist-prev", "force"])
 
     async def change_channel(self, direction: int) -> tuple[int, str]:
-        channel = self._channels.move(direction)
+        channel = self._channels.preview_move(direction)
         await self._send_command(["loadfile", channel.url, "replace"])
-        await self._send_command(["show-text", f"CH {channel.number:02d}\n{channel.name}", 3000])
+        self._channels.move(direction)
+        try:
+            await self._send_command(
+                ["show-text", f"CH {channel.number:02d}\n{channel.name}", 3000]
+            )
+        except CommandExecutionError:
+            log_event(logger, "mpv_osd_failed", channel=channel.id, number=channel.number)
         log_event(logger, "channel_changed", channel=channel.id, number=channel.number)
         return channel.number, channel.name
 
@@ -113,7 +120,9 @@ class MpvController:
         except CommandExecutionError:
             raise
         except OSError as error:
-            raise CommandExecutionError("mpv_ipc_unavailable", "mpv did not accept the requested control.") from error
+            raise CommandExecutionError(
+                "mpv_ipc_unavailable", "mpv did not accept the requested control."
+            ) from error
 
     def _default_ipc_sender(self, command: list[object]) -> None:
         payload = json.dumps({"command": command}, ensure_ascii=False).encode("utf-8") + b"\n"

@@ -4,8 +4,9 @@ import asyncio
 from dataclasses import dataclass, field
 
 from app.commands.bus import CommandBus
+from app.commands.ports import CommandExecutionError
 from app.protocol import Command, PointerAction, PointerActionMessage, TextInputMessage
-from app.state import ActiveApp, ControllerState, LauncherTile, StateStore
+from app.state import ActiveApp, ControllerState, StateStore
 
 
 @dataclass
@@ -13,6 +14,7 @@ class FakeApplications:
     opened: list[ActiveApp] = field(default_factory=list)
     home_calls: int = 0
     forwarded: list[Command] = field(default_factory=list)
+    input_targets: list[ActiveApp] = field(default_factory=list)
 
     async def open(self, app: ActiveApp) -> None:
         self.opened.append(app)
@@ -23,6 +25,28 @@ class FakeApplications:
     async def forward_command(self, command: Command) -> None:
         self.forwarded.append(command)
 
+    def require_input_target(self, app: ActiveApp) -> None:
+        self.input_targets.append(app)
+
+
+@dataclass
+class BlockingApplications(FakeApplications):
+    open_started: asyncio.Event = field(default_factory=asyncio.Event)
+    release_open: asyncio.Event = field(default_factory=asyncio.Event)
+    open_calls: int = 0
+
+    async def open(self, app: ActiveApp) -> None:
+        self.open_calls += 1
+        if self.open_calls == 1:
+            self.open_started.set()
+            await self.release_open.wait()
+        self.opened.append(app)
+
+
+class RejectingApplications(FakeApplications):
+    async def open(self, app: ActiveApp) -> None:
+        raise CommandExecutionError("application_not_found", "Configured browser is unavailable.")
+
 
 @dataclass
 class FakePlayer:
@@ -31,7 +55,6 @@ class FakePlayer:
     channel_number: int = 1
     channel_name: str = "Demo Channel"
     closed: int = 0
-
 
     async def open(self) -> tuple[int, str]:
         self.opened += 1
@@ -49,9 +72,9 @@ class FakePlayer:
     async def change_channel(self, direction: int) -> tuple[int, str]:
         self.channel_number += direction
         return self.channel_number, self.channel_name
+
     async def close(self) -> None:
         self.closed += 1
-
 
 
 @dataclass
@@ -149,6 +172,7 @@ def test_live_tv_channel_commands_publish_selected_channel() -> None:
 
     asyncio.run(scenario())
 
+
 def test_home_stops_the_controller_owned_mpv_process() -> None:
     async def scenario() -> None:
         bus, applications, player, _ = make_bus()
@@ -163,9 +187,55 @@ def test_home_stops_the_controller_owned_mpv_process() -> None:
     asyncio.run(scenario())
 
 
+def test_opening_a_browser_from_live_tv_stops_mpv_before_home() -> None:
+    async def scenario() -> None:
+        bus, applications, player, _ = make_bus()
+        await bus.dispatch_command(Command.OPEN_LIVE_TV)
+
+        opened = await bus.dispatch_command(Command.OPEN_BROWSER)
+        returned_home = await bus.dispatch_command(Command.HOME)
+
+        assert opened.success
+        assert opened.state.active_app is ActiveApp.BROWSER
+        assert applications.opened == [ActiveApp.BROWSER]
+        assert player.closed == 1
+        assert returned_home.success
+        assert returned_home.state.active_app is ActiveApp.LAUNCHER
+        assert player.closed == 1
+
+    asyncio.run(scenario())
+
+
+def test_failed_application_transition_from_live_tv_returns_to_launcher() -> None:
+    async def scenario() -> None:
+        applications = RejectingApplications()
+        player = FakePlayer()
+        bus = CommandBus(
+            StateStore(ControllerState()),
+            applications=applications,
+            player=player,
+            volume=FakeVolume(),
+            input_controller=FakeInput(),
+            power=FakePower(),
+        )
+        await bus.dispatch_command(Command.OPEN_LIVE_TV)
+
+        result = await bus.dispatch_command(Command.OPEN_BROWSER)
+
+        assert not result.success
+        assert result.error_code == "application_not_found"
+        assert result.state.active_app is ActiveApp.LAUNCHER
+        assert result.state.channel_number is None
+        assert result.state.channel_name is None
+        assert applications.home_calls == 1
+        assert player.closed == 1
+
+    asyncio.run(scenario())
+
+
 def test_pointer_and_text_actions_use_bounded_protocol_messages() -> None:
     async def scenario() -> None:
-        bus, _, _, input_controller = make_bus()
+        bus, applications, _, input_controller = make_bus()
         pointer = PointerActionMessage(
             version=1,
             type="pointer",
@@ -181,12 +251,16 @@ def test_pointer_and_text_actions_use_bounded_protocol_messages() -> None:
             text="search term",
         )
 
+        await bus.dispatch_command(Command.OPEN_BROWSER)
+
         pointer_result = await bus.dispatch_pointer(pointer)
         text_result = await bus.dispatch_text(text)
 
         assert pointer_result.success and text_result.success
+        assert not pointer_result.state_changed and not text_result.state_changed
         assert input_controller.pointers == [pointer]
         assert input_controller.texts == ["search term"]
+        assert applications.input_targets == [ActiveApp.BROWSER, ActiveApp.BROWSER]
 
     asyncio.run(scenario())
 
@@ -200,6 +274,106 @@ def test_external_navigation_is_forwarded_without_changing_active_application() 
 
         assert result.success
         assert applications.forwarded == [Command.NAV_DOWN]
+        assert not result.state_changed
         assert result.state.active_app is ActiveApp.BROWSER
+
+    asyncio.run(scenario())
+
+
+def test_commands_are_serialized_across_paired_remotes() -> None:
+    async def scenario() -> None:
+        applications = BlockingApplications()
+        bus = CommandBus(
+            StateStore(ControllerState()),
+            applications=applications,
+            player=FakePlayer(),
+            volume=FakeVolume(),
+            input_controller=FakeInput(),
+            power=FakePower(),
+        )
+
+        first = asyncio.create_task(bus.dispatch_command(Command.OPEN_YOUTUBE))
+        await applications.open_started.wait()
+        second = asyncio.create_task(bus.dispatch_command(Command.OPEN_NETFLIX))
+        await asyncio.sleep(0)
+        try:
+            assert applications.open_calls == 1
+        finally:
+            applications.release_open.set()
+
+        first_outcome, second_outcome = await asyncio.gather(first, second)
+
+        assert first_outcome.success and second_outcome.success
+        assert applications.opened == [ActiveApp.YOUTUBE, ActiveApp.NETFLIX]
+        assert second_outcome.state.active_app is ActiveApp.NETFLIX
+
+    asyncio.run(scenario())
+
+
+def test_pointer_and_text_require_a_controller_owned_browser_target() -> None:
+    async def scenario() -> None:
+        bus, applications, _, input_controller = make_bus()
+        text = TextInputMessage(
+            version=1, type="text_input", request_id="text-1", text="search term"
+        )
+
+        rejected = await bus.dispatch_text(text)
+        assert not rejected.success
+        assert rejected.error_code == "input_target_not_active"
+        assert input_controller.texts == []
+        assert applications.input_targets == []
+
+        await bus.dispatch_command(Command.OPEN_BROWSER)
+        accepted = await bus.dispatch_text(text)
+
+        assert accepted.success
+        assert input_controller.texts == ["search term"]
+        assert applications.input_targets == [ActiveApp.BROWSER]
+
+    asyncio.run(scenario())
+
+
+def test_pointer_and_text_wait_for_an_in_progress_application_transition() -> None:
+    async def scenario() -> None:
+        applications = BlockingApplications()
+        input_controller = FakeInput()
+        bus = CommandBus(
+            StateStore(ControllerState()),
+            applications=applications,
+            player=FakePlayer(),
+            volume=FakeVolume(),
+            input_controller=input_controller,
+            power=FakePower(),
+        )
+        pointer = PointerActionMessage(
+            version=1,
+            type="pointer",
+            request_id="pointer-1",
+            action=PointerAction.MOVE,
+            dx=20,
+            dy=-10,
+        )
+        text = TextInputMessage(
+            version=1, type="text_input", request_id="text-1", text="search term"
+        )
+
+        opening = asyncio.create_task(bus.dispatch_command(Command.OPEN_BROWSER))
+        await applications.open_started.wait()
+        pointer_task = asyncio.create_task(bus.dispatch_pointer(pointer))
+        text_task = asyncio.create_task(bus.dispatch_text(text))
+        await asyncio.sleep(0)
+
+        assert input_controller.pointers == []
+        assert input_controller.texts == []
+
+        applications.release_open.set()
+        opening_result, pointer_result, text_result = await asyncio.gather(
+            opening, pointer_task, text_task
+        )
+
+        assert opening_result.success and pointer_result.success and text_result.success
+        assert input_controller.pointers == [pointer]
+        assert input_controller.texts == ["search term"]
+        assert applications.input_targets == [ActiveApp.BROWSER, ActiveApp.BROWSER]
 
     asyncio.run(scenario())

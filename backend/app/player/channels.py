@@ -29,7 +29,9 @@ class Channel(BaseModel):
 
 class ChannelManager:
     def __init__(self, channels: list[Channel]) -> None:
-        enabled = sorted((channel for channel in channels if channel.enabled), key=lambda channel: channel.number)
+        enabled = sorted(
+            (channel for channel in channels if channel.enabled), key=lambda channel: channel.number
+        )
         if not enabled:
             raise ValueError("At least one enabled channel is required.")
         self._channels = enabled
@@ -43,11 +45,17 @@ class ChannelManager:
     def channels(self) -> tuple[Channel, ...]:
         return tuple(self._channels)
 
+    def preview_move(self, direction: int) -> Channel:
+        return self._channels[self._next_index(direction)]
+
     def move(self, direction: int) -> Channel:
+        self._current_index = self._next_index(direction)
+        return self.current
+
+    def _next_index(self, direction: int) -> int:
         if direction not in {-1, 1}:
             raise ValueError("Channel direction must be -1 or 1.")
-        self._current_index = (self._current_index + direction) % len(self._channels)
-        return self.current
+        return (self._current_index + direction) % len(self._channels)
 
 
 def load_channels(path: Path) -> list[Channel]:
