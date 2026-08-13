@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+from typing import Protocol
+
+from app.protocol import Command, PointerActionMessage
+from app.state import ActiveApp
+
+
+class CommandExecutionError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class ApplicationPort(Protocol):
+    async def open(self, app: ActiveApp) -> None: ...
+
+    async def return_home(self) -> None: ...
+
+    async def forward_command(self, command: Command) -> None: ...
+
+
+class PlayerPort(Protocol):
+    async def open(self) -> tuple[int, str]: ...
+    async def close(self) -> None: ...
+
+
+    async def toggle_pause(self) -> None: ...
+
+    async def next(self) -> None: ...
+
+    async def previous(self) -> None: ...
+
+    async def change_channel(self, direction: int) -> tuple[int, str]: ...
+
+
+class VolumePort(Protocol):
+    async def increase(self) -> tuple[int, bool]: ...
+
+    async def decrease(self) -> tuple[int, bool]: ...
+
+    async def toggle_mute(self) -> tuple[int, bool]: ...
+
+
+class InputPort(Protocol):
+    async def pointer(self, message: PointerActionMessage) -> None: ...
+
+    async def text(self, text: str) -> None: ...
+
+
+class PowerPort(Protocol):
+    async def sleep(self) -> None: ...
