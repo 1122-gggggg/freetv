@@ -1,0 +1,88 @@
+export const PROTOCOL_VERSION = 1 as const
+
+export type Command =
+  | 'NAV_UP'
+  | 'NAV_DOWN'
+  | 'NAV_LEFT'
+  | 'NAV_RIGHT'
+  | 'OK'
+  | 'BACK'
+  | 'HOME'
+  | 'PLAY_PAUSE'
+  | 'NEXT'
+  | 'PREVIOUS'
+  | 'VOLUME_UP'
+  | 'VOLUME_DOWN'
+  | 'MUTE'
+  | 'CHANNEL_UP'
+  | 'CHANNEL_DOWN'
+  | 'OPEN_YOUTUBE'
+  | 'OPEN_NETFLIX'
+  | 'OPEN_LIVE_TV'
+  | 'OPEN_BROWSER'
+  | 'POWER_SLEEP'
+
+export type PointerAction = 'move' | 'tap' | 'double_tap' | 'scroll'
+
+export interface ControllerState {
+  version: 1
+  type: 'state'
+  active_app: 'launcher' | 'youtube' | 'netflix' | 'live_tv' | 'browser'
+  focused_tile: 'youtube' | 'netflix' | 'live_tv' | 'browser' | 'settings'
+  volume: number
+  muted: boolean
+  channel_number: number | null
+  channel_name: string | null
+  status_message: string | null
+  error_message: string | null
+}
+
+export interface Acknowledgement {
+  version: 1
+  type: 'ack'
+  request_id: string
+  success: boolean
+  error_code: string | null
+  message: string | null
+}
+
+export interface ProtocolError {
+  version: 1
+  type: 'error'
+  code: string
+  message: string
+}
+
+export type ServerMessage = ControllerState | Acknowledgement | ProtocolError
+
+export interface CommandMessage {
+  version: 1
+  type: 'command'
+  request_id: string
+  command: Command
+}
+
+export interface AuthenticationMessage {
+  version: 1
+  type: 'authenticate'
+  request_id: string
+  token: string
+}
+
+export interface PointerMessage {
+  version: 1
+  type: 'pointer'
+  request_id: string
+  action: PointerAction
+  dx: number
+  dy: number
+}
+
+export interface TextInputMessage {
+  version: 1
+  type: 'text_input'
+  request_id: string
+  text: string
+}
+
+export type ClientMessage = CommandMessage | AuthenticationMessage | PointerMessage | TextInputMessage
