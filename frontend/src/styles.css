@@ -152,7 +152,10 @@ button:focus-visible, input:focus-visible {
 .volume-readout strong { font-size: 1.35rem; }
 
 .tv-footer { align-items: end; }
-.pairing-card { min-width: min(25rem, 100%); padding: 1rem 1.25rem; border-left: 3px solid #f7d488; background: rgb(255 255 255 / 4%); }
+.pairing-card { min-width: min(30rem, 100%); padding: 1rem 1.25rem; border-left: 3px solid #f7d488; background: rgb(255 255 255 / 4%); border-radius: 0.75rem; }
+.pairing-card-content { display: flex; align-items: center; gap: 1.25rem; }
+.pairing-qr-wrapper { padding: 0.5rem; background: #1b2434; border: 1px solid #36435a; border-radius: 0.75rem; display: grid; place-items: center; flex-shrink: 0; }
+.pairing-text-wrapper { flex: 1; min-width: 0; }
 .pairing-card p:last-child { margin: 0.35rem 0 0; color: #bec9d9; }
 .pairing-code { display: block; color: #f7d488; font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; font-size: clamp(2rem, 2.7vw, 4rem); letter-spacing: 0.16em; line-height: 0.95; }
 .tv-help { display: flex; flex-wrap: wrap; justify-content: end; gap: 1rem; color: #aab8ce; font-size: 0.9rem; }

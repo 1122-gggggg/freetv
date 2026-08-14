@@ -10,6 +10,9 @@ htmlcov/
 frontend/node_modules/
 frontend/dist/
 
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
 # Local controller data
 config/settings.json
 config/channels.json

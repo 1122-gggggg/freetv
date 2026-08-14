@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "PC TV Remote",
+    "slug": "pc-tv-remote",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0c111d",
+    "splash": {
+      "backgroundColor": "#0c111d",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.pctvbox.remote",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera to scan the TV pairing QR code.",
+        "NSLocalNetworkUsageDescription": "This app needs local network access to discover and communicate with your PC TV Box on your Wi-Fi.",
+        "NSBonjourServices": ["_pctvbox._tcp"]
+      }
+    },
+    "android": {
+      "package": "com.pctvbox.remote",
+      "adaptiveIcon": {
+        "backgroundColor": "#0c111d",
+        "foregroundImage": "./assets/android-icon-foreground.png"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_WIFI_STATE",
+        "android.permission.INTERNET",
+        "android.permission.VIBRATE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow PC TV Remote to scan the QR code displayed on your TV."
+        }
+      ]
+    ]
+  }
+}

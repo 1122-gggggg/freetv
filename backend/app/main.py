@@ -122,6 +122,9 @@ class PairingAttemptGuard:
 @asynccontextmanager
 async def controller_lifespan(app: FastAPI):
     configure_logging()
+    startup_runtime = getattr(app.state.runtime, "startup", None)
+    if startup_runtime is not None:
+        await startup_runtime()
     log_event(logger, "controller_started")
     try:
         yield

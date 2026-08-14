@@ -42,7 +42,15 @@ export function RemotePage({
 }
 
 function PairingScreen({ onPaired }: Pick<RemotePageProps, 'onPaired'>): ReactElement {
-  const [code, setCode] = useState('')
+  const [code, setCode] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const urlCode = new URLSearchParams(window.location.search).get('code')
+      if (urlCode && /^\d{6}$/.test(urlCode)) {
+        return urlCode
+      }
+    }
+    return ''
+  })
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 

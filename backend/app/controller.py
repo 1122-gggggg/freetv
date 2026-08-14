@@ -8,6 +8,7 @@ from app.applications.manager import ApplicationManager
 from app.commands.bus import CommandBus
 from app.commands.ports import CommandExecutionError
 from app.config import Settings, project_root, resolve_application_paths
+from app.discovery.advertiser import ServiceAdvertiser
 from app.player.channels import ChannelManager, load_channels
 from app.player.mpv import MpvController
 from app.security.pairing import PairingService
@@ -48,15 +49,21 @@ class ControllerRuntime:
     pairing: PairingService
     applications: object
     player: object
+    advertiser: ServiceAdvertiser | None = None
+
+    async def startup(self) -> None:
+        if self.advertiser is not None:
+            await self.advertiser.start()
 
     async def shutdown(self) -> None:
+        if self.advertiser is not None:
+            await self.advertiser.stop()
         close_player = getattr(self.player, "close", None)
         if close_player is not None:
             await close_player()
         shutdown_applications = getattr(self.applications, "shutdown", None)
         if shutdown_applications is not None:
             await shutdown_applications()
-
 
 def build_runtime(settings: Settings) -> ControllerRuntime:
     executable_paths = resolve_application_paths(settings)
@@ -85,7 +92,14 @@ def build_runtime(settings: Settings) -> ControllerRuntime:
         input_controller=input_controller,
         power=WindowsPowerController(),
     )
-    return ControllerRuntime(bus=bus, pairing=pairing, applications=applications, player=player)
+    advertiser = ServiceAdvertiser(port=settings.server.port)
+    return ControllerRuntime(
+        bus=bus,
+        pairing=pairing,
+        applications=applications,
+        player=player,
+        advertiser=advertiser,
+    )
 
 
 def _build_player(settings: Settings, mpv_path: Path | None) -> MpvController | UnavailablePlayer:

@@ -1,5 +1,5 @@
 import { type ReactElement, useEffect, useRef, useState } from 'react'
-
+import { QRCodeSVG } from 'qrcode.react'
 import { useControllerSocket } from '../api/useControllerSocket'
 import type { Command } from '../types/protocol'
 import { tileCommand, type TileId } from './navigation'
@@ -156,9 +156,24 @@ export function TVLauncher(): ReactElement {
 
       <footer className="tv-footer">
         <section className="pairing-card" aria-label="Pair a phone remote">
-          <p className="eyebrow">PAIR REMOTE</p>
-          <strong className="pairing-code">{pairing?.code ?? '------'}</strong>
-          <p>Open this PC&apos;s HTTPS Remote page and enter this code.</p>
+          <div className="pairing-card-content">
+            {pairing?.code ? (
+              <div className="pairing-qr-wrapper" aria-label="Pairing QR Code">
+                <QRCodeSVG
+                  value={`https://${window.location.hostname}:${window.location.port || '8765'}/remote?code=${pairing.code}`}
+                  size={92}
+                  bgColor="#1b2434"
+                  fgColor="#f7d488"
+                  level="M"
+                />
+              </div>
+            ) : null}
+            <div className="pairing-text-wrapper">
+              <p className="eyebrow">PAIR REMOTE / SCAN QR</p>
+              <strong className="pairing-code">{pairing?.code ?? '------'}</strong>
+              <p>Scan QR or enter this code in the Remote app.</p>
+            </div>
+          </div>
         </section>
         <section className="tv-help" aria-label="Keyboard controls">
           <span>Arrow keys navigate</span>
