@@ -7,10 +7,6 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0c111d",
-    "splash": {
-      "backgroundColor": "#0c111d",
-      "resizeMode": "contain"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.pctvbox.remote",
@@ -38,6 +34,14 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0c111d",
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain"
+        }
+      ],
       [
         "expo-camera",
         {
