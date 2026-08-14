@@ -103,6 +103,8 @@ function Get-EdgeKioskArguments {
         $Url,
         '--edge-kiosk-type=fullscreen',
         '--no-first-run',
+        '--disable-extensions',
+        '--disable-sync',
         "--user-data-dir=`"$UserDataDir`""
     )
 }

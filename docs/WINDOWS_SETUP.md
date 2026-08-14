@@ -19,7 +19,7 @@ Before the first phone connection, transfer `config\tls\pc-tv-box-local-ca.cer` 
 
 ## TV appliance behavior
 
-Run `./scripts/start.ps1` to refresh the IP-address certificate, start the backend, wait for health, and open the local HTTPS TV page. When Edge is available, it starts the launcher in Edge's documented full-screen kiosk mode with an absolute dedicated profile directory (`--user-data-dir` under `config\edge-profile`). The launcher itself has no account state, and this dedicated user data directory ensures the TV kiosk runs in a separate process that does not share, lock, or affect YouTube or Netflix's normal browser profiles. If Edge is unavailable, the script warns and falls back to the default browser without profile overrides. The controller uses the MY TV page as the Home destination; keep that page open.
+Run `./scripts/start.ps1` to refresh the IP-address certificate, start the backend, wait for health, and open the local HTTPS TV page. When Edge is available, it starts the launcher in Edge's documented full-screen kiosk mode with an absolute dedicated profile directory (`--user-data-dir` under `config\edge-profile`), extensions disabled, and sync disabled. The launcher itself has no account state, and this dedicated user data directory ensures the TV kiosk runs in a separate process that does not share, lock, or affect YouTube or Netflix's normal browser profiles. If Edge is unavailable, the script warns and falls back to the default browser without profile overrides. The controller uses the MY TV page as the Home destination; keep that page open.
 
 For automatic start after sign-in:
 

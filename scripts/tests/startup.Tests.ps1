@@ -58,6 +58,8 @@ if (Get-Command -Name Describe -ErrorAction SilentlyContinue) {
                 ($Args -contains '--edge-kiosk-type=fullscreen') | Should Be $true
                 ($Args -contains '--no-first-run') | Should Be $true
                 ($Args -contains '--user-data-dir="C:\TV Box\config\edge-profile"') | Should Be $true
+                ($Args -contains '--disable-extensions') | Should Be $true
+                ($Args -contains '--disable-sync') | Should Be $true
             }
 
             It 'Resolves absolute kiosk user-data-dir path under ignored config state' {
