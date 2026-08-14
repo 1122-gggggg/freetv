@@ -12,8 +12,7 @@
       "bundleIdentifier": "com.pctvbox.remote",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to scan the TV pairing QR code.",
-        "NSLocalNetworkUsageDescription": "This app needs local network access to discover and communicate with your PC TV Box on your Wi-Fi.",
-        "NSBonjourServices": ["_pctvbox._tcp"]
+        "NSLocalNetworkUsageDescription": "This app needs local network access to communicate with your PC TV Box on your Wi-Fi."
       }
     },
     "android": {
@@ -28,12 +27,24 @@
         "android.permission.ACCESS_WIFI_STATE",
         "android.permission.INTERNET",
         "android.permission.VIBRATE"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
       ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
+      "./plugins/withLocalCaTrust",
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true
+        }
+      ],
       [
         "expo-splash-screen",
         {
@@ -45,7 +56,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow PC TV Remote to scan the QR code displayed on your TV."
+          "cameraPermission": "Allow PC TV Remote to scan the QR code displayed on your TV.",
+          "recordAudioAndroid": false
         }
       ]
     ]

@@ -1,4 +1,4 @@
-import { parsePairingPayload } from './qrScanner'
+import { parsePairingPayload, resolvePairingTarget } from './qrScanner'
 
 describe('parsePairingPayload', () => {
   it('parses raw 6-digit pairing code', () => {
@@ -31,5 +31,32 @@ describe('parsePairingPayload', () => {
   it('returns null for invalid inputs', () => {
     expect(parsePairingPayload('')).toBeNull()
     expect(parsePairingPayload('invalid text')).toBeNull()
+  })
+})
+
+describe('resolvePairingTarget', () => {
+  it('does not invent an endpoint for a code-only QR scan', () => {
+    const payload = parsePairingPayload('123456')
+
+    expect(payload).not.toBeNull()
+    expect(resolvePairingTarget(payload!, '', 8765)).toBeNull()
+  })
+
+  it('uses the entered port with a code-only QR scan', () => {
+    const payload = parsePairingPayload('123456')
+
+    expect(resolvePairingTarget(payload!, '192.168.1.42', 9000)).toEqual({
+      host: '192.168.1.42',
+      port: 9000,
+    })
+  })
+
+  it('uses the QR endpoint port when the payload supplies its host', () => {
+    const payload = parsePairingPayload('pctv://pair?host=192.168.1.42&port=9000&code=123456')
+
+    expect(resolvePairingTarget(payload!, '192.168.1.99', 8765)).toEqual({
+      host: '192.168.1.42',
+      port: 9000,
+    })
   })
 })

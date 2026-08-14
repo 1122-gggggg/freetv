@@ -18,12 +18,23 @@ export function AppLaunchers({ onCommand, activeApp, disabled }: AppLaunchersPro
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>QUICK LAUNCH</Text>
+      <Text style={styles.title} accessibilityRole="header">QUICK LAUNCH</Text>
       <View style={styles.grid}>
         <TouchableOpacity
-          style={[styles.tile, activeApp === 'youtube' && styles.activeTile]}
+          style={[
+            styles.tile,
+            activeApp === 'youtube' && styles.activeTile,
+            disabled && styles.disabledControl,
+          ]}
           onPress={() => launch('OPEN_YOUTUBE')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Open YouTube"
+          accessibilityHint="Launches YouTube on the TV."
+          accessibilityState={{
+            disabled: Boolean(disabled),
+            selected: activeApp === 'youtube',
+          }}
         >
           <View style={[styles.badge, styles.ytBadge]}>
             <Text style={styles.badgeText}>YT</Text>
@@ -32,9 +43,20 @@ export function AppLaunchers({ onCommand, activeApp, disabled }: AppLaunchersPro
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.tile, activeApp === 'netflix' && styles.activeTile]}
+          style={[
+            styles.tile,
+            activeApp === 'netflix' && styles.activeTile,
+            disabled && styles.disabledControl,
+          ]}
           onPress={() => launch('OPEN_NETFLIX')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Open Netflix"
+          accessibilityHint="Launches Netflix on the TV."
+          accessibilityState={{
+            disabled: Boolean(disabled),
+            selected: activeApp === 'netflix',
+          }}
         >
           <View style={[styles.badge, styles.nfBadge]}>
             <Text style={styles.badgeText}>N</Text>
@@ -43,9 +65,20 @@ export function AppLaunchers({ onCommand, activeApp, disabled }: AppLaunchersPro
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.tile, activeApp === 'live_tv' && styles.activeTile]}
+          style={[
+            styles.tile,
+            activeApp === 'live_tv' && styles.activeTile,
+            disabled && styles.disabledControl,
+          ]}
           onPress={() => launch('OPEN_LIVE_TV')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Open Live TV"
+          accessibilityHint="Launches live television on the TV."
+          accessibilityState={{
+            disabled: Boolean(disabled),
+            selected: activeApp === 'live_tv',
+          }}
         >
           <View style={[styles.badge, styles.tvBadge]}>
             <Text style={styles.badgeText}>TV</Text>
@@ -54,9 +87,20 @@ export function AppLaunchers({ onCommand, activeApp, disabled }: AppLaunchersPro
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.tile, activeApp === 'browser' && styles.activeTile]}
+          style={[
+            styles.tile,
+            activeApp === 'browser' && styles.activeTile,
+            disabled && styles.disabledControl,
+          ]}
           onPress={() => launch('OPEN_BROWSER')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Open browser"
+          accessibilityHint="Launches the web browser on the TV."
+          accessibilityState={{
+            disabled: Boolean(disabled),
+            selected: activeApp === 'browser',
+          }}
         >
           <View style={[styles.badge, styles.webBadge]}>
             <Text style={styles.badgeText}>WEB</Text>
@@ -93,6 +137,9 @@ const styles = StyleSheet.create({
     padding: 10,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  disabledControl: {
+    opacity: 0.5,
   },
   activeTile: {
     borderColor: '#f7d488',

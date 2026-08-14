@@ -22,25 +22,37 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
       {/* Top Nav Row */}
       <View style={styles.row}>
         <TouchableOpacity
-          style={[styles.btn, styles.backBtn]}
+          style={[styles.btn, styles.backBtn, disabled && styles.disabledControl]}
           onPress={() => trigger('BACK')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          accessibilityHint="Returns to the previous screen on the TV."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.btnText}>◀ BACK</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.btn, styles.homeBtn]}
+          style={[styles.btn, styles.homeBtn, disabled && styles.disabledControl]}
           onPress={() => trigger('HOME')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Home"
+          accessibilityHint="Opens the TV home screen."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={[styles.btnText, styles.homeText]}>⌂ HOME</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.btn, styles.playBtn]}
+          style={[styles.btn, styles.playBtn, disabled && styles.disabledControl]}
           onPress={() => trigger('PLAY_PAUSE')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Play or pause media"
+          accessibilityHint="Toggles media playback on the TV."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.btnText}>⏯ PLAY</Text>
         </TouchableOpacity>
@@ -49,17 +61,29 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
       {/* Volume & Channel Row */}
       <View style={styles.row}>
         <TouchableOpacity
-          style={[styles.btn, styles.volBtn]}
+          style={[styles.btn, styles.volBtn, disabled && styles.disabledControl]}
           onPress={() => trigger('VOLUME_DOWN')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Volume down"
+          accessibilityHint="Lowers the TV volume."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.btnText}>VOL −</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.btn, muted ? styles.mutedBtn : styles.volBtn]}
+          style={[
+            styles.btn,
+            muted ? styles.mutedBtn : styles.volBtn,
+            disabled && styles.disabledControl,
+          ]}
           onPress={() => trigger('MUTE')}
           disabled={disabled}
+          accessibilityRole="togglebutton"
+          accessibilityLabel={muted ? 'Unmute TV' : 'Mute TV'}
+          accessibilityHint={muted ? 'Turns TV sound back on.' : 'Turns TV sound off.'}
+          accessibilityState={{ disabled: Boolean(disabled), checked: Boolean(muted) }}
         >
           <Text style={[styles.btnText, muted && styles.mutedText]}>
             {muted ? '🔇 MUTED' : '🔊 MUTE'}
@@ -67,9 +91,13 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.btn, styles.volBtn]}
+          style={[styles.btn, styles.volBtn, disabled && styles.disabledControl]}
           onPress={() => trigger('VOLUME_UP')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Volume up"
+          accessibilityHint="Raises the TV volume."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.btnText}>VOL ＋</Text>
         </TouchableOpacity>
@@ -78,25 +106,37 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
       {/* Channel Switch Row */}
       <View style={styles.row}>
         <TouchableOpacity
-          style={[styles.btn, styles.chBtn]}
+          style={[styles.btn, styles.chBtn, disabled && styles.disabledControl]}
           onPress={() => trigger('CHANNEL_DOWN')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Previous channel"
+          accessibilityHint="Changes to the previous TV channel."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.btnText}>CH ▼</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.btn, styles.powerBtn]}
+          style={[styles.btn, styles.powerBtn, disabled && styles.disabledControl]}
           onPress={() => trigger('POWER_SLEEP')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Put TV to sleep"
+          accessibilityHint="Puts the TV Box into sleep mode."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.powerText}>⏻ SLEEP</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.btn, styles.chBtn]}
+          style={[styles.btn, styles.chBtn, disabled && styles.disabledControl]}
           onPress={() => trigger('CHANNEL_UP')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Next channel"
+          accessibilityHint="Changes to the next TV channel."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.btnText}>CH ▲</Text>
         </TouchableOpacity>
@@ -124,6 +164,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  disabledControl: {
+    opacity: 0.5,
   },
   backBtn: {
     backgroundColor: '#202a3c',

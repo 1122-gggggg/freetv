@@ -4,6 +4,11 @@ export interface ParsedPairingPayload {
   code: string | null
 }
 
+export interface PairingTarget {
+  host: string
+  port: number
+}
+
 export function parsePairingPayload(raw: string): ParsedPairingPayload | null {
   const trimmed = raw.trim()
   if (!trimmed) return null
@@ -54,4 +59,14 @@ export function parsePairingPayload(raw: string): ParsedPairingPayload | null {
   }
 
   return null
+}
+
+export function resolvePairingTarget(
+  payload: ParsedPairingPayload,
+  manuallyEnteredHost: string,
+  manuallyEnteredPort: string | number,
+): PairingTarget | null {
+  const host = payload.host ?? manuallyEnteredHost.trim()
+  const port = payload.host ? payload.port : Number(manuallyEnteredPort)
+  return host ? { host, port } : null
 }

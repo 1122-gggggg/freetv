@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
   Modal,
@@ -12,8 +11,10 @@ import {
 } from 'react-native'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as Haptics from 'expo-haptics'
-import { checkDeviceHealth, type DiscoveredBox, pairWithDevice } from '../discovery/deviceScanner'
-import { parsePairingPayload } from '../discovery/qrScanner'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { validateControllerTarget } from '../api/controllerEndpoint'
+import { pairWithDevice } from '../discovery/deviceScanner'
+import { parsePairingPayload, resolvePairingTarget } from '../discovery/qrScanner'
 import { getSavedDevices, type SavedDevice, saveCurrentDevice } from '../storage/tokenStorage'
 
 interface DiscoveryScreenProps {
@@ -21,6 +22,7 @@ interface DiscoveryScreenProps {
 }
 
 export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): React.ReactElement {
+  const insets = useSafeAreaInsets()
   const [permission, requestPermission] = useCameraPermissions()
   const [isScanningQR, setIsScanningQR] = useState(false)
   const [manualHost, setManualHost] = useState('')
@@ -30,12 +32,12 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
   const [showPairModal, setShowPairModal] = useState(false)
   const [isPairing, setIsPairing] = useState(false)
   const [savedDevices, setSavedDevices] = useState<SavedDevice[]>([])
-  const [isSearching, setIsSearching] = useState(false)
-  const [discoveredBoxes, setDiscoveredBoxes] = useState<DiscoveredBox[]>([])
+
+  const isPairingRef = useRef(false)
+  const isScanningLockRef = useRef(false)
 
   useEffect(() => {
-    loadSaved()
-    scanLocalNetwork()
+    void loadSaved()
   }, [])
 
   const loadSaved = async () => {
@@ -43,47 +45,30 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
     setSavedDevices(list)
   }
 
-  const scanLocalNetwork = async () => {
-    setIsSearching(true)
-    const candidates = ['172.20.10.8', '10.0.0.102', '192.168.1.100', '192.168.0.100', '127.0.0.1']
-    const found: DiscoveredBox[] = []
-
-    await Promise.all(
-      candidates.map(async (ip) => {
-        const box = await checkDeviceHealth(ip, 8765, 1500)
-        if (box) found.push(box)
-      })
-    )
-
-    setDiscoveredBoxes(found)
-    setIsSearching(false)
-  }
-
-  const handleBarCodeScanned = async ({ data }: { data: string }) => {
-    setIsScanningQR(false)
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-    const parsed = parsePairingPayload(data)
-    if (!parsed) {
-      Alert.alert('Invalid QR Code', 'The scanned QR code is not a valid PC TV Box pairing code.')
+  const handleCancelPairModal = () => {
+    if (isPairingRef.current) {
       return
     }
-
-    const host = parsed.host || manualHost.trim() || '172.20.10.8'
-    const port = parsed.port || 8765
-
-    if (parsed.code) {
-      // Direct pair!
-      await performPairing(host, port, parsed.code)
-    } else {
-      setSelectedBox({ host, port })
-      setShowPairModal(true)
-    }
+    setShowPairModal(false)
+    setPairingCode('')
+    setSelectedBox(null)
   }
 
   const performPairing = async (host: string, port: number, code: string) => {
+    if (isPairingRef.current) {
+      return
+    }
+    const sanitizedCode = code.replace(/[^0-9]/g, '').slice(0, 6)
+    if (sanitizedCode.length !== 6) {
+      Alert.alert('Invalid Code', 'Pairing code must be 6 digits.')
+      return
+    }
+
+    isPairingRef.current = true
     setIsPairing(true)
+
     try {
-      const result = await pairWithDevice(host, port, code)
+      const result = await pairWithDevice(host, port, sanitizedCode)
       if ('token' in result) {
         const device: SavedDevice = {
           id: `${host}:${port}`,
@@ -96,16 +81,76 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
         await saveCurrentDevice(device)
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
         setShowPairModal(false)
+        setPairingCode('')
+        setSelectedBox(null)
         onDeviceConnected(device)
       } else {
         Alert.alert('Pairing Failed', result.error)
       }
+    } catch (error) {
+      Alert.alert(
+        'Pairing Failed',
+        error instanceof Error ? error.message : 'Could not securely save this pairing.',
+      )
     } finally {
+      isPairingRef.current = false
       setIsPairing(false)
     }
   }
 
+  const handleBarCodeScanned = async ({ data }: { data: string }) => {
+    if (isScanningLockRef.current || isPairingRef.current) {
+      return
+    }
+    isScanningLockRef.current = true
+
+    const parsed = parsePairingPayload(data)
+    if (!parsed) {
+      isScanningLockRef.current = false
+      Alert.alert('Invalid QR Code', 'The scanned QR code is not a valid PC TV Box pairing code.')
+      return
+    }
+
+    const target = resolvePairingTarget(parsed, manualHost, manualPort)
+    if (!target) {
+      isScanningLockRef.current = false
+      Alert.alert('Controller Address Required', 'Enter the TV Box IP address before scanning a code-only QR code.')
+      return
+    }
+
+    let validatedTarget: { host: string; port: number }
+    try {
+      validatedTarget = validateControllerTarget(target.host, target.port)
+    } catch (error) {
+      isScanningLockRef.current = false
+      Alert.alert('Invalid Address', error instanceof Error ? error.message : 'Invalid controller host or port.')
+      return
+    }
+
+    if (parsed.code) {
+      const sanitizedCode = parsed.code.replace(/[^0-9]/g, '').slice(0, 6)
+      if (sanitizedCode.length !== 6) {
+        isScanningLockRef.current = false
+        Alert.alert('Invalid QR Code', 'The scanned QR code does not contain a valid 6-digit code.')
+        return
+      }
+      setIsScanningQR(false)
+      await performPairing(validatedTarget.host, validatedTarget.port, sanitizedCode)
+      isScanningLockRef.current = false
+    } else {
+      setIsScanningQR(false)
+      setPairingCode('')
+      setSelectedBox(validatedTarget)
+      setShowPairModal(true)
+      isScanningLockRef.current = false
+    }
+  }
+
   const handleOpenQRScanner = async () => {
+    if (isPairingRef.current) {
+      return
+    }
+    isScanningLockRef.current = false
     if (!permission?.granted) {
       const res = await requestPermission()
       if (!res.granted) {
@@ -116,12 +161,38 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
     setIsScanningQR(true)
   }
 
+  const handleCloseQRScanner = () => {
+    isScanningLockRef.current = false
+    setIsScanningQR(false)
+  }
+
+  const handleManualPair = () => {
+    if (isPairingRef.current) {
+      return
+    }
+    try {
+      const target = validateControllerTarget(manualHost, manualPort)
+      setPairingCode('')
+      setSelectedBox(target)
+      setShowPairModal(true)
+    } catch (error) {
+      Alert.alert(
+        'Invalid Endpoint',
+        error instanceof Error ? error.message : 'Please enter a valid IPv4 address and port.',
+      )
+    }
+  }
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 },
+      ]}
+    >
       <View style={styles.header}>
         <Text style={styles.eyebrow}>PC TV BOX</Text>
         <Text style={styles.title}>Connect Your TV</Text>
-        <Text style={styles.subtitle}>Scan the QR code on your TV screen or select a discovered device on your Wi-Fi.</Text>
+        <Text style={styles.subtitle}>Scan the QR code on your TV screen or enter its LAN IP below.</Text>
       </View>
 
       {/* Primary Action: QR Code Scan */}
@@ -133,37 +204,16 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
         </View>
       </TouchableOpacity>
 
-      {/* Discovered / Saved Devices Section */}
       <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>DISCOVERED TVS</Text>
-          <TouchableOpacity onPress={scanLocalNetwork} disabled={isSearching}>
-            <Text style={styles.refreshText}>{isSearching ? 'Searching...' : '🔄 Rescan'}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {isSearching && (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator color="#f7d488" size="small" />
-            <Text style={styles.searchingText}>Scanning local network...</Text>
-          </View>
-        )}
+        <Text style={styles.sectionTitle}>SAVED TVS</Text>
 
         <FlatList
-          data={[...discoveredBoxes, ...savedDevices.map((d) => ({ id: d.id, name: d.name, host: d.host, port: d.port, braveAvailable: true, edgeAvailable: true, mpvAvailable: true }))]}
+          data={savedDevices}
           keyExtractor={(item, index) => `${item.host}-${index}`}
           renderItem={({ item }) => (
             <TouchableOpacity
               style={styles.deviceCard}
-              onPress={() => {
-                const saved = savedDevices.find((d) => d.host === item.host && d.port === item.port)
-                if (saved) {
-                  onDeviceConnected(saved)
-                } else {
-                  setSelectedBox({ host: item.host, port: item.port })
-                  setShowPairModal(true)
-                }
-              }}
+              onPress={() => onDeviceConnected(item)}
             >
               <View style={styles.deviceIcon}>
                 <Text style={{ fontSize: 20 }}>📺</Text>
@@ -176,9 +226,9 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
             </TouchableOpacity>
           )}
           ListEmptyComponent={
-            !isSearching ? (
-              <Text style={styles.emptyText}>No PC TV Box found automatically. Try scanning the QR code or enter the IP below.</Text>
-            ) : null
+            <Text style={styles.emptyText}>
+              No saved TV Box. Scan the QR code or enter the IP below.
+            </Text>
           }
         />
       </View>
@@ -205,14 +255,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
           />
           <TouchableOpacity
             style={styles.manualBtn}
-            onPress={() => {
-              if (!manualHost.trim()) {
-                Alert.alert('Error', 'Please enter the TV Box IP address.')
-                return
-              }
-              setSelectedBox({ host: manualHost.trim(), port: parseInt(manualPort, 10) || 8765 })
-              setShowPairModal(true)
-            }}
+            onPress={handleManualPair}
           >
             <Text style={styles.manualBtnText}>PAIR</Text>
           </TouchableOpacity>
@@ -220,7 +263,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
       </View>
 
       {/* QR Scanner Modal */}
-      <Modal visible={isScanningQR} animationType="slide" onRequestClose={() => setIsScanningQR(false)}>
+      <Modal visible={isScanningQR} animationType="slide" onRequestClose={handleCloseQRScanner}>
         <View style={styles.scannerModal}>
           <CameraView
             style={StyleSheet.absoluteFill}
@@ -230,10 +273,15 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
             }}
             onBarcodeScanned={handleBarCodeScanned}
           />
-          <View style={styles.scannerOverlay}>
+          <View
+            style={[
+              styles.scannerOverlay,
+              { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 },
+            ]}
+          >
             <Text style={styles.scannerTitle}>ALIGN QR CODE WITHIN FRAME</Text>
             <View style={styles.scanTarget} />
-            <TouchableOpacity style={styles.closeScannerBtn} onPress={() => setIsScanningQR(false)}>
+            <TouchableOpacity style={styles.closeScannerBtn} onPress={handleCloseQRScanner}>
               <Text style={styles.closeScannerText}>CLOSE SCANNER</Text>
             </TouchableOpacity>
           </View>
@@ -241,8 +289,13 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
       </Modal>
 
       {/* 6-Digit Pairing Modal */}
-      <Modal visible={showPairModal} transparent animationType="fade" onRequestClose={() => setShowPairModal(false)}>
-        <View style={styles.modalOverlay}>
+      <Modal visible={showPairModal} transparent animationType="fade" onRequestClose={handleCancelPairModal}>
+        <View
+          style={[
+            styles.modalOverlay,
+            { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 },
+          ]}
+        >
           <View style={styles.pairCard}>
             <Text style={styles.pairCardTitle}>ENTER 6-DIGIT CODE</Text>
             <Text style={styles.pairCardDesc}>
@@ -256,20 +309,31 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
               keyboardType="number-pad"
               maxLength={6}
               value={pairingCode}
-              onChangeText={setPairingCode}
+              editable={!isPairing}
+              onChangeText={(text) => {
+                const sanitized = text.replace(/[^0-9]/g, '').slice(0, 6)
+                setPairingCode(sanitized)
+              }}
               autoFocus
             />
 
             <View style={styles.pairActions}>
-              <TouchableOpacity style={styles.cancelPairBtn} onPress={() => setShowPairModal(false)}>
+              <TouchableOpacity
+                style={[styles.cancelPairBtn, isPairing && { opacity: 0.5 }]}
+                disabled={isPairing}
+                onPress={handleCancelPairModal}
+              >
                 <Text style={styles.cancelPairText}>CANCEL</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.confirmPairBtn, (pairingCode.length !== 6 || isPairing) && { opacity: 0.5 }]}
                 disabled={pairingCode.length !== 6 || isPairing}
                 onPress={() => {
-                  if (selectedBox) {
-                    performPairing(selectedBox.host, selectedBox.port, pairingCode)
+                  if (isPairingRef.current) {
+                    return
+                  }
+                  if (selectedBox && pairingCode.length === 6) {
+                    void performPairing(selectedBox.host, selectedBox.port, pairingCode)
                   }
                 }}
               >
@@ -288,7 +352,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0c111d',
     padding: 20,
-    paddingTop: 50,
   },
   header: {
     marginBottom: 20,
@@ -341,32 +404,12 @@ const styles = StyleSheet.create({
     flex: 1,
     marginBottom: 16,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
   sectionTitle: {
     color: '#8da0b8',
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 1.5,
-  },
-  refreshText: {
-    color: '#f7d488',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginVertical: 8,
-  },
-  searchingText: {
-    color: '#94a3b8',
-    fontSize: 13,
+    marginBottom: 10,
   },
   deviceCard: {
     backgroundColor: '#1b2535',
@@ -434,13 +477,16 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     color: '#f8fafc',
     paddingHorizontal: 12,
-    height: 42,
+    minWidth: 48,
+    minHeight: 48,
     fontSize: 14,
   },
   manualBtn: {
     backgroundColor: '#f7d488',
     borderRadius: 10,
     paddingHorizontal: 16,
+    minWidth: 48,
+    minHeight: 48,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -483,6 +529,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderColor: '#36435a',
     borderWidth: 1,
+    minWidth: 48,
+    minHeight: 48,
   },
   closeScannerText: {
     color: '#f8fafc',
@@ -535,7 +583,8 @@ const styles = StyleSheet.create({
   },
   cancelPairBtn: {
     flex: 1,
-    height: 46,
+    minWidth: 48,
+    minHeight: 48,
     borderRadius: 12,
     backgroundColor: '#273449',
     justifyContent: 'center',
@@ -547,7 +596,8 @@ const styles = StyleSheet.create({
   },
   confirmPairBtn: {
     flex: 1,
-    height: 46,
+    minWidth: 48,
+    minHeight: 48,
     borderRadius: 12,
     backgroundColor: '#f7d488',
     justifyContent: 'center',

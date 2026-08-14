@@ -19,10 +19,14 @@ export function Dpad({ onCommand, disabled }: DpadProps): React.ReactElement {
     <View style={styles.container}>
       <View style={styles.row}>
         <TouchableOpacity
-          style={[styles.button, styles.topButton]}
+          style={[styles.button, styles.topButton, disabled && styles.disabledControl]}
           activeOpacity={0.7}
           onPress={() => handlePress('NAV_UP')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Move up"
+          accessibilityHint="Moves focus up on the TV."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.arrow}>▲</Text>
         </TouchableOpacity>
@@ -30,28 +34,40 @@ export function Dpad({ onCommand, disabled }: DpadProps): React.ReactElement {
 
       <View style={styles.middleRow}>
         <TouchableOpacity
-          style={[styles.button, styles.leftButton]}
+          style={[styles.button, styles.leftButton, disabled && styles.disabledControl]}
           activeOpacity={0.7}
           onPress={() => handlePress('NAV_LEFT')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Move left"
+          accessibilityHint="Moves focus left on the TV."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.arrow}>◀</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.button, styles.centerButton]}
+          style={[styles.button, styles.centerButton, disabled && styles.disabledControl]}
           activeOpacity={0.7}
           onPress={() => handlePress('OK')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Select"
+          accessibilityHint="Activates the focused item on the TV."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.okText}>OK</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.button, styles.rightButton]}
+          style={[styles.button, styles.rightButton, disabled && styles.disabledControl]}
           activeOpacity={0.7}
           onPress={() => handlePress('NAV_RIGHT')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Move right"
+          accessibilityHint="Moves focus right on the TV."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.arrow}>▶</Text>
         </TouchableOpacity>
@@ -59,10 +75,14 @@ export function Dpad({ onCommand, disabled }: DpadProps): React.ReactElement {
 
       <View style={styles.row}>
         <TouchableOpacity
-          style={[styles.button, styles.bottomButton]}
+          style={[styles.button, styles.bottomButton, disabled && styles.disabledControl]}
           activeOpacity={0.7}
           onPress={() => handlePress('NAV_DOWN')}
           disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="Move down"
+          accessibilityHint="Moves focus down on the TV."
+          accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.arrow}>▼</Text>
         </TouchableOpacity>
@@ -95,6 +115,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  disabledControl: {
+    opacity: 0.5,
   },
   topButton: {
     width: 68,
