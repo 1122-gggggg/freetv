@@ -11,7 +11,7 @@
 
 ## Network and firewall
 
-The backend binds to `0.0.0.0:8765` so a paired phone can reach `https://<PC-LAN-IP>:8765/remote` on the private LAN. When Windows asks about firewall access, select **Private networks** only. Do not select Public networks and do not add a router port-forwarding rule.
+The backend binds only to `0.0.0.0:8765` so a paired phone can reach `https://<PC-LAN-IP>:8765/remote` on the private LAN. Keep `server.host` set to `0.0.0.0`; `start.ps1` rejects another binding because the controller's LAN and loopback policies depend on this separation. When Windows asks about firewall access, select **Private networks** only. Do not select Public networks and do not add a router port-forwarding rule.
 
 Find the Remote address by running `./scripts/start.ps1`; it prints the selected IPv4 address and CA SHA-256 fingerprint. Open that exact numeric HTTPS address on phones rather than a PC name or custom hostname. Phones must be on the same Wi-Fi/LAN. Guest Wi-Fi often blocks device-to-device traffic and will not work.
 
@@ -19,7 +19,7 @@ Before the first phone connection, transfer `config\tls\pc-tv-box-local-ca.cer` 
 
 ## TV appliance behavior
 
-Run `./scripts/start.ps1` to refresh the IP-address certificate, start the backend, wait for health, and open the local HTTPS TV page. Use the browser's fullscreen mode if desired. The controller uses the MY TV page as the Home destination; keep that page open.
+Run `./scripts/start.ps1` to refresh the IP-address certificate, start the backend, wait for health, and open the local HTTPS TV page. When Edge is available, it starts the launcher in Edge's documented full-screen kiosk mode with an absolute dedicated profile directory (`--user-data-dir` under `config\edge-profile`). The launcher itself has no account state, and this dedicated user data directory ensures the TV kiosk runs in a separate process that does not share, lock, or affect YouTube or Netflix's normal browser profiles. If Edge is unavailable, the script warns and falls back to the default browser without profile overrides. The controller uses the MY TV page as the Home destination; keep that page open.
 
 For automatic start after sign-in:
 
@@ -40,7 +40,7 @@ Set an explicit executable path if your installation differs. Paths are local ad
 
 ## Browser behavior
 
-YouTube opens Brave using the existing default profile; Google login persists normally. Netflix opens Edge with normal browser DRM. Do not expect automatic Netflix login, credential management, DRM extraction, or ad blocking: none is implemented.
+YouTube opens Brave using the existing default profile; Google login persists normally. Netflix opens Edge with normal browser DRM and user profile state, completely isolated from the TV kiosk session. Do not expect automatic Netflix login, credential management, DRM extraction, or ad blocking: none is implemented.
 
 ## Live TV behavior
 

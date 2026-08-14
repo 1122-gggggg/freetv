@@ -5,6 +5,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'TVBox.Startup.psm1') -Force
 
 $Root = Split-Path -Parent $PSScriptRoot
 
@@ -89,20 +90,21 @@ function Stop-ManagedController {
     throw "Existing PC TV Controller process $ProcessId did not release port $Port."
 }
 
+
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 $FrontendIndex = Join-Path $Root 'frontend\dist\index.html'
 $SettingsPath = Join-Path $Root 'config\settings.json'
 $SettingsSource = if (Test-Path $SettingsPath) { $SettingsPath } else { Join-Path $Root 'config\settings.example.json' }
 try {
-    $ServerSettings = (Get-Content -Raw -Path $SettingsSource | ConvertFrom-Json).server
-    $Port = [int]$ServerSettings.port
-    $BindHost = [string]$ServerSettings.host
+    $RawSettings = Get-Content -Raw -Path $SettingsSource | ConvertFrom-Json
+    $StartupConfig = Get-StartupSettings -Settings $RawSettings
+    $Port = $StartupConfig.Port
+    $BindHost = $StartupConfig.BindHost
+    $HealthHost = $StartupConfig.HealthHost
+    $ConfiguredEdgePath = $StartupConfig.ConfiguredEdgePath
 } catch {
-    throw "Could not read server settings from $SettingsSource."
+    throw "Could not read server settings from $SettingsSource. $_"
 }
-if ($Port -lt 1 -or $Port -gt 65535) { throw "Configured server port is invalid: $Port" }
-if ([string]::IsNullOrWhiteSpace($BindHost)) { throw 'Configured server host is required.' }
-$HealthHost = if ($BindHost -eq '0.0.0.0') { '127.0.0.1' } else { $BindHost }
 
 if (-not (Test-Path $Python)) { throw 'Python virtual environment was not found. Run .\scripts\setup.ps1 first.' }
 if (-not (Test-Path $FrontendIndex)) {
@@ -173,8 +175,10 @@ if ($null -eq $Listener) {
 }
 
 $HealthUrl = "https://${HealthHost}:$Port/api/health"
+$PairingUrl = "https://${HealthHost}:$Port/api/pairing"
 $Deadline = (Get-Date).AddSeconds(30)
 $Health = $null
+$PairingInfo = $null
 $ValidatorTypeName = 'PcTvBox.LocalHealthCertificateValidator'
 if ($null -eq ($ValidatorTypeName -as [type])) {
     Add-Type -TypeDefinition @'
@@ -214,6 +218,9 @@ try {
             Start-Sleep -Milliseconds 250
         }
     } while ((Get-Date) -lt $Deadline)
+    if ($Health -and $Health.status -eq 'ok') {
+        $PairingInfo = Invoke-RestMethod -Uri $PairingUrl -TimeoutSec 15
+    }
 } finally {
     [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $PreviousCertificateValidationCallback
 }
@@ -221,15 +228,10 @@ try {
 if (-not $Health -or $Health.status -ne 'ok' -or $Health.backend -ne $true -or $Health.frontend -ne $true) {
     throw "Controller did not become fully healthy at $HealthUrl."
 }
-$DefaultRoute = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
-    Sort-Object RouteMetric, InterfaceMetric |
-    Select-Object -First 1
-$LanAddress = if ($DefaultRoute) {
-    Get-NetIPAddress -InterfaceIndex $DefaultRoute.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-        Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } |
-        Select-Object -First 1 -ExpandProperty IPAddress
+if ($null -eq $PairingInfo) {
+    throw "Controller did not provide pairing details at $PairingUrl."
 }
-$RemoteUrl = if ($LanAddress) { "https://${LanAddress}:$Port/remote" } else { "https://<PC-LAN-IP>:$Port/remote" }
+$RemoteUrl = Get-PairingRemoteUrl -PairingResponse $PairingInfo -Port $Port
 
 $LocalUrl = "https://${HealthHost}:$Port/tv"
 Write-Host "TV Launcher: $LocalUrl"
@@ -240,5 +242,13 @@ Write-Host "CA SHA-256: $($Tls.ca_sha256)"
 Write-Warning 'Install and trust this local CA on each phone before opening the HTTPS Remote; see docs\WINDOWS_SETUP.md.'
 
 if (-not $NoBrowser) {
-    Start-Process $LocalUrl
+    $Edge = Resolve-EdgeExecutable -ConfiguredPath $ConfiguredEdgePath
+    if ($Edge) {
+        $KioskUserDataDir = Get-EdgeUserDataDirectory -RootDirectory $Root
+        $KioskArguments = Get-EdgeKioskArguments -Url $LocalUrl -UserDataDir $KioskUserDataDir
+        Start-Process -FilePath $Edge -ArgumentList $KioskArguments
+    } else {
+        Write-Warning 'Microsoft Edge was not found; opening the TV Launcher with the default browser instead of kiosk mode.'
+        Start-Process $LocalUrl
+    }
 }
