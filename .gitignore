@@ -18,6 +18,7 @@ config/settings.json
 config/channels.json
 config/remotes.json
 config/tls/
+config/edge-profile/
 logs/
 
 # Windows and editors
