@@ -9,7 +9,9 @@ from app.main import create_app
 def test_tv_and_remote_routes_serve_the_production_single_page_application() -> None:
     app = create_app(settings=Settings())
 
-    with TestClient(app, base_url="https://127.0.0.1:8765") as client:
+    with TestClient(
+        app, base_url="https://127.0.0.1:8765", client=("127.0.0.1", 50_000)
+    ) as client:
         tv = client.get("/tv")
         remote = client.get("/remote", headers={"host": "127.0.0.1:8765"})
 
@@ -26,7 +28,9 @@ def test_tv_and_remote_routes_serve_the_production_single_page_application() -> 
 def test_remote_route_rejects_an_untrusted_host() -> None:
     app = create_app(settings=Settings())
 
-    with TestClient(app, base_url="https://127.0.0.1:8765") as client:
+    with TestClient(
+        app, base_url="https://127.0.0.1:8765", client=("127.0.0.1", 50_000)
+    ) as client:
         response = client.get("/remote", headers={"host": "attacker.example:8765"})
 
     assert response.status_code == 403

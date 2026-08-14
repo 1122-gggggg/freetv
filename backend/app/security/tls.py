@@ -8,7 +8,7 @@ import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from ipaddress import IPv4Address, IPv6Address, ip_address
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, ip_address
 from pathlib import Path
 from typing import TypeAlias
 
@@ -18,6 +18,8 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+from app.system.network import eligible_lan_interface_names
 
 IPAddress: TypeAlias = IPv4Address | IPv6Address
 
@@ -69,24 +71,46 @@ def ensure_tls_materials(directory: Path, addresses: Iterable[IPAddress]) -> TLS
     return materials
 
 
+RFC1918_NETWORKS: tuple[IPv4Network, ...] = (
+    IPv4Network("10.0.0.0/8"),
+    IPv4Network("172.16.0.0/12"),
+    IPv4Network("192.168.0.0/16"),
+)
+
+
+def _is_eligible_local_address(address: IPAddress) -> bool:
+    if address.is_loopback:
+        return True
+    if isinstance(address, IPv4Address):
+        return any(address in network for network in RFC1918_NETWORKS)
+    return False
+
+
 def local_interface_addresses() -> set[IPAddress]:
     addresses: set[IPAddress] = {IPv4Address("127.0.0.1"), IPv6Address("::1")}
+    eligible_names = eligible_lan_interface_names()
+    if not eligible_names:
+        return addresses
     try:
-        interfaces = psutil.net_if_addrs().values()
+        interfaces = psutil.net_if_addrs()
     except OSError:
         return addresses
-    for interface_addresses in interfaces:
+    for interface_name, interface_addresses in interfaces.items():
+        if interface_name.casefold() not in eligible_names:
+            continue
         for interface_address in interface_addresses:
-            if interface_address.family not in {socket.AF_INET, socket.AF_INET6}:
+            if getattr(interface_address, "family", None) not in {socket.AF_INET, socket.AF_INET6}:
+                continue
+            raw_address = getattr(interface_address, "address", None)
+            if not raw_address:
                 continue
             try:
-                address = ip_address(interface_address.address.split("%", maxsplit=1)[0])
+                address = ip_address(raw_address.split("%", maxsplit=1)[0])
             except ValueError:
                 continue
-            if not address.is_unspecified:
+            if _is_eligible_local_address(address):
                 addresses.add(address)
     return addresses
-
 
 def certificate_fingerprint(certificate_path: Path) -> str:
     certificate = _load_ca_certificate(certificate_path)
@@ -96,11 +120,10 @@ def certificate_fingerprint(certificate_path: Path) -> str:
 
 def _certificate_addresses(addresses: Iterable[IPAddress]) -> tuple[IPAddress, ...]:
     normalized = {IPv4Address("127.0.0.1"), IPv6Address("::1")}
-    normalized.update(addresses)
-    if any(address.is_unspecified for address in normalized):
-        raise ValueError("TLS certificate addresses cannot include unspecified addresses.")
+    for address in addresses:
+        if _is_eligible_local_address(address):
+            normalized.add(address)
     return tuple(sorted(normalized, key=lambda address: (address.version, address.packed)))
-
 
 def _load_or_create_ca(materials: TLSMaterialPaths) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
     certificate_exists = materials.ca_certificate.is_file()
@@ -184,6 +207,7 @@ def _leaf_is_usable(
             x509.SubjectAlternativeName
         ).value
         certificate_addresses = set(subject_alternative_names.get_values_for_type(x509.IPAddress))
+        certificate_dns_names = set(subject_alternative_names.get_values_for_type(x509.DNSName))
     except (OSError, TypeError, ValueError, x509.ExtensionNotFound):
         return False
     if not isinstance(key, rsa.RSAPrivateKey):
@@ -192,7 +216,7 @@ def _leaf_is_usable(
         return False
     if certificate.not_valid_after_utc <= datetime.now(UTC) + _RENEWAL_LEEWAY:
         return False
-    if not set(addresses).issubset(certificate_addresses):
+    if certificate_addresses != set(addresses) or certificate_dns_names != {"localhost"}:
         return False
     if certificate.public_key().public_numbers() != key.public_key().public_numbers():
         return False

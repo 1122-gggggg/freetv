@@ -17,6 +17,12 @@ flowchart LR
 
 FastAPI is the sole transport server. The React TV Launcher and React Remote consume server state; neither calls Windows APIs or launches applications. Every control source becomes one protocol message and flows through `CommandBus`.
 
+## Native Remote
+
+`mobile/` is an Expo/React Native client, not a second controller. It pairs only through the existing numeric-IP HTTPS endpoint, then sends the same protocol messages through `wss://<controller-IP>:<port>/ws/remote`. Its native WebSocket implementation supplies the matching `origin` request header required by the controller. Pairing tokens are stored separately from device metadata in device-bound Expo SecureStore; a migration removes legacy plaintext metadata tokens.
+
+QR pairing is the primary endpoint-discovery path. A code-only QR is never assigned an invented address: the user must supply a numeric LAN IP. The app intentionally does not perform arbitrary subnet scans. Android's generated native network policy disallows cleartext and trusts only the system and user CA stores so the manually trusted controller CA works without weakening TLS for the app.
+
 ## Backend modules
 
 | Module | Responsibility |

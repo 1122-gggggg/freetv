@@ -11,6 +11,7 @@ A local Windows 11 controller that turns an HDMI-connected PC into a TV-style la
 - [mpv](https://mpv.io/installation/) for Live TV.
 - Laptop/PC and phone on the same private LAN/Wi-Fi.
 - The controller's local CA must be trusted on the TV Windows user and on every phone that will use the encrypted Remote.
+- Native Android builds additionally require Android Studio, its Android SDK, and a JDK. Native iOS builds require macOS/Xcode or an authenticated Expo EAS build account.
 
 ## Installation
 
@@ -44,7 +45,7 @@ Empty browser fields use the standard Windows locations where available. The gen
 .\scripts\start.ps1
 ```
 
-The script builds the frontend if necessary, creates/refreshes the local TLS certificate for current LAN IPs, starts the controller on port `8765`, waits for `/api/health`, opens the local TV Launcher, and prints the phone URL and CA fingerprint. On the first Windows Firewall prompt, allow the controller only on **Private** networks; do not create port-forwarding rules.
+The script builds the frontend if necessary, creates/refreshes the local TLS certificate for current LAN IPs, starts the controller on port `8765`, waits for `/api/health`, then opens the local TV Launcher in Edge full-screen kiosk mode when Edge is available. It falls back to the default browser with a warning otherwise. On the first Windows Firewall prompt, allow the controller only on **Private** networks; do not create port-forwarding rules.
 
 - TV Launcher: `https://127.0.0.1:8765/tv`
 - Phone Remote: `https://<PC-LAN-IP>:8765/remote`
@@ -66,10 +67,27 @@ It runs Vite on `http://127.0.0.1:5173` and proxies `/api` and `/ws` to the loca
 2. Open the TV Launcher on the HDMI display.
 3. Read the six-digit **Pair Remote** code shown at the lower left.
 4. On the phone, open the numeric LAN HTTPS Remote URL printed by `start.ps1`; do not replace it with a PC name or custom hostname.
-5. Enter the code once. The remote receives a cryptographically random, opaque token stored in that browser's `localStorage`.
+5. The PWA stores the opaque token in its local storage. The native app stores it in the OS secure store.
 6. The Remote reconnects automatically after temporary Wi-Fi or server interruptions.
 
 Pairing codes expire after 10 minutes and can be used once. Five failed attempts from one LAN address pause further attempts for one minute. Use **Forget** on the Remote to remove its local token.
+
+## Native Remote app
+
+`mobile/` is an Expo/React Native app for Android and iOS. It scans the TV pairing QR code, supports manual numeric-IP pairing, stores Remote tokens in device-bound secure storage, and exposes the same typed Remote controls, touchpad, text input, reconnect, and token-revocation flow as the PWA.
+
+Before pairing, install and trust the controller CA as described above. Android builds include a network-security configuration that trusts user-installed CAs for this app; iOS still requires enabling full trust for the imported CA. The app deliberately does not scan arbitrary LAN addresses: use the TV QR code or enter the numeric LAN IP printed by `start.ps1`.
+
+For a local Android development build:
+
+```powershell
+Push-Location mobile
+npm install
+npm run android
+Pop-Location
+```
+
+`npm run android` produces a custom development build, not an Expo Go session, because the local-CA trust configuration is native. Build iOS on macOS with Xcode, or use EAS after authenticating your own Expo account.
 
 ## Controls
 
@@ -150,6 +168,23 @@ npm test
 Pop-Location
 ```
 
+Native mobile:
+
+```powershell
+Push-Location mobile
+npm test -- --runInBand
+npm run typecheck
+npx expo export --platform android --output-dir dist
+npx expo prebuild --platform android --no-install
+Pop-Location
+```
+
+Integration smoke test (against an active `start.ps1 -NoBrowser` instance):
+
+```powershell
+.\.venv\Scripts\python.exe scripts\integration-smoke.py
+```
+
 ## Troubleshooting
 
 | Symptom | Action |
@@ -161,6 +196,7 @@ Pop-Location
 | Live TV error | Install mpv, set `applications.mpv_path` if needed, and validate your channel URL and authorization. |
 | TV Launcher does not foreground on Home | Keep the MY TV tab/window open. The launcher title is used to restore its specific browser window. |
 | Phone cannot install PWA | A trusted HTTPS controller origin is required for service workers and install prompts. Confirm the local CA is trusted on the phone. |
+| Native Remote cannot connect | Install the controller CA as an app CA on Android or enable full trust on iOS, then confirm the numeric IP matches the QR code or `start.ps1` output. Native Remote does not accept PC names. |
 
 ## Security
 
@@ -172,13 +208,14 @@ Pop-Location
 - A remote can use **Forget** to revoke its persisted token at the controller, immediately closing its paired WebSocket session. Pair it again from the TV code to reconnect.
 - Input is validated with versioned Pydantic protocol models at the transport boundary.
 - Browser/mpv paths and URLs come only from local typed configuration; subprocess calls use argument arrays, never shell strings.
-- The default binding is LAN-reachable for paired remotes. Do not expose port `8765` to the internet or configure router port forwarding.
+- The controller binds only to `0.0.0.0` for paired LAN remotes; `scripts/start.ps1` rejects another server host. Do not expose port `8765` to the internet or configure router port forwarding.
 
 ## Known limitations
 
 - The TV Launcher is a browser window, not a native Windows shell replacement. Configure Windows sign-in/autostart and use fullscreen/maximized browser behavior for the closest appliance flow.
-- Mobile browsers require explicit trust of the controller's local CA before the HTTPS Remote and PWA can be used. The certificate contains literal current IP addresses, so `start.ps1` refreshes it after LAN-address changes.
-- HDMI-CEC, ESP32/BLE remotes, voice control, EPG/XMLTV, Wake-on-LAN, native mobile apps, and multi-box management are intentionally deferred.
+- PWA and native Remote clients require explicit trust of the controller local CA. The certificate contains literal current IP addresses, so `start.ps1` refreshes it after LAN-address changes.
+- Native Remote pairing uses QR or a manually entered numeric IP; mDNS discovery is not implemented in this release.
+- Native iOS builds require macOS/Xcode or an authenticated Expo EAS account.
 - This project launches existing browsers and mpv only; it does not discover streams, bypass DRM, block ads, or manage account credentials.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PROTOCOL.md](docs/PROTOCOL.md), and [docs/WINDOWS_SETUP.md](docs/WINDOWS_SETUP.md) for implementation details.

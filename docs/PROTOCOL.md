@@ -25,15 +25,17 @@ A Remote must first send `authenticate`; the server accepts no command, pointer,
 }
 ```
 
-Successful authentication yields an acknowledgement, then the current `state`. Invalid tokens receive an error and the socket closes. The raw token is never sent in a state message or written to logs. The initial authentication message must arrive within 10 seconds; expired tokens close their Remote socket and are excluded from state broadcasts.
+Successful authentication yields an acknowledgement, then the current `state`. Invalid or expired tokens receive an `authentication_failed` error and the socket closes with application close code `4401`; clients discard their local token only for that authentication outcome. The raw token is never sent in a state message or written to logs. The initial authentication message must arrive within 10 seconds; expired tokens are excluded from state broadcasts.
 
-`/ws/remote`, `POST /api/pair`, and `DELETE /api/remote-token` require `https://<controller-literal-IP>:<configured-port>` and `wss://<controller-literal-IP>:<configured-port>` with the same matching Host and browser Origin. Plaintext LAN HTTP and `ws://` are rejected. This prevents an arbitrary DNS name from becoming a controller origin through DNS rebinding. Use the numeric URL printed by `start.ps1`, not a device name.
+`/ws/remote`, `POST /api/pair`, `DELETE /api/remote-token`, and `GET /remote` enforce a strict LAN boundary. Peer connections must originate from loopback or a private IPv4 address on the same directly connected subnet as an eligible private IPv4 address of an operational Ethernet (802.3) or native Wi-Fi (802.11) adapter. Windows derives that adapter set with `Get-NetAdapter -Physical` filtered to those media types, then resolves the peer's best route and requires that it use the same currently operational physical adapter. Cellular, Bluetooth PAN, VPN, Hyper-V, WSL, and other virtual adapters are excluded; this route check rejects overlapping virtual subnets. Off-subnet private, global/public, link-local, non-loopback IPv6, and malformed peer addresses are rejected before authentication.
+
+Furthermore, `/ws/remote`, `POST /api/pair`, and `DELETE /api/remote-token` require `https://<controller-literal-IP>:<configured-port>` and `wss://<controller-literal-IP>:<configured-port>` with the same matching Host and browser Origin, where the controller host address must be loopback or the eligible physical-LAN IPv4 address. Plaintext LAN HTTP and `ws://` are rejected. This prevents an arbitrary DNS name from becoming a controller origin through DNS rebinding. Use the numeric URL printed by `start.ps1`, not a device name.
 
 `/ws/tv` has no remote token because it is a local display channel. It therefore requires both a loopback client address and an Origin exactly matching the local launcher authority. Production startup uses `https://127.0.0.1:<configured-port>` (or another loopback literal); plaintext is accepted only for the loopback development proxy. Cross-origin webpages cannot use it to issue local TV commands.
 
 ## TLS bootstrap
 
-`setup.ps1` creates a private local CA and `start.ps1` regenerates its leaf certificate when LAN addresses change. The leaf has SAN entries only for `localhost`, loopback addresses, and current local IP addresses. Install `config\tls\pc-tv-box-local-ca.cer` on the TV Windows user and each phone, comparing the SHA-256 fingerprint printed by `start.ps1` before trusting it. The CA certificate is public DER; its private key remains local and ignored by Git.
+`setup.ps1` creates a private local CA and `start.ps1` regenerates its leaf certificate whenever the exact physical-LAN address set changes. The leaf has exactly `localhost`, loopback addresses, and eligible private IPv4 addresses from operational physical Wi-Fi/Ethernet interfaces as DNS/IP SANs; it never trusts hostnames, VPNs, or virtual adapters. Install `config\tls\pc-tv-box-local-ca.cer` on the TV Windows user and each phone, comparing the SHA-256 fingerprint printed by `start.ps1` before trusting it. The CA certificate is public DER; its private key remains local and ignored by Git.
 
 ## Pairing
 
@@ -146,7 +148,7 @@ Failure:
 }
 ```
 
-Malformed protocol data produces a non-sensitive `error` message. A client should show the error and reconnect only with backoff; it must not spin/retry a rejected request.
+Malformed protocol data produces a non-sensitive `error` message. A client should show the error and reconnect only with backoff; it must not spin/retry a rejected request. A `1008` policy close is not evidence that a token is invalid, so clients must preserve pairing credentials for that case.
 
 ## State broadcast
 

@@ -5,7 +5,7 @@ import logging
 import socket
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
-from ipaddress import IPv4Address, IPv6Address, ip_address
+from ipaddress import IPv4Address, IPv6Address, IPv4Network, ip_address
 from pathlib import Path
 from time import monotonic
 from urllib.parse import urlsplit
@@ -30,12 +30,15 @@ from app.protocol import (
 )
 from app.security.pairing import AuthenticatedRemoteSession, PairingCodeExpired, PairingCodeInvalid
 from app.security.request_limits import BoundedPairingRequestBodyMiddleware
+from app.system.network import eligible_lan_interface_names, is_eligible_lan_peer
 from app.websocket.registry import ConnectionRegistry
 
 logger = logging.getLogger(__name__)
 
 
 REMOTE_AUTHENTICATION_TIMEOUT_SECONDS = 10.0
+REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE = 4401
+
 
 HTML_SECURITY_HEADERS = {
     "Content-Security-Policy": "frame-ancestors 'none'",
@@ -171,11 +174,16 @@ def create_app(
         }
 
     @app.get("/api/pairing")
-    async def pairing_code(request: Request) -> dict[str, str]:
+    async def pairing_code(request: Request) -> dict[str, str | None]:
         _require_loopback_request(request)
-        _require_local_tv_host(request, app.state.settings.server.port)
+        port = app.state.settings.server.port
+        _require_local_tv_host(request, port)
         code, expires_at = app.state.runtime.pairing.current_code()
-        return {"code": code, "expires_at": expires_at.isoformat()}
+        return {
+            "code": code,
+            "expires_at": expires_at.isoformat(),
+            "remote_url": _pairing_remote_url(port),
+        }
 
     @app.post("/api/pair")
     async def pair_remote(request: Request, payload: PairRequest) -> dict[str, str]:
@@ -226,17 +234,20 @@ def create_app(
 
     @app.websocket("/ws/remote")
     async def remote_socket(websocket: WebSocket) -> None:
+        client_host = _websocket_host(websocket)
         expected_origin_scheme = _remote_websocket_origin_scheme(websocket)
-        if expected_origin_scheme is None or not _has_trusted_remote_origin(
-            websocket.headers.get("origin"),
-            websocket.headers.get("host"),
-            app.state.settings.server.port,
-            expected_scheme=expected_origin_scheme,
+        if (
+            not _is_trusted_remote_peer(client_host)
+            or expected_origin_scheme is None
+            or not _has_trusted_remote_origin(
+                websocket.headers.get("origin"),
+                websocket.headers.get("host"),
+                app.state.settings.server.port,
+                expected_scheme=expected_origin_scheme,
+            )
         ):
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
-
-        client_host = _websocket_host(websocket)
         authentication_guard: RemoteAuthenticationGuard = app.state.remote_authentication_guard
         if not await authentication_guard.acquire(client_host):
             log_event(logger, "remote_auth_admission_rejected", client=client_host)
@@ -278,7 +289,7 @@ def create_app(
             ):
                 log_event(logger, "remote_auth_failure", client=client_host)
                 await _send_error(websocket, "authentication_failed", "Remote token is invalid.")
-                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                await websocket.close(code=REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE)
                 return
 
             await authentication_guard.release(client_host)
@@ -300,7 +311,10 @@ def create_app(
                         pass
             except TimeoutError:
                 log_event(logger, "remote_session_expired", client=client_host)
-                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                await _send_error(
+                    websocket, "authentication_failed", "Remote token has expired."
+                )
+                await websocket.close(code=REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE)
             except WebSocketDisconnect:
                 return
             finally:
@@ -396,7 +410,7 @@ async def _handle_remote_message(
         return True
     log_event(logger, "remote_auth_failure", client=_websocket_host(websocket))
     await _send_error(websocket, "authentication_failed", "Remote token is invalid.")
-    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    await websocket.close(code=REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE)
     return False
 
 
@@ -533,7 +547,16 @@ def _is_local_tv_host(host: str | None, port: int, *, default_port: int) -> bool
     return authority is not None and authority[0] in {"127.0.0.1", "localhost", "::1"}
 
 
+def _require_trusted_remote_peer(request: Request) -> None:
+    if not _is_trusted_remote_peer(_client_host(request)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Remote access requires a connection from the controller LAN.",
+        )
+
+
 def _require_trusted_remote_host(request: Request, port: int) -> None:
+    _require_trusted_remote_peer(request)
     expected_scheme = _remote_request_origin_scheme(request)
     if expected_scheme is None or not _is_trusted_remote_host(
         request.headers.get("host"),
@@ -547,6 +570,7 @@ def _require_trusted_remote_host(request: Request, port: int) -> None:
 
 
 def _require_trusted_remote_origin(request: Request, port: int) -> None:
+    _require_trusted_remote_peer(request)
     expected_scheme = _remote_request_origin_scheme(request)
     if expected_scheme is None or not _has_trusted_remote_origin(
         request.headers.get("origin"),
@@ -556,9 +580,8 @@ def _require_trusted_remote_origin(request: Request, port: int) -> None:
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint must be called from this controller's HTTPS Remote page.",
+            detail="Remote access requires HTTPS at this controller's LAN IP.",
         )
-
 
 def _remote_request_origin_scheme(request: Request) -> str | None:
     if request.url.scheme == "https":
@@ -675,8 +698,108 @@ def _normalized_authority(
     return host.casefold(), effective_port
 
 
+def _pairing_remote_url(port: int) -> str | None:
+    address = _default_route_ipv4_address() or _first_lan_ipv4_address()
+    if address is None:
+        return None
+    return f"https://{address}:{port}/remote"
+
+
+def _default_route_ipv4_address() -> IPv4Address | None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("192.0.2.1", 9))
+            address = ip_address(probe.getsockname()[0])
+    except OSError:
+        return None
+    if not isinstance(address, IPv4Address) or not _is_local_lan_ipv4_address(address):
+        return None
+    return address
+
+
+def _first_lan_ipv4_address() -> IPv4Address | None:
+    addresses = sorted(
+        (
+            address
+            for address in _local_interface_addresses()
+            if isinstance(address, IPv4Address) and _is_lan_ipv4_address(address)
+        ),
+        key=int,
+    )
+    return addresses[0] if addresses else None
+
+
+RFC1918_NETWORKS: tuple[IPv4Network, ...] = (
+    IPv4Network("10.0.0.0/8"),
+    IPv4Network("172.16.0.0/12"),
+    IPv4Network("192.168.0.0/16"),
+)
+
+
+def _is_lan_ipv4_address(address: IPv4Address) -> bool:
+    return any(address in network for network in RFC1918_NETWORKS)
+
+
+def _is_local_lan_ipv4_address(address: IPv4Address) -> bool:
+    return _is_lan_ipv4_address(address) and address in _local_interface_addresses()
+
+
+def _is_trusted_remote_peer(host: str) -> bool:
+    if _is_loopback(host):
+        return True
+    try:
+        address = ip_address(host.split("%", maxsplit=1)[0])
+    except ValueError:
+        return False
+    if getattr(address, "ipv4_mapped", None):
+        address = address.ipv4_mapped
+        if address.is_loopback:
+            return True
+    if not isinstance(address, IPv4Address) or not _is_lan_ipv4_address(address):
+        return False
+    return is_eligible_lan_peer(address) and any(
+        address in network for network in _local_lan_ipv4_networks()
+    )
+
+
+def _local_lan_ipv4_networks() -> list[IPv4Network]:
+    networks: list[IPv4Network] = []
+    eligible_names = eligible_lan_interface_names()
+    if not eligible_names:
+        return networks
+    try:
+        interfaces = psutil.net_if_addrs()
+    except OSError:
+        return networks
+    for interface_name, interface_addresses in interfaces.items():
+        if interface_name.casefold() not in eligible_names:
+            continue
+        for interface_address in interface_addresses:
+            if getattr(interface_address, "family", None) != socket.AF_INET:
+                continue
+            raw_address = getattr(interface_address, "address", None)
+            if not raw_address:
+                continue
+            try:
+                address = ip_address(raw_address.split("%", maxsplit=1)[0])
+            except ValueError:
+                continue
+            if not isinstance(address, IPv4Address) or not _is_lan_ipv4_address(address):
+                continue
+            raw_netmask = getattr(interface_address, "netmask", None)
+            if raw_netmask:
+                try:
+                    network = IPv4Network(f"{address}/{raw_netmask}", strict=False)
+                except ValueError:
+                    network = IPv4Network(f"{address}/32", strict=False)
+            else:
+                network = IPv4Network(f"{address}/32", strict=False)
+            networks.append(network)
+    return networks
+
+
 def _is_controller_host(host: str) -> bool:
-    if host == "localhost":
+    if host.casefold() == "localhost":
         return True
     try:
         address = ip_address(host.split("%", maxsplit=1)[0])
@@ -684,23 +807,35 @@ def _is_controller_host(host: str) -> bool:
         return False
     if address.is_loopback:
         return True
-    return address in _local_interface_addresses()
+    if getattr(address, "ipv4_mapped", None) and address.ipv4_mapped.is_loopback:
+        return True
+    return isinstance(address, IPv4Address) and _is_local_lan_ipv4_address(address)
 
 
 def _local_interface_addresses() -> set[IPv4Address | IPv6Address]:
-    addresses: set[IPv4Address | IPv6Address] = set()
+    addresses: set[IPv4Address | IPv6Address] = {IPv4Address("127.0.0.1"), IPv6Address("::1")}
+    eligible_names = eligible_lan_interface_names()
+    if not eligible_names:
+        return addresses
     try:
-        interfaces = psutil.net_if_addrs().values()
+        interfaces = psutil.net_if_addrs()
     except OSError:
         return addresses
-    for interface_addresses in interfaces:
+    for interface_name, interface_addresses in interfaces.items():
+        if interface_name.casefold() not in eligible_names:
+            continue
         for interface_address in interface_addresses:
-            if interface_address.family not in {socket.AF_INET, socket.AF_INET6}:
+            if getattr(interface_address, "family", None) != socket.AF_INET:
+                continue
+            raw_address = getattr(interface_address, "address", None)
+            if not raw_address:
                 continue
             try:
-                addresses.add(ip_address(interface_address.address.split("%", maxsplit=1)[0]))
+                address = ip_address(raw_address.split("%", maxsplit=1)[0])
             except ValueError:
                 continue
+            if isinstance(address, IPv4Address) and _is_lan_ipv4_address(address):
+                addresses.add(address)
     return addresses
 
 
