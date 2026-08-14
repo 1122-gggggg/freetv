@@ -25,10 +25,18 @@ vi.mock('../api/useControllerSocket', () => ({
     sendText: () => 'request-id',
   }),
 }))
+vi.mock('qrcode.react', () => ({
+  QRCodeSVG: ({ value }: { value: string }) => <output data-testid="pairing-qr">{value}</output>,
+}))
 
-function pairingResponse(code: string, expiresAt: string): Response {
-  return new Response(JSON.stringify({ code, expires_at: expiresAt }), { status: 200 })
+
+function pairingResponse(code: string, expiresAt: string, remoteUrl?: string): Response {
+  return new Response(
+    JSON.stringify({ code, expires_at: expiresAt, remote_url: remoteUrl ?? null }),
+    { status: 200 },
+  )
 }
+
 
 describe('TVLauncher pairing code', () => {
   beforeEach(() => {
@@ -57,5 +65,21 @@ describe('TVLauncher pairing code', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(screen.getByText('222222')).toBeTruthy()
+  })
+
+  it('encodes the controller LAN URL in the pairing QR code', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        pairingResponse('111111', '2026-08-13T00:01:00.000Z', 'https://192.168.1.42:8765/remote'),
+      ),
+    )
+
+    render(<TVLauncher />)
+    await act(async () => {})
+
+    expect(screen.getByTestId('pairing-qr').textContent).toBe(
+      'https://192.168.1.42:8765/remote?code=111111',
+    )
   })
 })

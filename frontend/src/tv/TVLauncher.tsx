@@ -36,6 +36,18 @@ const KEY_COMMANDS: Record<string, Command> = {
 interface PairingInfo {
   code: string
   expires_at: string
+  remote_url?: string | null
+}
+
+function pairingQrValue(pairing: PairingInfo): string | null {
+  if (!pairing.remote_url) return null
+  try {
+    const remoteUrl = new URL(pairing.remote_url)
+    remoteUrl.searchParams.set('code', pairing.code)
+    return remoteUrl.toString()
+  } catch {
+    return null
+  }
 }
 
 function isTileId(value: string): value is TileId {
@@ -47,6 +59,7 @@ export function TVLauncher(): ReactElement {
   const [pairing, setPairing] = useState<PairingInfo | null>(null)
   const tileRefs = useRef<Partial<Record<TileId, HTMLButtonElement>>>({})
   const focusedTile = state && isTileId(state.focused_tile) ? state.focused_tile : 'youtube'
+  const pairingQr = pairing ? pairingQrValue(pairing) : null
 
   useEffect(() => {
     document.title = 'MY TV • PC TV Box'
@@ -157,10 +170,10 @@ export function TVLauncher(): ReactElement {
       <footer className="tv-footer">
         <section className="pairing-card" aria-label="Pair a phone remote">
           <div className="pairing-card-content">
-            {pairing?.code ? (
+            {pairingQr ? (
               <div className="pairing-qr-wrapper" aria-label="Pairing QR Code">
                 <QRCodeSVG
-                  value={`https://${window.location.hostname}:${window.location.port || '8765'}/remote?code=${pairing.code}`}
+                  value={pairingQr}
                   size={92}
                   bgColor="#1b2434"
                   fgColor="#f7d488"
