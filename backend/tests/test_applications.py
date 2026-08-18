@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -10,8 +11,6 @@ from app.commands.ports import CommandExecutionError
 from app.config import ApplicationSettings, Settings, UrlSettings
 from app.protocol import Command
 from app.state import ActiveApp
-
-
 @dataclass
 class FakeProcess:
     pid: int = 123
@@ -87,7 +86,9 @@ class FakeInput:
 
 
 def make_manager(
-    *, brave: Path | None = Path("C:/Apps/brave.exe")
+    *,
+    chrome: Path | None = Path("C:/Apps/chrome.exe"),
+    adblock_dir: Path | None = None,
 ) -> tuple[ApplicationManager, FakeLauncher, FakeWindows, FakeInput]:
     launcher = FakeLauncher()
     windows = FakeWindows()
@@ -98,35 +99,93 @@ def make_manager(
     )
     manager = ApplicationManager(
         settings,
-        executable_paths={"brave": brave, "edge": Path("C:/Apps/msedge.exe"), "browser": None},
+        executable_paths={
+            "chrome": chrome,
+            "edge": Path("C:/Apps/msedge.exe"),
+            "brave": None,
+            "browser": None,
+        },
         process_launcher=launcher,
         windows=windows,
         input_controller=input_controller,
+        adblock_dir=adblock_dir,
     )
     return manager, launcher, windows, input_controller
 
 
-def test_youtube_uses_tracked_brave_process_and_argument_array() -> None:
-    async def scenario() -> None:
-        manager, launcher, windows, _ = make_manager()
+def test_youtube_uses_isolated_chrome_kiosk_and_adblock(tmp_path: Path) -> None:
+    adblock = tmp_path / "adblock"
+    adblock.mkdir()
+    (adblock / "manifest.json").write_text("{}", encoding="utf-8")
+    manager, launcher, windows, _ = make_manager(adblock_dir=adblock)
+    asyncio.run(manager.open(ActiveApp.YOUTUBE))
+    argv = launcher.calls[0]
+    assert argv[0].endswith("chrome.exe")
+    assert "--kiosk" in argv
+    assert any(part.startswith("--user-data-dir=") and "chrome-tv-profile" in part for part in argv)
+    assert any(
+        part.startswith("--load-extension=") and str(adblock).replace("\\", "/") in part.replace("\\", "/")
+        for part in argv
+    )
+    assert "--start-maximized" not in argv
+    assert argv[-1] == "https://www.youtube.com/"
 
-        await manager.open(ActiveApp.YOUTUBE)
 
-        assert launcher.calls == [
-            ["C:/Apps/brave.exe", "--new-window", "--start-maximized", "https://www.youtube.com/"]
-        ]
-        assert windows.maximized == [900]
-        assert manager.active_app is ActiveApp.YOUTUBE
+def test_netflix_stays_on_edge_without_adblock() -> None:
+    manager, launcher, windows, _ = make_manager()
+    asyncio.run(manager.open(ActiveApp.NETFLIX))
+    assert launcher.calls[0][0].endswith("msedge.exe")
+    assert "--start-maximized" in launcher.calls[0]
+    assert "--load-extension" not in " ".join(launcher.calls[0])
+    assert "chrome-tv-profile" not in " ".join(launcher.calls[0])
 
-    import asyncio
 
-    asyncio.run(scenario())
+def test_missing_chrome_returns_chrome_not_found(tmp_path: Path) -> None:
+    adblock = tmp_path / "adblock"
+    adblock.mkdir()
+    (adblock / "manifest.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(CommandExecutionError) as error:
+        asyncio.run(make_manager(chrome=None, adblock_dir=adblock)[0].open(ActiveApp.YOUTUBE))
+    assert error.value.code == "chrome_not_found"
+
+
+def test_missing_adblock_returns_adblock_not_installed() -> None:
+    with pytest.raises(CommandExecutionError) as error:
+        asyncio.run(make_manager(adblock_dir=Path("C:/missing-adblock"))[0].open(ActiveApp.YOUTUBE))
+    assert error.value.code == "adblock_not_installed"
+
+
+def test_search_youtube_opens_results_url(tmp_path: Path) -> None:
+    adblock = tmp_path / "adblock"
+    adblock.mkdir()
+    (adblock / "manifest.json").write_text("{}", encoding="utf-8")
+    manager, launcher, _, _ = make_manager(adblock_dir=adblock)
+    asyncio.run(manager.search_youtube("cat videos"))
+    argv = launcher.calls[0]
+    assert argv[0].endswith("chrome.exe")
+    assert "--kiosk" in argv
+    assert argv[-1] == "https://www.youtube.com/results?search_query=cat+videos"
+    assert manager.active_app is ActiveApp.YOUTUBE
+
+
+def test_open_news_opens_kiosk_chrome_with_live_url(tmp_path: Path) -> None:
+    adblock = tmp_path / "adblock"
+    adblock.mkdir()
+    (adblock / "manifest.json").write_text("{}", encoding="utf-8")
+    manager, launcher, _, _ = make_manager(adblock_dir=adblock)
+    news_url = "https://www.youtube.com/watch?v=live_stream_id"
+    asyncio.run(manager.open_news(news_url))
+    argv = launcher.calls[0]
+    assert argv[0].endswith("chrome.exe")
+    assert "--kiosk" in argv
+    assert argv[-1] == news_url
+    assert manager.active_app is ActiveApp.NEWS
 
 
 def test_home_minimizes_only_the_tracked_window_and_restores_launcher() -> None:
     async def scenario() -> None:
         manager, _, windows, _ = make_manager()
-        await manager.open(ActiveApp.YOUTUBE)
+        await manager.open(ActiveApp.NETFLIX)
 
         await manager.return_home()
 
@@ -134,23 +193,7 @@ def test_home_minimizes_only_the_tracked_window_and_restores_launcher() -> None:
         assert windows.brought_launcher_forward == 1
         assert manager.active_app is ActiveApp.LAUNCHER
 
-    import asyncio
-
     asyncio.run(scenario())
-
-
-def test_missing_brave_returns_stable_user_facing_error() -> None:
-    async def scenario() -> None:
-        manager, _, _, _ = make_manager(brave=None)
-
-        with pytest.raises(CommandExecutionError, match="Brave browser is not installed"):
-            await manager.open(ActiveApp.YOUTUBE)
-
-    import asyncio
-
-    asyncio.run(scenario())
-
-
 def test_forwarding_only_uses_fixed_command_mapping() -> None:
     async def scenario() -> None:
         manager, _, windows, input_controller = make_manager()
@@ -169,7 +212,7 @@ def test_forwarding_only_uses_fixed_command_mapping() -> None:
 def test_shutdown_terminates_only_the_child_started_by_controller() -> None:
     async def scenario() -> None:
         manager, launcher, _, _ = make_manager()
-        await manager.open(ActiveApp.YOUTUBE)
+        await manager.open(ActiveApp.NETFLIX)
 
         await manager.shutdown()
 
@@ -183,14 +226,14 @@ def test_shutdown_terminates_only_the_child_started_by_controller() -> None:
 def test_failed_application_launch_keeps_the_existing_tracked_window_visible() -> None:
     async def scenario() -> None:
         manager, launcher, windows, _ = make_manager()
-        await manager.open(ActiveApp.YOUTUBE)
+        await manager.open(ActiveApp.NETFLIX)
         launcher.fail_next_launch = True
 
-        with pytest.raises(CommandExecutionError, match="Could not open Microsoft Edge"):
-            await manager.open(ActiveApp.NETFLIX)
+        with pytest.raises(CommandExecutionError, match="Could not open Configured browser"):
+            await manager.open(ActiveApp.BROWSER)
 
         assert windows.minimized == []
-        assert manager.active_app is ActiveApp.YOUTUBE
+        assert manager.active_app is ActiveApp.NETFLIX
 
     import asyncio
 
@@ -264,5 +307,21 @@ def test_home_does_not_minimize_a_reused_tracked_window_handle() -> None:
         assert windows.brought_launcher_forward == 1
 
     import asyncio
+
+    asyncio.run(scenario())
+
+
+def test_forwarding_accepts_input_for_news_target(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        adblock = tmp_path / "adblock"
+        adblock.mkdir()
+        (adblock / "manifest.json").write_text("{}", encoding="utf-8")
+        manager, _, windows, input_controller = make_manager(adblock_dir=adblock)
+        await manager.open_news("https://www.youtube.com/watch?v=live123")
+
+        await manager.forward_command(Command.NAV_DOWN)
+
+        assert input_controller.commands == [Command.NAV_DOWN]
+        assert windows.activated == [900]
 
     asyncio.run(scenario())

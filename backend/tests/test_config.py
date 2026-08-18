@@ -6,9 +6,14 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from app.config import Settings, load_settings
+from app.config import (
+    ApplicationSettings,
+    Settings,
+    detect_capabilities,
+    load_settings,
+    resolve_application_paths,
+)
 from app.controller import build_runtime
-
 
 def test_load_settings_merges_defaults_with_local_overrides(tmp_path) -> None:
     settings_path = tmp_path / "settings.json"
@@ -50,3 +55,36 @@ def test_runtime_uses_configured_pairing_code_expiry() -> None:
     remaining_seconds = (expires_at - datetime.now(UTC)).total_seconds()
 
     assert 55 <= remaining_seconds <= 61
+
+
+def test_load_settings_supports_chrome_path(tmp_path) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "applications": {"chrome_path": "C:/Tools/Chrome/chrome.exe"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    settings = load_settings(settings_path)
+    assert settings.applications.chrome_path == "C:/Tools/Chrome/chrome.exe"
+
+
+def test_resolve_application_paths_uses_configured_chrome_path(tmp_path) -> None:
+    chrome_exe = tmp_path / "chrome.exe"
+    chrome_exe.write_text("", encoding="utf-8")
+    settings = Settings(applications=ApplicationSettings(chrome_path=str(chrome_exe)))
+
+    paths = resolve_application_paths(settings)
+    assert paths["chrome"] == chrome_exe
+
+
+def test_detect_capabilities_reports_chrome_availability(tmp_path) -> None:
+    chrome_exe = tmp_path / "chrome.exe"
+    chrome_exe.write_text("", encoding="utf-8")
+    settings = Settings(applications=ApplicationSettings(chrome_path=str(chrome_exe)))
+
+    capabilities = detect_capabilities(settings)
+    assert capabilities["chrome_available"] is True
