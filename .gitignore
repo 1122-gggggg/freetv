@@ -19,6 +19,9 @@ config/channels.json
 config/remotes.json
 config/tls/
 config/edge-profile/
+config/news.json
+config/chrome-tv-profile/
+vendor/adblock/
 logs/
 
 # Appliance packages
