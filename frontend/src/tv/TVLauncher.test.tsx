@@ -82,4 +82,18 @@ describe('TVLauncher pairing code', () => {
       'https://192.168.1.42:8765/remote?code=111111',
     )
   })
+
+  it('renders all tiles including the News tile', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(pairingResponse('111111', '2026-08-13T00:01:00.000Z')))
+
+    render(<TVLauncher />)
+    await act(async () => {})
+
+    expect(screen.getByRole('button', { name: 'Open YouTube' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open Netflix' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open 新聞 / News' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open Live TV' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open Browser' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Open Settings' })).toBeTruthy()
+  })
 })

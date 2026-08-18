@@ -20,6 +20,7 @@ export type Command =
   | 'OPEN_NETFLIX'
   | 'OPEN_LIVE_TV'
   | 'OPEN_BROWSER'
+  | 'OPEN_NEWS'
   | 'POWER_SLEEP'
 
 export type PointerAction = 'move' | 'tap' | 'double_tap' | 'scroll'
@@ -27,8 +28,8 @@ export type PointerAction = 'move' | 'tap' | 'double_tap' | 'scroll'
 export interface ControllerState {
   version: 1
   type: 'state'
-  active_app: 'launcher' | 'youtube' | 'netflix' | 'live_tv' | 'browser'
-  focused_tile: 'youtube' | 'netflix' | 'live_tv' | 'browser' | 'settings'
+  active_app: 'launcher' | 'youtube' | 'netflix' | 'live_tv' | 'browser' | 'news'
+  focused_tile: 'youtube' | 'netflix' | 'live_tv' | 'browser' | 'news' | 'settings'
   volume: number
   muted: boolean
   channel_number: number | null

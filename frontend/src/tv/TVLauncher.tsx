@@ -7,6 +7,7 @@ import { tileCommand, type TileId } from './navigation'
 const TILES: ReadonlyArray<{ id: TileId; label: string; detail: string; badge: string }> = [
   { id: 'youtube', label: 'YouTube', detail: 'Open Brave with your existing profile', badge: 'YT' },
   { id: 'netflix', label: 'Netflix', detail: 'Open Microsoft Edge with your existing profile', badge: 'N' },
+  { id: 'news', label: '新聞 / News', detail: 'Watch live news streams on YouTube', badge: 'NEWS' },
   { id: 'live_tv', label: 'Live TV', detail: 'Play configured channels through mpv', badge: 'TV' },
   { id: 'browser', label: 'Browser', detail: 'Open your configured browser start page', badge: 'WEB' },
   { id: 'settings', label: 'Settings', detail: 'Configure this box from settings.json', badge: 'SET' },
