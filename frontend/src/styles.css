@@ -209,36 +209,38 @@ button:focus-visible, input:focus-visible {
 
 .remote-grid { display: grid; gap: 0.7rem; margin-top: 0.8rem; }
 .two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.apps-grid { margin-top: 1.5rem; }
-.apps-grid .remote-button { min-height: 4.25rem; background: #26334a; }
+.three-column { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.apps-row { margin-top: 0.8rem; }
+.apps-row .remote-button { min-height: 4rem; background: #26334a; font-weight: 700; }
 
-.touchpad-card, .text-card {
+.remote-voice-row { margin-top: 0.8rem; display: flex; }
+.remote-voice-row .voice-button {
+  width: 100%;
+  min-height: 3.8rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #f8fafc;
+  background: #1e3a5f;
+  border-color: #3b82f6;
+}
+.remote-voice-row .voice-button.is-listening {
+  background: #7c2d12;
+  border-color: #f97316;
+}
+
+.search-card {
+  display: flex;
   flex-direction: column;
   align-items: stretch;
-  margin-top: 1.5rem;
+  margin-top: 1rem;
   padding: 1.15rem;
   border: 1px solid #2c394f;
   border-radius: 1.25rem;
   background: rgb(27 37 53 / 80%);
 }
-
-.touchpad-card h2, .text-card h2 { margin: 0; font-size: 1.2rem; }
-.touchpad {
-  min-height: 11rem;
-  display: grid;
-  place-items: center;
-  margin-top: 0.8rem;
-  border: 1px dashed #62738f;
-  border-radius: 1rem;
-  color: #aab8ce;
-  text-align: center;
-  touch-action: none;
-  user-select: none;
-}
-.touchpad span { max-width: 17rem; line-height: 1.45; }
-
-.text-card form { display: grid; grid-template-columns: 1fr auto; gap: 0.65rem; margin-top: 0.8rem; }
-.text-card input, .pairing-form-card input {
+.search-card h2 { margin: 0; font-size: 1.2rem; }
+.search-card form { display: grid; grid-template-columns: 1fr auto; gap: 0.65rem; margin-top: 0.8rem; }
+.search-card input, .pairing-form-card input {
   min-width: 0;
   min-height: 3.5rem;
   border: 1px solid #43516a;
@@ -247,6 +249,15 @@ button:focus-visible, input:focus-visible {
   color: #f8fafc;
   background: #0d1420;
 }
+.search-submit {
+  min-height: 3.5rem;
+  padding-inline: 1.25rem;
+  font-weight: 700;
+  border-color: #f7d488;
+  color: #1a1b20;
+  background: #f7d488;
+}
+.search-submit:disabled { opacity: 0.6; }
 .remote-feedback { min-height: 2.2rem; padding: 1.25rem 0; color: #cbd6e4; text-align: center; }
 
 .pairing-shell { display: grid; place-items: center; }
@@ -271,7 +282,7 @@ button:focus-visible, input:focus-visible {
 @media (max-width: 390px) {
   .remote-shell { padding-inline: 0.75rem; }
   .remote-button { min-height: 3.25rem; padding-inline: 0.55rem; font-size: 0.9rem; }
-  .text-card form { grid-template-columns: 1fr; }
+  .search-card form { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

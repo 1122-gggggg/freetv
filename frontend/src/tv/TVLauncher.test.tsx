@@ -23,6 +23,7 @@ vi.mock('../api/useControllerSocket', () => ({
     sendCommand: () => 'request-id',
     sendPointer: () => 'request-id',
     sendText: () => 'request-id',
+    sendSearch: () => 'request-id',
   }),
 }))
 vi.mock('qrcode.react', () => ({

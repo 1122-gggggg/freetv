@@ -86,4 +86,11 @@ export interface TextInputMessage {
   text: string
 }
 
-export type ClientMessage = CommandMessage | AuthenticationMessage | PointerMessage | TextInputMessage
+export interface SearchVideoMessage {
+  version: 1
+  type: 'search_video'
+  request_id: string
+  query: string
+}
+
+export type ClientMessage = CommandMessage | AuthenticationMessage | PointerMessage | TextInputMessage | SearchVideoMessage
