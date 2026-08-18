@@ -29,14 +29,12 @@ vi.mock('qrcode.react', () => ({
   QRCodeSVG: ({ value }: { value: string }) => <output data-testid="pairing-qr">{value}</output>,
 }))
 
-
 function pairingResponse(code: string, expiresAt: string, remoteUrl?: string): Response {
   return new Response(
     JSON.stringify({ code, expires_at: expiresAt, remote_url: remoteUrl ?? null }),
     { status: 200 },
   )
 }
-
 
 describe('TVLauncher pairing code', () => {
   beforeEach(() => {
@@ -58,6 +56,7 @@ describe('TVLauncher pairing code', () => {
     render(<TVLauncher />)
     await act(async () => {})
     expect(screen.getByText('111111')).toBeTruthy()
+    expect(screen.getByText('Connect this box to a private Wi-Fi/LAN to create the Remote link.')).toBeTruthy()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(55_000)
@@ -67,7 +66,7 @@ describe('TVLauncher pairing code', () => {
     expect(screen.getByText('222222')).toBeTruthy()
   })
 
-  it('encodes the controller LAN URL in the pairing QR code', async () => {
+  it('shows the controller URL and encodes the one-time code in the pairing QR', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
@@ -78,6 +77,7 @@ describe('TVLauncher pairing code', () => {
     render(<TVLauncher />)
     await act(async () => {})
 
+    expect(screen.getByText('https://192.168.1.42:8765/remote')).toBeTruthy()
     expect(screen.getByTestId('pairing-qr').textContent).toBe(
       'https://192.168.1.42:8765/remote?code=111111',
     )

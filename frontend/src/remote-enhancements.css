@@ -1,0 +1,103 @@
+button:disabled,
+input:disabled {
+  cursor: not-allowed;
+}
+
+.pairing-card {
+  min-width: min(44rem, 100%);
+}
+
+.pairing-card-content {
+  align-items: stretch;
+}
+
+.pairing-text-wrapper {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.pairing-instructions {
+  max-width: 42rem;
+  margin: 0.55rem 0 0.45rem;
+  color: #bec9d9;
+  line-height: 1.35;
+}
+
+.pairing-url {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  border: 1px solid #40506a;
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.7rem;
+  color: #f8fafc;
+  background: #0b111c;
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: clamp(0.78rem, 1vw, 1.05rem);
+  line-height: 1.35;
+  user-select: all;
+}
+
+.pairing-url-unavailable {
+  margin: 0.35rem 0 0;
+  color: #f7d488;
+  line-height: 1.4;
+}
+
+.remote-connection-note {
+  min-height: 1.35rem;
+  margin: -0.65rem 0 1.15rem;
+  color: #aab8ce;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.remote-button {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.remote-button:disabled,
+.text-card input:disabled,
+.text-card form button:disabled {
+  opacity: 0.48;
+}
+
+.remote-button:disabled:hover {
+  border-color: #36435a;
+}
+
+.remote-button:disabled:active,
+.text-card form button:disabled:active {
+  transform: none;
+  background: #1b2535;
+}
+
+.remote-power-row .remote-button:disabled:active {
+  background: #3c2428;
+}
+
+.touchpad.is-disabled {
+  opacity: 0.52;
+  border-style: solid;
+  touch-action: auto;
+}
+
+@media (max-width: 760px) {
+  .pairing-card-content {
+    align-items: center;
+  }
+}
+
+@media (max-width: 460px) {
+  .pairing-card-content {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pairing-qr-wrapper {
+    align-self: center;
+  }
+}

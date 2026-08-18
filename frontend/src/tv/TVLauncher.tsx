@@ -21,7 +21,6 @@ function pairingRefreshDelay(expiresAt: string): number {
   return Math.max(1_000, Math.min(PAIRING_REFRESH_INTERVAL_MS, expiresAtMilliseconds - Date.now() - PAIRING_REFRESH_LEEWAY_MS))
 }
 
-
 const KEY_COMMANDS: Record<string, Command> = {
   ArrowUp: 'NAV_UP',
   ArrowDown: 'NAV_DOWN',
@@ -168,13 +167,13 @@ export function TVLauncher(): ReactElement {
       </section>
 
       <footer className="tv-footer">
-        <section className="pairing-card" aria-label="Pair a phone remote">
+        <section className="pairing-card" aria-label="Pair a phone web remote">
           <div className="pairing-card-content">
             {pairingQr ? (
               <div className="pairing-qr-wrapper" aria-label="Pairing QR Code">
                 <QRCodeSVG
                   value={pairingQr}
-                  size={92}
+                  size={108}
                   bgColor="#1b2434"
                   fgColor="#f7d488"
                   level="M"
@@ -182,9 +181,14 @@ export function TVLauncher(): ReactElement {
               </div>
             ) : null}
             <div className="pairing-text-wrapper">
-              <p className="eyebrow">PAIR REMOTE / SCAN QR</p>
+              <p className="eyebrow">PHONE WEB REMOTE</p>
               <strong className="pairing-code">{pairing?.code ?? '------'}</strong>
-              <p>Scan QR or enter this code in the Remote app.</p>
+              <p className="pairing-instructions">Use the same Wi-Fi. Scan the QR code or open this link, then enter the code:</p>
+              {pairing?.remote_url ? (
+                <code className="pairing-url">{pairing.remote_url}</code>
+              ) : (
+                <p className="pairing-url-unavailable">Connect this box to a private Wi-Fi/LAN to create the Remote link.</p>
+              )}
             </div>
           </div>
         </section>

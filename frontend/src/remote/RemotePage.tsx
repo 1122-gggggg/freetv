@@ -24,11 +24,22 @@ interface RemoteControlProps {
   onAuthenticationFailed: () => void
 }
 
-
 interface PendingPointer {
   action: PointerAction
   dx: number
   dy: number
+}
+
+function removePairingCodeFromAddressBar(): void {
+  const url = new URL(window.location.href)
+  if (!url.searchParams.has('code')) return
+  url.searchParams.delete('code')
+  const query = url.searchParams.toString()
+  window.history.replaceState(
+    window.history.state,
+    '',
+    `${url.pathname}${query ? `?${query}` : ''}${url.hash}`,
+  )
 }
 
 export function RemotePage({
@@ -37,6 +48,10 @@ export function RemotePage({
   onForget,
   onAuthenticationFailed,
 }: RemotePageProps): ReactElement {
+  useEffect(() => {
+    document.title = 'MY TV Remote'
+  }, [])
+
   if (!token) return <PairingScreen onPaired={onPaired} />
   return <RemoteControl token={token} onForget={onForget} onAuthenticationFailed={onAuthenticationFailed} />
 }
@@ -73,6 +88,7 @@ function PairingScreen({ onPaired }: Pick<RemotePageProps, 'onPaired'>): ReactEl
         throw new Error(payload.detail ?? 'Pairing was not accepted.')
       }
       rememberRemoteToken(payload.token)
+      removePairingCodeFromAddressBar()
       onPaired(payload.token)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Pairing was not accepted.')
@@ -86,7 +102,7 @@ function PairingScreen({ onPaired }: Pick<RemotePageProps, 'onPaired'>): ReactEl
       <section className="pairing-form-card" aria-labelledby="pairing-title">
         <p className="eyebrow">MY TV REMOTE</p>
         <h1 id="pairing-title">Pair this phone</h1>
-        <p>Enter the six-digit code currently visible on the TV Launcher.</p>
+        <p>Scan the QR code on the TV or enter its current six-digit code.</p>
         <form onSubmit={submit}>
           <label htmlFor="pairing-code">Pairing code</label>
           <input
@@ -98,7 +114,7 @@ function PairingScreen({ onPaired }: Pick<RemotePageProps, 'onPaired'>): ReactEl
             value={code}
             onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
           />
-          <button className="pairing-submit" disabled={submitting} type="submit">
+          <button className="pairing-submit" disabled={submitting || code.length !== 6} type="submit">
             {submitting ? 'Pairing…' : 'Pair remote'}
           </button>
         </form>
@@ -117,6 +133,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   const pendingPointer = useRef<PendingPointer | null>(null)
   const pointerFrame = useRef<number | null>(null)
   const tapTimer = useRef<number | null>(null)
+  const controlsDisabled = status !== 'connected'
 
   useEffect(() => {
     if (lastError?.code === 'authentication_failed') onAuthenticationFailed()
@@ -128,10 +145,11 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   }, [])
 
   const command = (value: Command) => {
-    if (!sendCommand(value)) navigator.vibrate?.(16)
+    if (!sendCommand(value)) navigator.vibrate?.([16, 35, 16])
   }
 
   const queuePointer = (action: PointerAction, dx = 0, dy = 0) => {
+    if (controlsDisabled) return
     if (action === 'tap' || action === 'double_tap') {
       sendPointer(action)
       return
@@ -148,6 +166,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
 
   const touchStart = (event: TouchEvent<HTMLDivElement>) => {
     event.preventDefault()
+    if (controlsDisabled) return
     const touches = event.touches
     if (touches.length === 2) {
       gesture.current = {
@@ -165,6 +184,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
 
   const touchMove = (event: TouchEvent<HTMLDivElement>) => {
     event.preventDefault()
+    if (controlsDisabled) return
     const current = gesture.current
     if (current.mode === 'move' && event.touches.length === 1) {
       const touch = event.touches[0]
@@ -187,6 +207,10 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
 
   const touchEnd = (event: TouchEvent<HTMLDivElement>) => {
     event.preventDefault()
+    if (controlsDisabled) {
+      gesture.current = { mode: 'none', x: 0, y: 0, moved: false }
+      return
+    }
     const current = gesture.current
     if (current.mode === 'move' && !current.moved && event.touches.length === 0) {
       if (tapTimer.current !== null) {
@@ -205,7 +229,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
 
   const submitText = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (text.length === 0) return
+    if (controlsDisabled || text.length === 0) return
     if (sendText(text)) setText('')
   }
 
@@ -236,37 +260,42 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         <span className="status-dot" aria-hidden="true" />
         {status === 'connected' ? 'Connected' : status === 'authenticating' ? 'Authenticating' : status}
       </div>
+      <p className="remote-connection-note" aria-live="polite">
+        {controlsDisabled
+          ? 'Controls unlock automatically when the TV Box reconnects.'
+          : 'Hold arrows, volume, or channel buttons to repeat.'}
+      </p>
 
       <section className="remote-power-row" aria-label="Power controls">
-        <CommandButton command="POWER_SLEEP" label="Sleep PC" onCommand={command} />
+        <CommandButton command="POWER_SLEEP" label="Sleep PC" onCommand={command} disabled={controlsDisabled} />
       </section>
 
       <section className="remote-direction-pad" aria-label="Navigation controls">
-        <CommandButton command="NAV_UP" label="Up" onCommand={command} className="direction-up" />
-        <CommandButton command="NAV_LEFT" label="Left" onCommand={command} className="direction-left" />
-        <CommandButton command="OK" label="OK" onCommand={command} className="direction-ok" />
-        <CommandButton command="NAV_RIGHT" label="Right" onCommand={command} className="direction-right" />
-        <CommandButton command="NAV_DOWN" label="Down" onCommand={command} className="direction-down" />
+        <CommandButton command="NAV_UP" label="Up" onCommand={command} className="direction-up" disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="NAV_LEFT" label="Left" onCommand={command} className="direction-left" disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="OK" label="OK" onCommand={command} className="direction-ok" disabled={controlsDisabled} />
+        <CommandButton command="NAV_RIGHT" label="Right" onCommand={command} className="direction-right" disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="NAV_DOWN" label="Down" onCommand={command} className="direction-down" disabled={controlsDisabled} repeatOnHold />
       </section>
 
       <section className="remote-grid two-column" aria-label="Core controls">
-        <CommandButton command="BACK" label="Back" onCommand={command} />
-        <CommandButton command="HOME" label="Home" onCommand={command} />
-        <CommandButton command="VOLUME_UP" label="Volume +" onCommand={command} />
-        <CommandButton command="CHANNEL_UP" label="Channel +" onCommand={command} />
-        <CommandButton command="VOLUME_DOWN" label="Volume −" onCommand={command} />
-        <CommandButton command="CHANNEL_DOWN" label="Channel −" onCommand={command} />
-        <CommandButton command="MUTE" label="Mute" onCommand={command} />
-        <CommandButton command="PLAY_PAUSE" label="Play / Pause" onCommand={command} />
-        <CommandButton command="PREVIOUS" label="Previous" onCommand={command} />
-        <CommandButton command="NEXT" label="Next" onCommand={command} />
+        <CommandButton command="BACK" label="Back" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="HOME" label="Home" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="VOLUME_UP" label="Volume +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="CHANNEL_UP" label="Channel +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="VOLUME_DOWN" label="Volume −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="CHANNEL_DOWN" label="Channel −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="MUTE" label="Mute" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="PLAY_PAUSE" label="Play / Pause" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="PREVIOUS" label="Previous" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="NEXT" label="Next" onCommand={command} disabled={controlsDisabled} />
       </section>
 
       <section className="remote-grid two-column apps-grid" aria-label="Applications">
-        <CommandButton command="OPEN_YOUTUBE" label="YouTube" onCommand={command} />
-        <CommandButton command="OPEN_NETFLIX" label="Netflix" onCommand={command} />
-        <CommandButton command="OPEN_LIVE_TV" label="Live TV" onCommand={command} />
-        <CommandButton command="OPEN_BROWSER" label="Browser" onCommand={command} />
+        <CommandButton command="OPEN_YOUTUBE" label="YouTube" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="OPEN_NETFLIX" label="Netflix" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="OPEN_LIVE_TV" label="Live TV" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="OPEN_BROWSER" label="Browser" onCommand={command} disabled={controlsDisabled} />
       </section>
 
       <section className="touchpad-card" aria-labelledby="touchpad-title">
@@ -275,15 +304,16 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
           <h2 id="touchpad-title">Move, tap, scroll</h2>
         </div>
         <div
-          className="touchpad"
+          className={`touchpad ${controlsDisabled ? 'is-disabled' : ''}`}
           role="application"
           aria-label="Touchpad: drag to move, tap to click, two-finger drag to scroll"
+          aria-disabled={controlsDisabled}
           onTouchStart={touchStart}
           onTouchMove={touchMove}
           onTouchEnd={touchEnd}
           onTouchCancel={touchEnd}
         >
-          <span>One finger: move · tap: click · two fingers: scroll</span>
+          <span>{controlsDisabled ? 'Reconnect to use the touchpad.' : 'One finger: move · tap: click · two fingers: scroll'}</span>
         </div>
       </section>
 
@@ -293,11 +323,12 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         <form onSubmit={submitText}>
           <input
             aria-label="Text to send to the active application"
+            disabled={controlsDisabled}
             maxLength={256}
             value={text}
             onChange={(event) => setText(event.target.value.slice(0, 256))}
           />
-          <button type="submit">Send text</button>
+          <button disabled={controlsDisabled || text.length === 0} type="submit">Send text</button>
         </form>
       </section>
 
