@@ -30,4 +30,7 @@ pc-tv-box-stage/
 .idea/
 *.log
 Thumbs.db
+
+# Local worktrees
+.worktrees/
 .DS_Store
