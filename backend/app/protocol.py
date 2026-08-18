@@ -34,6 +34,7 @@ class Command(StrEnum):
     OPEN_NETFLIX = "OPEN_NETFLIX"
     OPEN_LIVE_TV = "OPEN_LIVE_TV"
     OPEN_BROWSER = "OPEN_BROWSER"
+    OPEN_NEWS = "OPEN_NEWS"
     POWER_SLEEP = "POWER_SLEEP"
 
 
@@ -101,8 +102,29 @@ class TextInputMessage(WireModel):
         return sanitized
 
 
+
+class SearchVideoMessage(WireModel):
+    version: Literal[PROTOCOL_VERSION]
+    type: Literal["search_video"]
+    request_id: str = Field(min_length=1, max_length=64, pattern=REQUEST_ID_PATTERN)
+    query: str = Field(min_length=1, max_length=128)
+
+    @field_validator("query", mode="before")
+    @classmethod
+    def sanitize_query(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise TypeError("Search query must be a string.")
+        sanitized = sanitize_text(value).strip()
+        if not sanitized:
+            raise ValueError("Search query must include visible characters.")
+        return sanitized
+
 ClientMessage = Annotated[
-    AuthenticationMessage | CommandMessage | PointerActionMessage | TextInputMessage,
+    AuthenticationMessage
+    | CommandMessage
+    | PointerActionMessage
+    | TextInputMessage
+    | SearchVideoMessage,
     Field(discriminator="type"),
 ]
 client_message_adapter = TypeAdapter(ClientMessage)

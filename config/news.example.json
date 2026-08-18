@@ -1,0 +1,30 @@
+[
+  {
+    "id": "dw-news",
+    "number": 1,
+    "name": "DW News",
+    "url": "https://www.youtube.com/@dwnews/live",
+    "enabled": true
+  },
+  {
+    "id": "aljazeera-english",
+    "number": 2,
+    "name": "Al Jazeera English",
+    "url": "https://www.youtube.com/@aljazeeraenglish/live",
+    "enabled": true
+  },
+  {
+    "id": "pbs-newshour",
+    "number": 3,
+    "name": "PBS NewsHour",
+    "url": "https://www.youtube.com/@pbsnewshour/live",
+    "enabled": true
+  },
+  {
+    "id": "france24-english",
+    "number": 4,
+    "name": "France 24 English",
+    "url": "https://www.youtube.com/@FRANCE24English/live",
+    "enabled": true
+  }
+]
