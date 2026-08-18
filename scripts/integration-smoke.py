@@ -41,6 +41,7 @@ class SmokeConfig:
     lan_host: str | None = None
     ca_cert_path: Path | None = None
     timeout: float = 10.0
+    transport: str = "http"
 
 
 @dataclass(slots=True)
@@ -99,7 +100,7 @@ def validate_port(port: int | str) -> int:
     return val
 
 
-def parse_and_validate_remote_url(remote_url: str) -> tuple[str, int]:
+def parse_and_validate_remote_url(remote_url: str) -> tuple[str, str, int]:
     """Parse remote_url (e.g. https://192.168.1.50:8765/remote) and validate scheme, host, port."""
     if not remote_url or not isinstance(remote_url, str):
         raise SmokeValidationError("Remote URL must be a non-empty string.")
@@ -108,14 +109,15 @@ def parse_and_validate_remote_url(remote_url: str) -> tuple[str, int]:
     except Exception as err:
         raise SmokeValidationError(f"Could not parse remote URL '{remote_url}': {err}") from err
 
-    if parsed.scheme.casefold() != "https":
-        raise SmokeValidationError(f"Remote URL scheme must be 'https', got '{parsed.scheme}'.")
+    scheme = parsed.scheme.casefold()
+    if scheme not in {"http", "https"}:
+        raise SmokeValidationError(f"Remote URL scheme must be 'http' or 'https', got '{parsed.scheme}'.")
     if not parsed.hostname:
         raise SmokeValidationError(f"Remote URL missing hostname: '{remote_url}'.")
 
     host = validate_host_address(parsed.hostname)
-    port = validate_port(parsed.port or 443)
-    return host, port
+    port = validate_port(parsed.port or (443 if scheme == "https" else 80))
+    return scheme, host, port
 
 
 def create_request_id(prefix: str = "smoke") -> str:
@@ -313,17 +315,22 @@ async def run_smoke_test(config: SmokeConfig) -> SmokeResult:
     """Execute the end-to-end integration smoke workflow."""
     result = SmokeResult()
     root = find_project_root()
-    ca_path = config.ca_cert_path or find_default_ca_cert(root)
-    if not ca_path.is_file():
-        raise SmokeValidationError(
-            f"Local CA certificate was not found at '{ca_path}'. "
-            "Ensure the controller is running or specify --ca-cert."
-        )
+    scheme = config.transport
+    ssl_ctx = None
+    if scheme == "https":
+        ca_path = config.ca_cert_path or find_default_ca_cert(root)
+        if not ca_path.is_file():
+            raise SmokeValidationError(
+                f"Local CA certificate was not found at '{ca_path}'. "
+                "Ensure the controller is running or specify --ca-cert."
+            )
+        ssl_ctx = build_ssl_context(ca_path)
+    elif config.ca_cert_path is not None:
+        logger.warning("Ignoring --ca-cert because transport is http.")
 
-    ssl_ctx = build_ssl_context(ca_path)
     port = validate_port(config.port)
     loopback_host = validate_host_address(config.loopback_host)
-    loopback_origin = f"https://{loopback_host}:{port}"
+    loopback_origin = f"{scheme}://{loopback_host}:{port}"
     loopback_base_url = loopback_origin
 
     token: str | None = None
@@ -331,7 +338,7 @@ async def run_smoke_test(config: SmokeConfig) -> SmokeResult:
     lan_origin: str = ""
     lan_base_url: str = ""
 
-    async with httpx.AsyncClient(verify=ssl_ctx, timeout=config.timeout) as http_client:
+    async with httpx.AsyncClient(verify=ssl_ctx if ssl_ctx else True, timeout=config.timeout) as http_client:
         try:
             # 1. Health check
             logger.info("1/7: Checking GET /api/health...")
@@ -370,7 +377,7 @@ async def run_smoke_test(config: SmokeConfig) -> SmokeResult:
             remote_url = pairing_data.get("remote_url")
             if lan_host is None:
                 if remote_url:
-                    parsed_lan_host, parsed_port = parse_and_validate_remote_url(remote_url)
+                    _parsed_scheme, parsed_lan_host, parsed_port = parse_and_validate_remote_url(remote_url)
                     lan_host = parsed_lan_host
                     port = parsed_port
                 else:
@@ -378,7 +385,7 @@ async def run_smoke_test(config: SmokeConfig) -> SmokeResult:
             else:
                 lan_host = validate_host_address(lan_host)
 
-            lan_origin = f"https://{lan_host}:{port}"
+            lan_origin = f"{scheme}://{lan_host}:{port}"
             lan_base_url = lan_origin
             logger.info("LAN Remote origin resolved to: %s", lan_origin)
 
@@ -406,12 +413,12 @@ async def run_smoke_test(config: SmokeConfig) -> SmokeResult:
 
             # 4. Authenticate both Loopback TV WSS and LAN Remote WSS
             logger.info("4/7: Connecting TV WSS and authenticating LAN Remote WSS...")
-            tv_ws_url = f"wss://{loopback_host}:{port}/ws/tv"
+            tv_ws_url = f"{'wss' if scheme == 'https' else 'ws'}://{loopback_host}:{port}/ws/tv"
             tv_headers = {
                 "Host": f"{loopback_host}:{port}",
                 "Origin": loopback_origin,
             }
-            remote_ws_url = f"wss://{lan_host}:{port}/ws/remote"
+            remote_ws_url = f"{'wss' if scheme == 'https' else 'ws'}://{lan_host}:{port}/ws/remote"
             remote_headers = {
                 "Host": f"{lan_host}:{port}",
                 "Origin": lan_origin,
@@ -552,6 +559,12 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Path to local CA certificate (defaults to config/tls/pc-tv-box-local-ca.cer).",
     )
     parser.add_argument(
+        "--transport",
+        choices=["http", "https"],
+        default="http",
+        help="Controller transport (default: http).",
+    )
+    parser.add_argument(
         "--port",
         type=int,
         default=8765,
@@ -597,6 +610,7 @@ def main(argv: list[str] | None = None) -> int:
         lan_host=args.lan_ip,
         ca_cert_path=args.ca_cert,
         timeout=args.timeout,
+        transport=args.transport,
     )
     try:
         result = asyncio.run(run_smoke_test(config))

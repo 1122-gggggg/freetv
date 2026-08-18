@@ -21,6 +21,10 @@ config/tls/
 config/edge-profile/
 logs/
 
+# Appliance packages
+pc-tv-box.zip
+pc-tv-box-stage/
+
 # Windows and editors
 .vscode/
 .idea/

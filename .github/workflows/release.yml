@@ -1,0 +1,37 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Lint, build, and test frontend
+        working-directory: frontend
+        run: npm ci && npm run lint && npm run build && npm test
+      - name: Stage appliance zip
+        run: |
+          set -euo pipefail
+          stage=pc-tv-box
+          mkdir -p "$stage/frontend" "$stage/backend" "$stage/scripts" "$stage/config" "$stage/docs"
+          cp -r frontend/dist "$stage/frontend/dist"
+          cp -r backend/app "$stage/backend/app"
+          cp backend/requirements.txt "$stage/backend/"
+          cp scripts/*.ps1 scripts/*.psm1 scripts/integration-smoke.py "$stage/scripts/"
+          cp config/settings.example.json config/channels.example.json "$stage/config/"
+          cp README.md "$stage/"
+          cp docs/*.md "$stage/docs/"
+          find "$stage" -type d -name '__pycache__' -prune -exec rm -rf {} +
+          zip -r pc-tv-box.zip "$stage"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" pc-tv-box.zip --title "$GITHUB_REF_NAME" --generate-notes

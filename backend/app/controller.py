@@ -92,7 +92,11 @@ def build_runtime(settings: Settings) -> ControllerRuntime:
         input_controller=input_controller,
         power=WindowsPowerController(),
     )
-    advertiser = ServiceAdvertiser(port=settings.server.port)
+    advertiser = (
+        ServiceAdvertiser(port=settings.server.port)
+        if settings.server.transport == "https"
+        else None
+    )
     return ControllerRuntime(
         bus=bus,
         pairing=pairing,

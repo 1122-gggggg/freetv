@@ -29,22 +29,34 @@ function Get-ManagedControllerProcess {
         [int]$ProcessId,
         [string]$PythonPath,
         [string]$CertificatePath,
-        [int]$Port
+        [int]$Port,
+        [string]$Transport = 'https'
     )
 
     $Process = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
     if ($null -eq $Process -or [string]::IsNullOrWhiteSpace($Process.CommandLine)) {
         return $null
     }
-    $PythonPattern = [regex]::Escape((Resolve-Path -LiteralPath $PythonPath).Path)
-    $CertificatePattern = [regex]::Escape((Resolve-Path -LiteralPath $CertificatePath).Path)
     $PortPattern = [regex]::Escape([string]$Port)
-    $CertificateParameterPattern = '(?i)--ssl-certfile\s+"?' + $CertificatePattern + '"?(?:\s|$)'
+    $CertificateParameterPattern = $null
+    if ($Transport -eq 'https') {
+        $PythonPattern = [regex]::Escape((Resolve-Path -LiteralPath $PythonPath).Path)
+        $CertificatePattern = [regex]::Escape((Resolve-Path -LiteralPath $CertificatePath).Path)
+        $CertificateParameterPattern = '(?i)--ssl-certfile\s+"?' + $CertificatePattern + '"?(?:\s|$)'
+        if (
+            $Process.CommandLine -notmatch "(?i)$PythonPattern" -or
+            $Process.CommandLine -notmatch '(?i)(?:^|\s)-m\s+uvicorn\s+app\.main:app(?:\s|$)' -or
+            $Process.CommandLine -notmatch "(?i)--port\s+$PortPattern(?:\s|$)" -or
+            $Process.CommandLine -notmatch $CertificateParameterPattern
+        ) {
+            return $null
+        }
+        return $Process
+    }
     if (
-        $Process.CommandLine -notmatch "(?i)$PythonPattern" -or
         $Process.CommandLine -notmatch '(?i)(?:^|\s)-m\s+uvicorn\s+app\.main:app(?:\s|$)' -or
         $Process.CommandLine -notmatch "(?i)--port\s+$PortPattern(?:\s|$)" -or
-        $Process.CommandLine -notmatch $CertificateParameterPattern
+        $Process.CommandLine -match '(?i)--ssl-certfile'
     ) {
         return $null
     }
@@ -102,6 +114,8 @@ try {
     $BindHost = $StartupConfig.BindHost
     $HealthHost = $StartupConfig.HealthHost
     $ConfiguredEdgePath = $StartupConfig.ConfiguredEdgePath
+    $Transport = $StartupConfig.Transport
+    $Scheme = $Transport
 } catch {
     throw "Could not read server settings from $SettingsSource. $_"
 }
@@ -118,23 +132,26 @@ if (-not (Test-Path $FrontendIndex)) {
     }
 }
 if (-not (Test-Path $FrontendIndex)) { throw 'Frontend build did not produce frontend\dist\index.html.' }
-$TlsDirectory = Join-Path $Root 'config\tls'
 $BackendDirectory = Join-Path $Root 'backend'
-$TlsOutput = $null
-Push-Location $BackendDirectory
-try {
-    $TlsOutput = & $Python -m app.security.tls --directory $TlsDirectory
-    Assert-NativeSuccess 'Creating local TLS materials'
-} finally {
-    Pop-Location
-}
-try {
-    $Tls = (($TlsOutput -join "`n") | ConvertFrom-Json)
-} catch {
-    throw 'Could not read locally generated TLS material metadata.'
-}
-if (-not (Test-Path $Tls.certificate) -or -not (Test-Path $Tls.private_key) -or -not (Test-Path $Tls.ca_certificate)) {
-    throw 'Local TLS material generation did not produce the expected certificate files.'
+$Tls = $null
+if ($Transport -eq 'https') {
+    $TlsDirectory = Join-Path $Root 'config\tls'
+    $TlsOutput = $null
+    Push-Location $BackendDirectory
+    try {
+        $TlsOutput = & $Python -m app.security.tls --directory $TlsDirectory
+        Assert-NativeSuccess 'Creating local TLS materials'
+    } finally {
+        Pop-Location
+    }
+    try {
+        $Tls = (($TlsOutput -join "`n") | ConvertFrom-Json)
+    } catch {
+        throw 'Could not read locally generated TLS material metadata.'
+    }
+    if (-not (Test-Path $Tls.certificate) -or -not (Test-Path $Tls.private_key) -or -not (Test-Path $Tls.ca_certificate)) {
+        throw 'Local TLS material generation did not produce the expected certificate files.'
+    }
 }
 
 
@@ -143,45 +160,53 @@ if ($null -ne $Listener) {
     $ExistingController = Get-ManagedControllerProcess `
         -ProcessId $Listener.OwningProcess `
         -PythonPath $Python `
-        -CertificatePath $Tls.certificate `
-        -Port $Port
+        -CertificatePath $(if ($null -ne $Tls) { $Tls.certificate } else { '' }) `
+        -Port $Port `
+        -Transport $Transport
     if ($null -eq $ExistingController) {
         throw "Configured server port $Port is already in use by a process that is not this PC TV Controller."
     }
-    if (-not (Test-ManagedControllerUsesCurrentCertificate -Process $ExistingController -CertificatePath $Tls.certificate)) {
-        Write-Host 'Restarting PC TV Controller to load current TLS material...'
-        Stop-ManagedController -ProcessId $Listener.OwningProcess -Port $Port
-        $Listener = Get-Listener -Port $Port
-        if ($null -ne $Listener) {
-            throw "Configured server port $Port remained in use after stopping the previous PC TV Controller."
+    if ($Transport -eq 'https') {
+        if (-not (Test-ManagedControllerUsesCurrentCertificate -Process $ExistingController -CertificatePath $Tls.certificate)) {
+            Write-Host 'Restarting PC TV Controller to load current TLS material...'
+            Stop-ManagedController -ProcessId $Listener.OwningProcess -Port $Port
+            $Listener = Get-Listener -Port $Port
+            if ($null -ne $Listener) {
+                throw "Configured server port $Port remained in use after stopping the previous PC TV Controller."
+            }
+        } else {
+            Write-Host "Using existing PC TV Controller with current TLS material on port $Port."
         }
     } else {
-        Write-Host "Using existing PC TV Controller with current TLS material on port $Port."
+        Write-Host "Using existing PC TV Controller on port $Port."
     }
 }
 if ($null -eq $Listener) {
     Write-Host 'Starting PC TV Controller...'
-    $TlsPrivateKeyArgument = '"{0}"' -f ([string]$Tls.private_key)
-    $TlsCertificateArgument = '"{0}"' -f ([string]$Tls.certificate)
     $UvicornArguments = @(
         '-m', 'uvicorn', 'app.main:app', '--host', $BindHost, '--port', $Port,
-        '--ssl-keyfile', $TlsPrivateKeyArgument, '--ssl-certfile', $TlsCertificateArgument,
         '--ws', 'websockets-sansio',
         '--limit-concurrency', '64', '--backlog', '64',
         '--ws-max-size', '65536', '--ws-max-queue', '16', '--timeout-keep-alive', '10'
     )
+    if ($Transport -eq 'https') {
+        $TlsPrivateKeyArgument = '"{0}"' -f ([string]$Tls.private_key)
+        $TlsCertificateArgument = '"{0}"' -f ([string]$Tls.certificate)
+        $UvicornArguments += @('--ssl-keyfile', $TlsPrivateKeyArgument, '--ssl-certfile', $TlsCertificateArgument)
+    }
     $Process = Start-Process -FilePath $Python -WorkingDirectory $BackendDirectory -ArgumentList $UvicornArguments -PassThru
     Write-Host "Backend process started: $($Process.Id)"
 }
 
-$HealthUrl = "https://${HealthHost}:$Port/api/health"
-$PairingUrl = "https://${HealthHost}:$Port/api/pairing"
+$HealthUrl = "${Scheme}://${HealthHost}:$Port/api/health"
+$PairingUrl = "${Scheme}://${HealthHost}:$Port/api/pairing"
 $Deadline = (Get-Date).AddSeconds(30)
 $Health = $null
 $PairingInfo = $null
-$ValidatorTypeName = 'PcTvBox.LocalHealthCertificateValidator'
-if ($null -eq ($ValidatorTypeName -as [type])) {
-    Add-Type -TypeDefinition @'
+if ($Transport -eq 'https') {
+    $ValidatorTypeName = 'PcTvBox.LocalHealthCertificateValidator'
+    if ($null -eq ($ValidatorTypeName -as [type])) {
+        Add-Type -TypeDefinition @'
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 
@@ -200,16 +225,31 @@ namespace PcTvBox
     }
 }
 '@
-}
-$HealthCallbackType = [System.Net.Security.RemoteCertificateValidationCallback]
-$HealthCallbackMethod = [PcTvBox.LocalHealthCertificateValidator].GetMethod('Accept')
-$LocalHealthCertificateValidationCallback = [System.Delegate]::CreateDelegate(
-    $HealthCallbackType,
-    $HealthCallbackMethod
-)
-$PreviousCertificateValidationCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
-[System.Net.ServicePointManager]::ServerCertificateValidationCallback = $LocalHealthCertificateValidationCallback
-try {
+    }
+    $HealthCallbackType = [System.Net.Security.RemoteCertificateValidationCallback]
+    $HealthCallbackMethod = [PcTvBox.LocalHealthCertificateValidator].GetMethod('Accept')
+    $LocalHealthCertificateValidationCallback = [System.Delegate]::CreateDelegate(
+        $HealthCallbackType,
+        $HealthCallbackMethod
+    )
+    $PreviousCertificateValidationCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $LocalHealthCertificateValidationCallback
+    try {
+        do {
+            try {
+                $Health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2
+                if ($Health.status -eq 'ok') { break }
+            } catch {
+                Start-Sleep -Milliseconds 250
+            }
+        } while ((Get-Date) -lt $Deadline)
+        if ($Health -and $Health.status -eq 'ok') {
+            $PairingInfo = Invoke-RestMethod -Uri $PairingUrl -TimeoutSec 15
+        }
+    } finally {
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $PreviousCertificateValidationCallback
+    }
+} else {
     do {
         try {
             $Health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2
@@ -221,8 +261,6 @@ try {
     if ($Health -and $Health.status -eq 'ok') {
         $PairingInfo = Invoke-RestMethod -Uri $PairingUrl -TimeoutSec 15
     }
-} finally {
-    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $PreviousCertificateValidationCallback
 }
 
 if (-not $Health -or $Health.status -ne 'ok' -or $Health.backend -ne $true -or $Health.frontend -ne $true) {
@@ -231,15 +269,19 @@ if (-not $Health -or $Health.status -ne 'ok' -or $Health.backend -ne $true -or $
 if ($null -eq $PairingInfo) {
     throw "Controller did not provide pairing details at $PairingUrl."
 }
-$RemoteUrl = Get-PairingRemoteUrl -PairingResponse $PairingInfo -Port $Port
+$RemoteUrl = Get-PairingRemoteUrl -PairingResponse $PairingInfo -Port $Port -Scheme $Scheme
 
-$LocalUrl = "https://${HealthHost}:$Port/tv"
+$LocalUrl = "${Scheme}://${HealthHost}:$Port/tv"
 Write-Host "TV Launcher: $LocalUrl"
 Write-Host "Phone Remote: $RemoteUrl"
 Write-Host "Health: $HealthUrl"
-Write-Host "Local TLS CA: $($Tls.ca_certificate)"
-Write-Host "CA SHA-256: $($Tls.ca_sha256)"
-Write-Warning 'Install and trust this local CA on each phone before opening the HTTPS Remote; see docs\WINDOWS_SETUP.md.'
+if ($Transport -eq 'https') {
+    Write-Host "Local TLS CA: $($Tls.ca_certificate)"
+    Write-Host "CA SHA-256: $($Tls.ca_sha256)"
+    Write-Warning 'Install and trust this local CA on each phone before opening the HTTPS Remote; see docs\WINDOWS_SETUP.md.'
+} else {
+    Write-Host "Transport: HTTP (private LAN only). Set server.transport to 'https' in config\settings.json for encrypted Remote."
+}
 
 if (-not $NoBrowser) {
     $Edge = Resolve-EdgeExecutable -ConfiguredPath $ConfiguredEdgePath

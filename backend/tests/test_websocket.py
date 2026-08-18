@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app import main
 from app.commands.bus import CommandBus
-from app.config import Settings
+from app.config import ServerSettings, Settings
 from app.controller import ControllerRuntime
 from app.main import RemoteAuthenticationGuard, create_app
 from app.protocol import Command, PointerActionMessage
@@ -102,7 +102,7 @@ class FakePower:
         return None
 
 
-def make_app(tmp_path):
+def make_app(tmp_path, transport: str = "http"):
     token_store = TokenStore(tmp_path / "remotes.json")
     pairing = PairingService(token_store, code_factory=lambda: "482731")
     pairing.rotate_code()
@@ -117,7 +117,11 @@ def make_app(tmp_path):
         power=FakePower(),
     )
     runtime = ControllerRuntime(bus=bus, pairing=pairing, applications=applications, player=player)
-    return create_app(settings=Settings(), capabilities={}, runtime=runtime)
+    return create_app(
+        settings=Settings(server=ServerSettings(transport=transport)),
+        capabilities={},
+        runtime=runtime,
+    )
 
 
 def authenticate(socket, token: str, request_id: str) -> None:
@@ -291,8 +295,8 @@ def test_remote_socket_rejects_a_missing_origin(tmp_path) -> None:
     assert error.value.code == 1008
 
 
-def test_remote_socket_rejects_plain_websocket_from_the_lan(tmp_path, monkeypatch) -> None:
-    app = make_app(tmp_path)
+def test_remote_socket_rejects_plain_websocket_from_the_lan_in_https_mode(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path, transport="https")
     lan_ip = "192.168.1.44"
     monkeypatch.setattr(
         main.psutil,
@@ -384,7 +388,7 @@ def test_pairing_code_endpoint_includes_lan_remote_url(tmp_path, monkeypatch) ->
         response = client.get("/api/pairing", headers={"host": "127.0.0.1:8765"})
 
     assert response.status_code == 200
-    assert response.json()["remote_url"] == "https://192.168.1.42:8765/remote"
+    assert response.json()["remote_url"] == "http://192.168.1.42:8765/remote"
 
 
 
@@ -401,8 +405,8 @@ def test_pairing_endpoint_rejects_an_oversized_body_before_validation(tmp_path) 
     assert response.status_code == 413
 
 
-def test_pairing_endpoint_rejects_plain_http_from_the_lan(tmp_path, monkeypatch) -> None:
-    app = make_app(tmp_path)
+def test_pairing_endpoint_rejects_plain_http_from_the_lan_in_https_mode(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path, transport="https")
     lan_ip = "192.168.1.44"
     monkeypatch.setattr(
         main.psutil,
@@ -421,7 +425,6 @@ def test_pairing_endpoint_rejects_plain_http_from_the_lan(tmp_path, monkeypatch)
         response = client.post("/api/pair", json={"code": "482731"}, headers=headers)
 
     assert response.status_code == 403
-
 
 def test_pairing_accepts_the_controller_lan_ip_origin(tmp_path, monkeypatch) -> None:
     app = make_app(tmp_path)
@@ -446,6 +449,67 @@ def test_pairing_accepts_the_controller_lan_ip_origin(tmp_path, monkeypatch) -> 
 
     assert response.status_code == 200
     assert app.state.runtime.pairing.verify_token(response.json()["token"])
+
+
+def test_pairing_accepts_plain_http_from_the_lan_in_http_mode(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    lan_ip = "192.168.1.44"
+    monkeypatch.setattr(
+        main.psutil,
+        "net_if_addrs",
+        lambda: {
+            "Wi-Fi": [
+                SimpleNamespace(
+                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
+                )
+            ]
+        },
+    )
+    headers = {"host": f"{lan_ip}:8765", "origin": f"http://{lan_ip}:8765"}
+
+    with TestClient(
+        app, base_url=f"http://{lan_ip}:8765", client=("192.168.1.87", 50_000)
+    ) as client:
+        response = client.post("/api/pair", json={"code": "482731"}, headers=headers)
+
+    assert response.status_code == 200
+    assert app.state.runtime.pairing.verify_token(response.json()["token"])
+
+
+def test_remote_socket_accepts_plain_websocket_from_the_lan_in_http_mode(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    lan_ip = "192.168.1.44"
+    monkeypatch.setattr(
+        main.psutil,
+        "net_if_addrs",
+        lambda: {
+            "Wi-Fi": [
+                SimpleNamespace(
+                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
+                )
+            ]
+        },
+    )
+    headers = {"host": f"{lan_ip}:8765", "origin": f"http://{lan_ip}:8765"}
+
+    with TestClient(
+        app, base_url=f"http://{lan_ip}:8765", client=("192.168.1.87", 50_000)
+    ) as client:
+        response = client.post("/api/pair", json={"code": "482731"}, headers=headers)
+        token = response.json()["token"]
+        with client.websocket_connect("/ws/remote", headers=headers) as socket:
+            authenticate(socket, token, "req-http-lan")
+
+
+def test_pairing_code_endpoint_uses_https_remote_url_in_https_mode(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path, transport="https")
+    monkeypatch.setattr(main, "_default_route_ipv4_address", lambda: IPv4Address("192.168.1.42"))
+
+    with TestClient(app, client=("127.0.0.1", 50_000)) as client:
+        response = client.get("/api/pairing", headers={"host": "127.0.0.1:8765"})
+
+    assert response.status_code == 200
+    assert response.json()["remote_url"] == "https://192.168.1.42:8765/remote"
 
 def test_pairing_endpoint_rejects_non_ascii_digits_before_pairing(tmp_path) -> None:
     app = make_app(tmp_path)

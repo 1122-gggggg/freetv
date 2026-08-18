@@ -6,11 +6,11 @@ The controller uses JSON over WebSocket. Every client-to-server message includes
 
 | Endpoint | Binding | Intended client |
 |---|---|---|
-| `/ws/remote` | Literal controller LAN IP, matching `https` Host/Origin, `wss`, paired token | Paired phone Remote |
+| `/ws/remote` | Literal controller LAN IP, matching Host/Origin for the configured `server.transport`, paired token | Paired phone Remote |
 | `/ws/tv` | Loopback plus exact local TV Origin | Local TV Launcher |
-| `POST /api/pair` | Literal controller LAN IP, matching HTTPS browser Origin | One-time pairing exchange |
+| `POST /api/pair` | Literal controller LAN IP, matching browser Origin for the configured transport | One-time pairing exchange |
 | `GET /api/pairing` | Loopback only | Pairing-code display on TV |
-| `DELETE /api/remote-token` | Literal controller LAN IP, matching HTTPS browser Origin, `Authorization: Bearer <token>` | Revoke this paired Remote |
+| `DELETE /api/remote-token` | Literal controller LAN IP, matching browser Origin, `Authorization: Bearer <token>` | Revoke this paired Remote |
 
 ## Authentication
 
@@ -29,13 +29,13 @@ Successful authentication yields an acknowledgement, then the current `state`. I
 
 `/ws/remote`, `POST /api/pair`, `DELETE /api/remote-token`, and `GET /remote` enforce a strict LAN boundary. Peer connections must originate from loopback or a private IPv4 address on the same directly connected subnet as an eligible private IPv4 address of an operational Ethernet (802.3) or native Wi-Fi (802.11) adapter. Windows derives that adapter set with `Get-NetAdapter -Physical` filtered to those media types, then resolves the peer's best route and requires that it use the same currently operational physical adapter. Cellular, Bluetooth PAN, VPN, Hyper-V, WSL, and other virtual adapters are excluded; this route check rejects overlapping virtual subnets. Off-subnet private, global/public, link-local, non-loopback IPv6, and malformed peer addresses are rejected before authentication.
 
-Furthermore, `/ws/remote`, `POST /api/pair`, and `DELETE /api/remote-token` require `https://<controller-literal-IP>:<configured-port>` and `wss://<controller-literal-IP>:<configured-port>` with the same matching Host and browser Origin, where the controller host address must be loopback or the eligible physical-LAN IPv4 address. Plaintext LAN HTTP and `ws://` are rejected. This prevents an arbitrary DNS name from becoming a controller origin through DNS rebinding. Use the numeric URL printed by `start.ps1`, not a device name.
+Furthermore, `/ws/remote`, `POST /api/pair`, and `DELETE /api/remote-token` require `<scheme>://<controller-literal-IP>:<configured-port>` and the matching WebSocket scheme (`ws` or `wss`) with the same Host and browser Origin, where the controller host address must be loopback or the eligible physical-LAN IPv4 address. Scheme follows `server.transport`. Plaintext LAN HTTP and `ws://` are rejected only in HTTPS mode. This prevents an arbitrary DNS name from becoming a controller origin through DNS rebinding. Use the numeric URL printed by `start.ps1`, not a device name.
 
-`/ws/tv` has no remote token because it is a local display channel. It therefore requires both a loopback client address and an Origin exactly matching the local launcher authority. Production startup uses `https://127.0.0.1:<configured-port>` (or another loopback literal); plaintext is accepted only for the loopback development proxy. Cross-origin webpages cannot use it to issue local TV commands.
+`/ws/tv` has no remote token because it is a local display channel. It therefore requires both a loopback client address and an Origin exactly matching the local launcher authority. Production startup uses the configured transport at `127.0.0.1:<configured-port>` (or another loopback literal); the loopback development proxy still uses plaintext. Cross-origin webpages cannot use it to issue local TV commands.
 
 ## TLS bootstrap
 
-`setup.ps1` creates a private local CA and `start.ps1` regenerates its leaf certificate whenever the exact physical-LAN address set changes. The leaf has exactly `localhost`, loopback addresses, and eligible private IPv4 addresses from operational physical Wi-Fi/Ethernet interfaces as DNS/IP SANs; it never trusts hostnames, VPNs, or virtual adapters. Install `config\tls\pc-tv-box-local-ca.cer` on the TV Windows user and each phone, comparing the SHA-256 fingerprint printed by `start.ps1` before trusting it. The CA certificate is public DER; its private key remains local and ignored by Git.
+HTTPS mode only: `setup.ps1` creates a private local CA and `start.ps1` regenerates its leaf certificate whenever the exact physical-LAN address set changes. The leaf has exactly `localhost`, loopback addresses, and eligible private IPv4 addresses from operational physical Wi-Fi/Ethernet interfaces as DNS/IP SANs; it never trusts hostnames, VPNs, or virtual adapters. Install `config\tls\pc-tv-box-local-ca.cer` on the TV Windows user and each phone, comparing the SHA-256 fingerprint printed by `start.ps1` before trusting it. The CA certificate is public DER; its private key remains local and ignored by Git.
 
 ## Pairing
 

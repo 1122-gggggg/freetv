@@ -81,18 +81,27 @@ def test_validate_port_rejects_out_of_bounds_or_malformed() -> None:
 
 
 def test_parse_and_validate_remote_url_valid_https() -> None:
-    host, port = smoke.parse_and_validate_remote_url("https://192.168.1.42:8765/remote")
+    scheme, host, port = smoke.parse_and_validate_remote_url("https://192.168.1.42:8765/remote")
+    assert scheme == "https"
     assert host == "192.168.1.42"
     assert port == 8765
 
-    host_default, port_default = smoke.parse_and_validate_remote_url("https://10.0.0.5/remote")
+    scheme_default, host_default, port_default = smoke.parse_and_validate_remote_url(
+        "https://10.0.0.5/remote"
+    )
+    assert scheme_default == "https"
     assert host_default == "10.0.0.5"
     assert port_default == 443
 
+    scheme_http, host_http, port_http = smoke.parse_and_validate_remote_url(
+        "http://192.168.1.42:8765/remote"
+    )
+    assert (scheme_http, host_http, port_http) == ("http", "192.168.1.42", 8765)
+
 
 def test_parse_and_validate_remote_url_rejects_insecure_scheme_or_invalid_host() -> None:
-    with pytest.raises(smoke.SmokeValidationError, match="must be 'https'"):
-        smoke.parse_and_validate_remote_url("http://192.168.1.42:8765/remote")
+    with pytest.raises(smoke.SmokeValidationError, match="must be 'http' or 'https'"):
+        smoke.parse_and_validate_remote_url("ftp://192.168.1.42:8765/remote")
 
     with pytest.raises(smoke.SmokeValidationError, match="Invalid host address"):
         smoke.parse_and_validate_remote_url("https://controller.local:8765/remote")

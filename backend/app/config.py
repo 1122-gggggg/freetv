@@ -4,7 +4,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -15,6 +15,7 @@ class ServerSettings(BaseModel):
 
     host: str = "0.0.0.0"
     port: int = Field(default=8765, ge=1, le=65535)
+    transport: Literal["http", "https"] = "http"
 
 
 class ApplicationSettings(BaseModel):

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
+from app import main
 from app.config import Settings
 from app.main import create_app
 
@@ -34,3 +37,27 @@ def test_remote_route_rejects_an_untrusted_host() -> None:
         response = client.get("/remote", headers={"host": "attacker.example:8765"})
 
     assert response.status_code == 403
+
+
+def test_remote_route_serves_over_plain_http_to_a_lan_client(monkeypatch) -> None:
+    app = create_app(settings=Settings())
+    lan_ip = "192.168.1.44"
+    monkeypatch.setattr(main, "eligible_lan_interface_names", lambda: frozenset({"wi-fi"}))
+    monkeypatch.setattr(main, "is_eligible_lan_peer", lambda address: True)
+    monkeypatch.setattr(
+        main.psutil,
+        "net_if_addrs",
+        lambda: {
+            "Wi-Fi": [
+                SimpleNamespace(
+                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
+                )
+            ]
+        },
+    )
+
+    with TestClient(app, base_url="http://192.168.1.44:8765", client=("192.168.1.87", 50_000)) as client:
+        response = client.get("/remote", headers={"host": "192.168.1.44:8765"})
+
+    assert response.status_code == 200
+    assert 'id="root"' in response.text

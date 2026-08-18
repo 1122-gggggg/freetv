@@ -182,12 +182,14 @@ def create_app(
         return {
             "code": code,
             "expires_at": expires_at.isoformat(),
-            "remote_url": _pairing_remote_url(port),
+            "remote_url": _pairing_remote_url(port, app.state.settings.server.transport),
         }
 
     @app.post("/api/pair")
     async def pair_remote(request: Request, payload: PairRequest) -> dict[str, str]:
-        _require_trusted_remote_origin(request, app.state.settings.server.port)
+        _require_trusted_remote_origin(
+            request, app.state.settings.server.port, app.state.settings.server.transport
+        )
         client_host = _client_host(request)
         attempts: PairingAttemptGuard = app.state.pairing_attempts
         if not attempts.may_attempt(client_host):
@@ -219,7 +221,9 @@ def create_app(
 
     @app.delete("/api/remote-token", status_code=status.HTTP_204_NO_CONTENT)
     async def revoke_remote_token(request: Request) -> None:
-        _require_trusted_remote_origin(request, app.state.settings.server.port)
+        _require_trusted_remote_origin(
+            request, app.state.settings.server.port, app.state.settings.server.transport
+        )
         token = _bearer_token(request)
         if token is None or not app.state.runtime.pairing.verify_token(token):
             raise HTTPException(
@@ -235,7 +239,9 @@ def create_app(
     @app.websocket("/ws/remote")
     async def remote_socket(websocket: WebSocket) -> None:
         client_host = _websocket_host(websocket)
-        expected_origin_scheme = _remote_websocket_origin_scheme(websocket)
+        expected_origin_scheme = _remote_websocket_origin_scheme(
+            websocket, app.state.settings.server.transport
+        )
         if (
             not _is_trusted_remote_peer(client_host)
             or expected_origin_scheme is None
@@ -377,7 +383,9 @@ def create_app(
     @app.get("/remote")
     async def frontend_route(request: Request) -> FileResponse:
         if request.url.path == "/remote":
-            _require_trusted_remote_host(request, app.state.settings.server.port)
+            _require_trusted_remote_host(
+                request, app.state.settings.server.port, app.state.settings.server.transport
+            )
         index = frontend / "index.html"
         if not index.is_file():
             raise HTTPException(
@@ -555,35 +563,50 @@ def _require_trusted_remote_peer(request: Request) -> None:
         )
 
 
-def _require_trusted_remote_host(request: Request, port: int) -> None:
+def _require_trusted_remote_host(request: Request, port: int, transport: str) -> None:
     _require_trusted_remote_peer(request)
-    expected_scheme = _remote_request_origin_scheme(request)
+    expected_scheme = _remote_request_origin_scheme(request, transport)
     if expected_scheme is None or not _is_trusted_remote_host(
         request.headers.get("host"),
         port,
         default_port=_default_port_for_scheme(expected_scheme),
     ):
+        detail = (
+            "Remote access requires HTTPS at this controller's LAN IP."
+            if transport == "https"
+            else "Remote access requires this controller's LAN IP."
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Remote access requires HTTPS at this controller's LAN IP.",
+            detail=detail,
         )
 
 
-def _require_trusted_remote_origin(request: Request, port: int) -> None:
+def _require_trusted_remote_origin(request: Request, port: int, transport: str) -> None:
     _require_trusted_remote_peer(request)
-    expected_scheme = _remote_request_origin_scheme(request)
+    expected_scheme = _remote_request_origin_scheme(request, transport)
     if expected_scheme is None or not _has_trusted_remote_origin(
         request.headers.get("origin"),
         request.headers.get("host"),
         port,
         expected_scheme=expected_scheme,
     ):
+        detail = (
+            "Remote access requires HTTPS at this controller's LAN IP."
+            if transport == "https"
+            else "Remote access requires this controller's LAN IP."
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Remote access requires HTTPS at this controller's LAN IP.",
+            detail=detail,
         )
 
-def _remote_request_origin_scheme(request: Request) -> str | None:
+
+def _remote_request_origin_scheme(request: Request, transport: str) -> str | None:
+    if transport == "http":
+        if request.url.scheme in {"http", "https"}:
+            return request.url.scheme
+        return None
     if request.url.scheme == "https":
         return "https"
     if request.url.scheme == "http" and _is_loopback(_client_host(request)):
@@ -591,8 +614,14 @@ def _remote_request_origin_scheme(request: Request) -> str | None:
     return None
 
 
-def _remote_websocket_origin_scheme(websocket: WebSocket) -> str | None:
+def _remote_websocket_origin_scheme(websocket: WebSocket, transport: str) -> str | None:
     scheme = websocket.scope.get("scheme")
+    if transport == "http":
+        if scheme == "ws":
+            return "http"
+        if scheme == "wss":
+            return "https"
+        return None
     if scheme == "wss":
         return "https"
     if scheme == "ws" and _is_loopback(_websocket_host(websocket)):
@@ -698,11 +727,11 @@ def _normalized_authority(
     return host.casefold(), effective_port
 
 
-def _pairing_remote_url(port: int) -> str | None:
+def _pairing_remote_url(port: int, scheme: str) -> str | None:
     address = _default_route_ipv4_address() or _first_lan_ipv4_address()
     if address is None:
         return None
-    return f"https://{address}:{port}/remote"
+    return f"{scheme}://{address}:{port}/remote"
 
 
 def _default_route_ipv4_address() -> IPv4Address | None:

@@ -40,14 +40,14 @@ QR pairing is the primary endpoint-discovery path. A code-only QR is never assig
 
 ## Command flow
 
-1. A Remote loads `https://<controller-literal-IP>:<port>/remote`; the server rejects plaintext LAN access, arbitrary Host names, and mismatched browser Origins.
-2. The Remote connects with `wss://`, has bounded pre-authentication admission, and must authenticate with a valid token before any command, pointer, or text-input message.
+1. A Remote loads `<scheme>://<controller-literal-IP>:<port>/remote` using the configured `server.transport`; the server rejects arbitrary Host names and mismatched browser Origins. Plaintext LAN access is rejected only in HTTPS mode.
+2. The Remote connects with `ws://` or `wss://` matching that transport, has bounded pre-authentication admission, and must authenticate with a valid token before any command, pointer, or text-input message.
 3. `CommandBus` selects an owned application, mpv, input, power, or volume action.
 4. The bus updates `StateStore` only after the action outcome is known.
 5. `ConnectionRegistry` broadcasts a new `state` message only when an observable state value changed, filtering invalid Remote sessions first.
 6. The source Remote receives an `ack` for each request ID.
 
-The TV socket accepts only `CommandMessage`, requires both a loopback client address and the exact local TV Origin, and cannot pair, send text, or move the pointer. Production startup opens it through HTTPS; plaintext is retained only for the loopback development proxy.
+The TV socket accepts only `CommandMessage`, requires both a loopback client address and the exact local TV Origin, and cannot pair, send text, or move the pointer. Production startup uses the configured transport; loopback plaintext remains available for the development proxy.
 
 ## Ownership and Home
 
@@ -71,7 +71,9 @@ Browser lookup, process launch, mpv IPC, volume access, named-pipe input, and Wi
 
 ## Remote transport security
 
-`start.ps1` generates or reuses a CA under ignored `config\tls`, refreshes its leaf certificate when the controller IP changes, and starts Uvicorn with that certificate and key. The CA uses a DER `.cer` file so Windows and mobile OS certificate installers can consume it. It must be trusted separately on the TV Windows user and every Remote phone; the script prints its SHA-256 fingerprint for an out-of-band comparison. No plaintext LAN Remote route is available after production startup.
+Default `server.transport` is `"http"`: the controller accepts plaintext LAN Remote traffic at the controller's literal LAN IP with pairing-token auth and Host/Origin checks. The mDNS advertiser starts only in HTTPS mode because the native app consumes its `https_port` TXT record.
+
+Set `"transport": "https"` to restore encrypted Remote. In that mode `start.ps1` generates or reuses a CA under ignored `config\tls`, refreshes its leaf certificate when the controller IP changes, and starts Uvicorn with that certificate and key. The CA uses a DER `.cer` file so Windows and mobile OS certificate installers can consume it. It must be trusted separately on the TV Windows user and every Remote phone; the script prints its SHA-256 fingerprint for an out-of-band comparison.
 
 ## Extension points
 

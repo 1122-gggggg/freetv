@@ -47,6 +47,11 @@ function Get-StartupSettings {
 
     $HealthHost = '127.0.0.1'
 
+    $Transport = [string](Get-OptionalSetting -Target $Server -PropertyName 'transport' -Default 'http')
+    if ($Transport -notin @('http', 'https')) {
+        throw "Configured server transport must be 'http' or 'https'."
+    }
+
     $Applications = Get-OptionalSetting -Target $Settings -PropertyName 'applications'
     $ConfiguredEdgePath = ''
     if ($null -ne $Applications) {
@@ -57,6 +62,7 @@ function Get-StartupSettings {
         Port               = $Port
         BindHost           = $BindHost
         HealthHost         = $HealthHost
+        Transport          = $Transport
         ConfiguredEdgePath = $ConfiguredEdgePath
     }
 }
@@ -127,14 +133,16 @@ function Get-PairingRemoteUrl {
         [PSObject]$PairingResponse,
 
         [Parameter(Mandatory = $true)]
-        [int]$Port
+        [int]$Port,
+
+        [string]$Scheme = 'http'
     )
 
     $RemoteUrl = [string](Get-OptionalSetting -Target $PairingResponse -PropertyName 'remote_url' -Default '')
     if (-not [string]::IsNullOrWhiteSpace($RemoteUrl)) {
         return $RemoteUrl
     }
-    return "https://<PC-LAN-IP>:$Port/remote"
+    return "${Scheme}://<PC-LAN-IP>:$Port/remote"
 }
 
 function Get-AutostartTaskSpec {
