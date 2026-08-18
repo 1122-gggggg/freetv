@@ -7,11 +7,12 @@ from app.commands.ports import (
     ApplicationPort,
     CommandExecutionError,
     InputPort,
+    NewsPort,
     PlayerPort,
     PowerPort,
     VolumePort,
 )
-from app.protocol import Command, PointerActionMessage, TextInputMessage
+from app.protocol import Command, PointerActionMessage, SearchVideoMessage, TextInputMessage
 from app.state import ActiveApp, ControllerState, LauncherTile, StateStore
 
 
@@ -29,6 +30,7 @@ _TILE_COMMANDS: dict[LauncherTile, Command] = {
     LauncherTile.NETFLIX: Command.OPEN_NETFLIX,
     LauncherTile.LIVE_TV: Command.OPEN_LIVE_TV,
     LauncherTile.BROWSER: Command.OPEN_BROWSER,
+    LauncherTile.NEWS: Command.OPEN_NEWS,
 }
 
 _LAUNCH_TARGETS: dict[Command, ActiveApp] = {
@@ -62,6 +64,7 @@ class CommandBus:
         volume: VolumePort,
         input_controller: InputPort,
         power: PowerPort,
+        news: NewsPort,
     ) -> None:
         self._state = state
         self._applications = applications
@@ -69,8 +72,8 @@ class CommandBus:
         self._volume = volume
         self._input = input_controller
         self._power = power
+        self._news = news
         self._command_lock = asyncio.Lock()
-
     async def dispatch_command(self, command: Command) -> CommandOutcome:
         async with self._command_lock:
             try:
@@ -107,6 +110,38 @@ class CommandBus:
                 self._require_external_input_target(await self._state.snapshot())
                 await self._input.text(message.text)
                 return await self._passive_success()
+            except CommandExecutionError as error:
+                return await self._failure(error)
+            except Exception:
+                return await self._unknown_failure()
+
+    async def dispatch_search(self, message: SearchVideoMessage) -> CommandOutcome:
+        async with self._command_lock:
+            try:
+                current = await self._state.snapshot()
+                if current.active_app is ActiveApp.LIVE_TV:
+                    await self._player.close()
+                    try:
+                        await self._applications.search_youtube(message.query)
+                    except Exception:
+                        await self._applications.return_home()
+                        await self._state.update(
+                            active_app=ActiveApp.LAUNCHER,
+                            channel_number=None,
+                            channel_name=None,
+                            status_message=None,
+                        )
+                        raise
+                else:
+                    await self._applications.search_youtube(message.query)
+                state = await self._state.update(
+                    active_app=ActiveApp.YOUTUBE,
+                    channel_number=None,
+                    channel_name=None,
+                    error_message=None,
+                    status_message=None,
+                )
+                return CommandOutcome(True, state)
             except CommandExecutionError as error:
                 return await self._failure(error)
             except Exception:
@@ -171,6 +206,32 @@ class CommandBus:
                 status_message=None,
             )
             return CommandOutcome(True, state)
+        if command is Command.OPEN_NEWS:
+            channel = self._news.current
+            if current.active_app is ActiveApp.LIVE_TV:
+                await self._player.close()
+                try:
+                    await self._applications.open_news(channel.url)
+                except Exception:
+                    await self._applications.return_home()
+                    await self._state.update(
+                        active_app=ActiveApp.LAUNCHER,
+                        channel_number=None,
+                        channel_name=None,
+                        status_message=None,
+                    )
+                    raise
+            else:
+                await self._applications.open_news(channel.url)
+            state = await self._state.update(
+                active_app=ActiveApp.NEWS,
+                channel_number=channel.number,
+                channel_name=channel.name,
+                error_message=None,
+                status_message=None,
+            )
+            return CommandOutcome(True, state)
+
 
         if command in {Command.NAV_UP, Command.NAV_DOWN, Command.NAV_LEFT, Command.NAV_RIGHT}:
             return await self._navigate(current, command)
@@ -200,20 +261,29 @@ class CommandBus:
             return await self._passive_success()
 
         if command in {Command.CHANNEL_UP, Command.CHANNEL_DOWN}:
-            if current.active_app is not ActiveApp.LIVE_TV:
-                raise CommandExecutionError(
-                    "live_tv_not_active", "Open Live TV before changing channels."
-                )
             direction = 1 if command is Command.CHANNEL_UP else -1
-            channel_number, channel_name = await self._player.change_channel(direction)
-            state = await self._state.update(
-                channel_number=channel_number,
-                channel_name=channel_name,
-                error_message=None,
-                status_message=None,
+            if current.active_app is ActiveApp.NEWS:
+                channel = self._news.move(direction)
+                await self._applications.open_news(channel.url)
+                state = await self._state.update(
+                    channel_number=channel.number,
+                    channel_name=channel.name,
+                    error_message=None,
+                    status_message=None,
+                )
+                return CommandOutcome(True, state)
+            if current.active_app is ActiveApp.LIVE_TV:
+                channel_number, channel_name = await self._player.change_channel(direction)
+                state = await self._state.update(
+                    channel_number=channel_number,
+                    channel_name=channel_name,
+                    error_message=None,
+                    status_message=None,
+                )
+                return CommandOutcome(True, state)
+            raise CommandExecutionError(
+                "channel_source_not_active", "Open News or Live TV before changing channels."
             )
-            return CommandOutcome(True, state)
-
         if command is Command.VOLUME_UP:
             level, muted = await self._volume.increase()
             return CommandOutcome(True, await self._success_state(volume=level, muted=muted))
@@ -226,7 +296,12 @@ class CommandBus:
             level, muted = await self._volume.toggle_mute()
             return CommandOutcome(True, await self._success_state(volume=level, muted=muted))
 
-        if current.active_app in {ActiveApp.YOUTUBE, ActiveApp.NETFLIX, ActiveApp.BROWSER}:
+        if current.active_app in {
+            ActiveApp.YOUTUBE,
+            ActiveApp.NETFLIX,
+            ActiveApp.BROWSER,
+            ActiveApp.NEWS,
+        }:
             await self._applications.forward_command(command)
             return await self._passive_success()
         raise CommandExecutionError(
@@ -235,7 +310,12 @@ class CommandBus:
 
     async def _navigate(self, current: ControllerState, command: Command) -> CommandOutcome:
         if current.active_app is not ActiveApp.LAUNCHER:
-            if current.active_app in {ActiveApp.YOUTUBE, ActiveApp.NETFLIX, ActiveApp.BROWSER}:
+            if current.active_app in {
+                ActiveApp.YOUTUBE,
+                ActiveApp.NETFLIX,
+                ActiveApp.BROWSER,
+                ActiveApp.NEWS,
+            }:
                 await self._applications.forward_command(command)
                 return await self._passive_success()
             raise CommandExecutionError(
@@ -247,7 +327,12 @@ class CommandBus:
         return CommandOutcome(True, state)
 
     def _require_external_input_target(self, current: ControllerState) -> None:
-        if current.active_app not in {ActiveApp.YOUTUBE, ActiveApp.NETFLIX, ActiveApp.BROWSER}:
+        if current.active_app not in {
+            ActiveApp.YOUTUBE,
+            ActiveApp.NETFLIX,
+            ActiveApp.BROWSER,
+            ActiveApp.NEWS,
+        }:
             raise CommandExecutionError(
                 "input_target_not_active",
                 "Open a controller-managed browser before using remote input.",

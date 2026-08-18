@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
+if TYPE_CHECKING:
+    from app.player.channels import Channel
 from app.protocol import Command, PointerActionMessage
 from app.state import ActiveApp
 
@@ -54,3 +56,10 @@ class InputPort(Protocol):
 
 class PowerPort(Protocol):
     async def sleep(self) -> None: ...
+
+
+class NewsPort(Protocol):
+    @property
+    def current(self) -> Channel: ...
+
+    def move(self, direction: int) -> Channel: ...

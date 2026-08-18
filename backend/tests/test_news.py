@@ -102,3 +102,43 @@ def test_news_manager_wraps_channels(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="direction must be -1 or 1"):
         manager.move(0)
+
+
+def test_controller_build_news_loads_example_when_config_absent(monkeypatch, tmp_path: Path) -> None:
+    from app.config import Settings
+    from app.controller import _build_news
+    import app.controller as controller_module
+
+    fake_project_root = tmp_path
+    (fake_project_root / "config").mkdir()
+    example_path = fake_project_root / "config" / "news.example.json"
+    example_path.write_text(json.dumps([
+        {"id": "dw-news", "number": 1, "name": "DW News", "url": "https://www.youtube.com/@dwnews/live", "enabled": True}
+    ]), encoding="utf-8")
+    monkeypatch.setattr(controller_module, "project_root", lambda: fake_project_root)
+
+    news = _build_news(Settings())
+    assert isinstance(news, NewsChannelManager)
+    assert news.current.id == "dw-news"
+
+
+def test_controller_build_news_returns_unavailable_when_invalid(monkeypatch, tmp_path: Path) -> None:
+    from app.config import Settings
+    from app.controller import _build_news, UnavailableNews
+    import app.controller as controller_module
+    from app.commands.ports import CommandExecutionError
+
+    fake_project_root = tmp_path
+    (fake_project_root / "config").mkdir()
+    news_path = fake_project_root / "config" / "news.json"
+    news_path.write_text("invalid json", encoding="utf-8")
+    monkeypatch.setattr(controller_module, "project_root", lambda: fake_project_root)
+
+    news = _build_news(Settings())
+    assert isinstance(news, UnavailableNews)
+    with pytest.raises(CommandExecutionError) as err:
+        _ = news.current
+    assert err.value.code == "news_not_configured"
+    with pytest.raises(CommandExecutionError) as err:
+        news.move(1)
+    assert err.value.code == "news_not_configured"

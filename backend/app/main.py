@@ -25,6 +25,7 @@ from app.protocol import (
     CommandMessage,
     ErrorMessage,
     PointerActionMessage,
+    SearchVideoMessage,
     TextInputMessage,
     parse_client_message,
 )
@@ -168,6 +169,7 @@ def create_app(
             "status": "ok",
             "backend": True,
             "frontend": resolved_frontend_available,
+            "chrome_available": bool(app.state.capabilities.get("chrome_available", False)),
             "brave_available": bool(app.state.capabilities.get("brave_available", False)),
             "edge_available": bool(app.state.capabilities.get("edge_available", False)),
             "mpv_available": bool(app.state.capabilities.get("mpv_available", False)),
@@ -425,7 +427,7 @@ async def _handle_remote_message(
 async def _dispatch_and_broadcast(
     app: FastAPI,
     websocket: WebSocket,
-    message: CommandMessage | PointerActionMessage | TextInputMessage,
+    message: CommandMessage | PointerActionMessage | TextInputMessage | SearchVideoMessage,
     *,
     session: AuthenticatedRemoteSession | None = None,
 ) -> bool:
@@ -441,6 +443,9 @@ async def _dispatch_and_broadcast(
         elif isinstance(message, PointerActionMessage):
             outcome = await app.state.runtime.bus.dispatch_pointer(message)
             command_name = message.action.value
+        elif isinstance(message, SearchVideoMessage):
+            outcome = await app.state.runtime.bus.dispatch_search(message)
+            command_name = "search_video"
         else:
             outcome = await app.state.runtime.bus.dispatch_text(message)
             command_name = "text_input"

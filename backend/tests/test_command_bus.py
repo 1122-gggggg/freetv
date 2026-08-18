@@ -5,19 +5,34 @@ from dataclasses import dataclass, field
 
 from app.commands.bus import CommandBus
 from app.commands.ports import CommandExecutionError
-from app.protocol import Command, PointerAction, PointerActionMessage, TextInputMessage
+from app.player.channels import Channel
+from app.protocol import (
+    Command,
+    PointerAction,
+    PointerActionMessage,
+    SearchVideoMessage,
+    TextInputMessage,
+)
 from app.state import ActiveApp, ControllerState, StateStore
 
 
 @dataclass
 class FakeApplications:
     opened: list[ActiveApp] = field(default_factory=list)
+    opened_news: list[str] = field(default_factory=list)
+    searches: list[str] = field(default_factory=list)
     home_calls: int = 0
     forwarded: list[Command] = field(default_factory=list)
     input_targets: list[ActiveApp] = field(default_factory=list)
 
     async def open(self, app: ActiveApp) -> None:
         self.opened.append(app)
+    async def open_news(self, url: str) -> None:
+        self.opened_news.append(url)
+
+    async def search_youtube(self, query: str) -> None:
+        self.searches.append(query)
+
 
     async def return_home(self) -> None:
         self.home_calls += 1
@@ -114,8 +129,37 @@ class FakePower:
     async def sleep(self) -> None:
         self.sleep_calls += 1
 
+@dataclass
+class FakeNews:
+    channels: list[Channel] = field(
+        default_factory=lambda: [
+            Channel(
+                id="dw-news",
+                number=1,
+                name="DW News",
+                url="https://www.youtube.com/@dwnews/live",
+            ),
+            Channel(
+                id="aljazeera-english",
+                number=2,
+                name="Al Jazeera English",
+                url="https://www.youtube.com/@aljazeeraenglish/live",
+            ),
+        ]
+    )
+    current_index: int = 0
 
-def make_bus() -> tuple[CommandBus, FakeApplications, FakePlayer, FakeInput]:
+    @property
+    def current(self) -> Channel:
+        return self.channels[self.current_index]
+
+    def move(self, direction: int) -> Channel:
+        self.current_index = (self.current_index + direction) % len(self.channels)
+        return self.current
+
+
+
+def make_bus(news: FakeNews | None = None) -> tuple[CommandBus, FakeApplications, FakePlayer, FakeInput]:
     applications = FakeApplications()
     player = FakePlayer()
     input_controller = FakeInput()
@@ -126,6 +170,7 @@ def make_bus() -> tuple[CommandBus, FakeApplications, FakePlayer, FakeInput]:
         volume=FakeVolume(),
         input_controller=input_controller,
         power=FakePower(),
+        news=news or FakeNews(),
     )
     return bus, applications, player, input_controller
 
@@ -217,6 +262,7 @@ def test_failed_application_transition_from_live_tv_returns_to_launcher() -> Non
             volume=FakeVolume(),
             input_controller=FakeInput(),
             power=FakePower(),
+            news=FakeNews(),
         )
         await bus.dispatch_command(Command.OPEN_LIVE_TV)
 
@@ -290,6 +336,7 @@ def test_commands_are_serialized_across_paired_remotes() -> None:
             volume=FakeVolume(),
             input_controller=FakeInput(),
             power=FakePower(),
+            news=FakeNews(),
         )
 
         first = asyncio.create_task(bus.dispatch_command(Command.OPEN_YOUTUBE))
@@ -344,6 +391,7 @@ def test_pointer_and_text_wait_for_an_in_progress_application_transition() -> No
             volume=FakeVolume(),
             input_controller=input_controller,
             power=FakePower(),
+            news=FakeNews(),
         )
         pointer = PointerActionMessage(
             version=1,
@@ -377,3 +425,186 @@ def test_pointer_and_text_wait_for_an_in_progress_application_transition() -> No
         assert applications.input_targets == [ActiveApp.BROWSER, ActiveApp.BROWSER]
 
     asyncio.run(scenario())
+
+def test_open_news_sets_channel_and_active_app() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus()
+        outcome = await bus.dispatch_command(Command.OPEN_NEWS)
+
+        assert outcome.success
+        assert outcome.state.active_app is ActiveApp.NEWS
+        assert outcome.state.channel_number == 1
+        assert outcome.state.channel_name == "DW News"
+        assert applications.opened_news == ["https://www.youtube.com/@dwnews/live"]
+
+    asyncio.run(scenario())
+
+
+def test_channel_up_on_news_opens_next_official_url() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus()
+        await bus.dispatch_command(Command.OPEN_NEWS)
+        outcome = await bus.dispatch_command(Command.CHANNEL_UP)
+
+        assert outcome.success
+        assert outcome.state.active_app is ActiveApp.NEWS
+        assert outcome.state.channel_number == 2
+        assert outcome.state.channel_name == "Al Jazeera English"
+        assert applications.opened_news == [
+            "https://www.youtube.com/@dwnews/live",
+            "https://www.youtube.com/@aljazeeraenglish/live",
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_channel_down_on_news_opens_previous_channel() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus()
+        await bus.dispatch_command(Command.OPEN_NEWS)
+        outcome = await bus.dispatch_command(Command.CHANNEL_DOWN)
+
+        assert outcome.success
+        assert outcome.state.active_app is ActiveApp.NEWS
+        assert outcome.state.channel_number == 2
+        assert outcome.state.channel_name == "Al Jazeera English"
+        assert applications.opened_news == [
+            "https://www.youtube.com/@dwnews/live",
+            "https://www.youtube.com/@aljazeeraenglish/live",
+        ]
+
+    asyncio.run(scenario())
+
+
+def test_channel_up_on_youtube_is_rejected() -> None:
+    async def scenario() -> None:
+        bus, _, _, _ = make_bus()
+        await bus.dispatch_command(Command.OPEN_YOUTUBE)
+        outcome = await bus.dispatch_command(Command.CHANNEL_UP)
+
+        assert not outcome.success
+        assert outcome.error_code == "channel_source_not_active"
+        assert outcome.message == "Open News or Live TV before changing channels."
+
+    asyncio.run(scenario())
+
+
+def test_search_video_opens_youtube_results() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus()
+        message = SearchVideoMessage(
+            version=1,
+            type="search_video",
+            request_id="search-1",
+            query="cat videos",
+        )
+        outcome = await bus.dispatch_search(message)
+
+        assert outcome.success
+        assert outcome.state.active_app is ActiveApp.YOUTUBE
+        assert outcome.state.channel_number is None
+        assert outcome.state.channel_name is None
+        assert applications.searches == ["cat videos"]
+
+    asyncio.run(scenario())
+
+
+def test_open_news_when_live_tv_active_stops_player() -> None:
+    async def scenario() -> None:
+        bus, applications, player, _ = make_bus()
+        await bus.dispatch_command(Command.OPEN_LIVE_TV)
+        assert player.opened == 1
+        assert player.closed == 0
+
+        outcome = await bus.dispatch_command(Command.OPEN_NEWS)
+        assert outcome.success
+        assert player.closed == 1
+        assert outcome.state.active_app is ActiveApp.NEWS
+        assert applications.opened_news == ["https://www.youtube.com/@dwnews/live"]
+
+    asyncio.run(scenario())
+
+
+def test_search_video_when_live_tv_active_stops_player() -> None:
+    async def scenario() -> None:
+        bus, applications, player, _ = make_bus()
+        await bus.dispatch_command(Command.OPEN_LIVE_TV)
+        assert player.opened == 1
+        assert player.closed == 0
+
+        message = SearchVideoMessage(
+            version=1,
+            type="search_video",
+            request_id="search-2",
+            query="relaxing music",
+        )
+        outcome = await bus.dispatch_search(message)
+        assert outcome.success
+        assert player.closed == 1
+        assert outcome.state.active_app is ActiveApp.YOUTUBE
+        assert applications.searches == ["relaxing music"]
+
+    asyncio.run(scenario())
+
+def test_unavailable_news_raises_news_not_configured_on_open_news() -> None:
+    async def scenario() -> None:
+        from app.controller import UnavailableNews
+
+        news = UnavailableNews("No enabled news channels are configured. Update config/news.json.")
+        bus, applications, _, _ = make_bus(news=news)
+        outcome = await bus.dispatch_command(Command.OPEN_NEWS)
+
+        assert not outcome.success
+        assert outcome.error_code == "news_not_configured"
+        assert outcome.message == "No enabled news channels are configured. Update config/news.json."
+        assert applications.opened_news == []
+
+    asyncio.run(scenario())
+
+
+def test_external_navigation_forwarded_when_news_active() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus()
+        await bus.dispatch_command(Command.OPEN_NEWS)
+
+        result = await bus.dispatch_command(Command.NAV_DOWN)
+
+        assert result.success
+        assert applications.forwarded == [Command.NAV_DOWN]
+        assert not result.state_changed
+        assert result.state.active_app is ActiveApp.NEWS
+
+    asyncio.run(scenario())
+
+
+def test_pointer_and_text_accepted_when_news_active() -> None:
+    async def scenario() -> None:
+        bus, applications, _, input_controller = make_bus()
+        pointer = PointerActionMessage(
+            version=1,
+            type="pointer",
+            request_id="pointer-news-1",
+            action=PointerAction.MOVE,
+            dx=10,
+            dy=20,
+        )
+        text = TextInputMessage(
+            version=1,
+            type="text_input",
+            request_id="text-news-1",
+            text="news query",
+        )
+
+        await bus.dispatch_command(Command.OPEN_NEWS)
+
+        pointer_result = await bus.dispatch_pointer(pointer)
+        text_result = await bus.dispatch_text(text)
+
+        assert pointer_result.success and text_result.success
+        assert not pointer_result.state_changed and not text_result.state_changed
+        assert input_controller.pointers == [pointer]
+        assert input_controller.texts == ["news query"]
+        assert applications.input_targets == [ActiveApp.NEWS, ActiveApp.NEWS]
+
+    asyncio.run(scenario())
+
