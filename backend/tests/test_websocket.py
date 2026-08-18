@@ -434,6 +434,53 @@ def test_pairing_code_endpoint_includes_lan_remote_url(tmp_path, monkeypatch) ->
     assert response.json()["remote_url"] == "http://192.168.1.42:8765/remote"
 
 
+def test_pairing_code_endpoint_prefers_public_tunnel_origin(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+    monkeypatch.setattr(main, "_default_route_ipv4_address", lambda: IPv4Address("192.168.1.42"))
+
+    with TestClient(app, client=("127.0.0.1", 50_000)) as client:
+        response = client.get("/api/pairing", headers={"host": "127.0.0.1:8765"})
+
+    assert response.status_code == 200
+    assert response.json()["remote_url"] == "https://abc.trycloudflare.com/remote"
+
+
+def test_pairing_accepts_public_tunnel_origin_from_loopback(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+    headers = {
+        "host": "abc.trycloudflare.com",
+        "origin": "https://abc.trycloudflare.com",
+    }
+
+    with TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 50_000)) as client:
+        response = client.post("/api/pair", json={"code": "482731"}, headers=headers)
+
+    assert response.status_code == 200
+    assert app.state.runtime.pairing.verify_token(response.json()["token"])
+
+
+def test_pairing_rejects_unrelated_public_host_when_tunnel_is_configured(
+    tmp_path, monkeypatch
+) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+    headers = {"host": "evil.example", "origin": "https://evil.example"}
+
+    with TestClient(app, client=("127.0.0.1", 50_000)) as client:
+        response = client.post("/api/pair", json={"code": "482731"}, headers=headers)
+
+    assert response.status_code == 403
+
+
+def test_parse_cloudflared_origin_from_log_line() -> None:
+    line = "2026-08-19 INF |  https://abc.trycloudflare.com  |"
+    assert main.parse_cloudflared_origin(line) == "https://abc.trycloudflare.com"
+    assert main.parse_cloudflared_origin("https://api.trycloudflare.com metrics") is None
+    assert main.parse_cloudflared_origin("no url here") is None
+
+
 
 def test_pairing_endpoint_rejects_an_oversized_body_before_validation(tmp_path) -> None:
     app = make_app(tmp_path)

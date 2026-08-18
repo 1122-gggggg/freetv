@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    [switch]$NoTunnel
 )
 
 Set-StrictMode -Version Latest
@@ -269,6 +270,44 @@ if (-not $Health -or $Health.status -ne 'ok' -or $Health.backend -ne $true -or $
 if ($null -eq $PairingInfo) {
     throw "Controller did not provide pairing details at $PairingUrl."
 }
+
+$TunnelOriginFile = Join-Path $Root 'config\tunnel-origin.txt'
+if (-not $NoTunnel) {
+    $Cloudflared = Get-Command cloudflared -ErrorAction SilentlyContinue
+    if (-not $Cloudflared) {
+        Write-Warning 'cloudflared was not found. Off-LAN Remote stays unavailable. Install with: winget install Cloudflare.cloudflared'
+    } else {
+        $TunnelLog = Join-Path $Root 'config\cloudflared.log'
+        $TunnelOut = Join-Path $Root 'config\cloudflared.out.log'
+        New-Item -ItemType Directory -Force -Path (Join-Path $Root 'config') | Out-Null
+        if (Test-Path $TunnelLog) { Remove-Item -LiteralPath $TunnelLog -Force }
+        if (Test-Path $TunnelOut) { Remove-Item -LiteralPath $TunnelOut -Force }
+        Start-Process -FilePath $Cloudflared.Source -ArgumentList @('tunnel', '--url', "http://${HealthHost}:$Port") -RedirectStandardOutput $TunnelOut -RedirectStandardError $TunnelLog -WindowStyle Hidden | Out-Null
+        $TunnelDeadline = (Get-Date).AddSeconds(30)
+        $PublicOrigin = $null
+        do {
+            if ((Test-Path $TunnelLog) -or (Test-Path $TunnelOut)) {
+                $LogText = ''
+                if (Test-Path $TunnelLog) { $LogText += Get-Content -Raw -Path $TunnelLog -ErrorAction SilentlyContinue }
+                if (Test-Path $TunnelOut) { $LogText += Get-Content -Raw -Path $TunnelOut -ErrorAction SilentlyContinue }
+                if ($LogText -match 'https://(?!api\.)[A-Za-z0-9.-]+\.trycloudflare\.com') {
+                    $PublicOrigin = $Matches[0].TrimEnd('/')
+                    break
+                }
+            }
+            Start-Sleep -Milliseconds 400
+        } while ((Get-Date) -lt $TunnelDeadline)
+        if ($PublicOrigin) {
+            Set-Content -Path $TunnelOriginFile -Value $PublicOrigin -Encoding utf8
+            $env:PC_TV_PUBLIC_ORIGIN = $PublicOrigin
+            $PairingInfo = Invoke-RestMethod -Uri $PairingUrl -TimeoutSec 15
+            Write-Host "Cloudflare Tunnel: $PublicOrigin"
+        } else {
+            Write-Warning 'cloudflared did not print a trycloudflare.com URL in 30s. Phone Remote stays on the LAN URL.'
+        }
+    }
+}
+
 $RemoteUrl = Get-PairingRemoteUrl -PairingResponse $PairingInfo -Port $Port -Scheme $Scheme
 
 $LocalUrl = "${Scheme}://${HealthHost}:$Port/tv"
@@ -279,8 +318,10 @@ if ($Transport -eq 'https') {
     Write-Host "Local TLS CA: $($Tls.ca_certificate)"
     Write-Host "CA SHA-256: $($Tls.ca_sha256)"
     Write-Warning 'Install and trust this local CA on each phone before opening the HTTPS Remote; see docs\WINDOWS_SETUP.md.'
+} elseif ($RemoteUrl -like 'https://*.trycloudflare.com/*') {
+    Write-Host 'Transport: HTTP locally; phone uses the Cloudflare HTTPS URL. Rescan the QR after each restart.'
 } else {
-    Write-Host "Transport: HTTP (private LAN only). Set server.transport to 'https' in config\settings.json for encrypted Remote."
+    Write-Host "Transport: HTTP (private LAN only). Install cloudflared for off-LAN Remote."
 }
 
 if (-not $NoBrowser) {

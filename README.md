@@ -9,7 +9,7 @@ A local Windows 11 controller that turns an HDMI-connected PC into a TV-style la
 - Google Chrome for YouTube and News (launched in fullscreen kiosk mode with store AdBlock in an isolated TV profile).
 - Microsoft Edge for Netflix. Windows 11 normally installs it.
 - [mpv](https://mpv.io/installation/) for Live TV.
-- Laptop/PC and phone on the same private LAN/Wi-Fi.
+- Laptop/PC on a private LAN. Phone may be on another network if `cloudflared` is installed.
 - Native Android builds additionally require Android Studio, its Android SDK, and a JDK. Native iOS builds require macOS/Xcode or an authenticated Expo EAS build account.
 
 ## Installation
@@ -58,13 +58,13 @@ Empty browser fields use the standard Windows locations where available. The gen
 .\scripts\start.ps1
 ```
 
-The script starts the controller on port `8765`, waits for `/api/health`, then opens the local TV Launcher in Edge full-screen kiosk mode when Edge is available. It falls back to the default browser with a warning otherwise. On the first Windows Firewall prompt, allow the controller only on **Private** networks; do not create port-forwarding rules. In HTTPS mode it also creates/refreshes the local TLS certificate for current LAN IPs.
+The script starts the controller on port `8765`, waits for `/api/health`, then opens the local TV Launcher in Edge full-screen kiosk mode when Edge is available. If `cloudflared` is on PATH it also starts a Cloudflare quick tunnel and reprints pairing with that HTTPS URL. On the first Windows Firewall prompt, allow the controller only on **Private** networks; do not create port-forwarding rules.
 
 - TV Launcher: `http://127.0.0.1:8765/tv` (or `https://` when `server.transport` is `"https"`)
-- Phone Remote: `http://<PC-LAN-IP>:8765/remote`
+- Phone Remote: `https://<id>.trycloudflare.com/remote` when the tunnel is up, otherwise `http://<PC-LAN-IP>:8765/remote`
 - Health: `http://127.0.0.1:8765/api/health`
 
-Use the exact numeric LAN address printed by the script. The controller intentionally rejects device names and arbitrary hostnames for Remote traffic.
+Scan the QR printed on the TV. The tunnel hostname changes each restart; rescan after `start.ps1`.
 
 For frontend/backend development:
 
@@ -77,11 +77,11 @@ It runs Vite on `http://127.0.0.1:5173` and proxies `/api` and `/ws` to the loca
 ## Pair a phone
 
 1. Open the TV Launcher on the HDMI display.
-2. Scan the TV QR or open the printed `http://<PC-LAN-IP>:8765/remote` and enter the 6-digit code (QR prefills it).
+2. Scan the TV QR (Cloudflare HTTPS when the tunnel is running, otherwise the LAN URL). The QR prefills the 6-digit code.
 3. The PWA stores the opaque token in its local storage. The native app stores it in the OS secure store.
 4. The Remote reconnects automatically after temporary Wi-Fi or server interruptions.
 
-Pairing codes expire after 10 minutes and can be used once. Five failed attempts from one LAN address pause further attempts for one minute. Use **Forget** on the Remote to remove its local token.
+Pairing codes expire after 10 minutes and can be used once. Five failed attempts from one address pause further attempts for one minute. Use **Forget** on the Remote to remove its local token. Install `cloudflared` (`winget install Cloudflare.cloudflared`) for off-LAN control. Skip the tunnel with `.\scripts\start.ps1 -NoTunnel`.
 
 ## Native Remote app
 
@@ -218,7 +218,7 @@ Integration smoke test (against an active `start.ps1 -NoBrowser` instance):
 
 | Symptom | Action |
 |---|---|
-| Phone cannot open `/remote` | Confirm both devices use the same LAN, use the exact numeric IP printed by `start.ps1`, and allow the app through Windows Firewall on Private networks only. |
+| Phone cannot open `/remote` | Same LAN: use the printed numeric IP. Off-LAN: install `cloudflared`, restart `start.ps1`, and rescan the new trycloudflare QR. Do not port-forward 8765. |
 | Browser warns about the controller certificate | HTTPS mode only: import `config\tls\pc-tv-box-local-ca.cer` into **Current User → Trusted Root Certification Authorities**. On the phone, transfer and trust the same CA certificate, verifying the fingerprint printed by `start.ps1`. |
 | Pairing code rejected | Read the current TV code again; it expires after 10 minutes and becomes invalid after a successful pairing. |
 | Brave/Edge unavailable | Confirm the path in `config/settings.json`, then restart the controller. |
@@ -229,7 +229,7 @@ Integration smoke test (against an active `start.ps1 -NoBrowser` instance):
 
 ## Security
 
-- Default transport is plain HTTP restricted to the private LAN. Pairing code, token auth, LAN-IP Host/Origin checks, 10s auth timeout, and rate limits are unchanged. Set `"server": {"transport": "https"}` to restore encrypted Remote with a local CA.
+- Default transport is local HTTP. Off-LAN phones use a Cloudflare HTTPS origin written by `start.ps1`. Pairing code, token auth, Host/Origin checks, 10s auth timeout, and rate limits stay. Do not expose port `8765` on the router.
 - In HTTPS mode, state-changing Remote traffic is accepted only through `https://<controller-literal-IP>:<port>` and `wss://<controller-literal-IP>:<port>`, with matching browser Host/Origin; arbitrary hostnames and missing browser Origins are rejected.
 - Pairing code display is loopback-only; the unauthenticated TV WebSocket additionally requires the exact local launcher Origin.
 - In HTTPS mode the per-user CA signs certificates only for the controller's loopback and current literal IP addresses. Its private key and the token store remain under ignored `config\`.

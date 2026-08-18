@@ -128,6 +128,12 @@ Write-Host 'External dependency check:'
 Write-Host ("  Chrome: {0}" -f $(if ($ChromeFound) { $ChromeFound } else { 'not found; install Google Chrome for YouTube & News' }))
 Write-Host ("  Brave:  {0}" -f $(if ($BraveFound) { $BraveFound } else { 'not found; configure applications.brave_path if installed elsewhere' }))
 Write-Host ("  Edge:   {0}" -f $(if ($EdgeFound) { $EdgeFound } else { 'not found; install Microsoft Edge' }))
+$Cloudflared = Get-Command cloudflared -ErrorAction SilentlyContinue
+if ($Cloudflared) {
+    Write-Host "  cloudflared: $($Cloudflared.Source)"
+} else {
+    Write-Warning 'cloudflared was not found. Off-LAN Remote needs: winget install Cloudflare.cloudflared'
+}
 if ($Mpv) {
     Write-Host "  mpv:   $($Mpv.Source)"
 } else {

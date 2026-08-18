@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import socket
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
-from ipaddress import IPv4Address, IPv6Address, IPv4Network, ip_address
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, ip_address
 from pathlib import Path
 from time import monotonic
 from urllib.parse import urlsplit
@@ -608,6 +609,9 @@ def _require_trusted_remote_origin(request: Request, port: int, transport: str) 
 
 
 def _remote_request_origin_scheme(request: Request, transport: str) -> str | None:
+    host = request.headers.get("host")
+    if host is not None and _is_public_tunnel_host(host):
+        return "https"
     if transport == "http":
         if request.url.scheme in {"http", "https"}:
             return request.url.scheme
@@ -620,6 +624,9 @@ def _remote_request_origin_scheme(request: Request, transport: str) -> str | Non
 
 
 def _remote_websocket_origin_scheme(websocket: WebSocket, transport: str) -> str | None:
+    host = websocket.headers.get("host")
+    if host is not None and _is_public_tunnel_host(host):
+        return "https"
     scheme = websocket.scope.get("scheme")
     if transport == "http":
         if scheme == "ws":
@@ -726,13 +733,53 @@ def _normalized_authority(
 ) -> tuple[str, int] | None:
     if host is None:
         return None
+    if _is_public_tunnel_host(host):
+        return host.casefold(), default_port if parsed_port is None else parsed_port
     effective_port = default_port if parsed_port is None else parsed_port
     if effective_port != port:
         return None
     return host.casefold(), effective_port
 
 
+def _public_tunnel_origin() -> str | None:
+    configured = os.environ.get("PC_TV_PUBLIC_ORIGIN", "").strip()
+    if not configured:
+        origin_path = project_root() / "config" / "tunnel-origin.txt"
+        if origin_path.is_file():
+            configured = origin_path.read_text(encoding="utf-8").strip()
+    if not configured:
+        return None
+    parsed = urlsplit(configured)
+    if parsed.scheme.casefold() != "https" or not parsed.hostname:
+        return None
+    return f"https://{parsed.hostname.casefold()}"
+
+
+def parse_cloudflared_origin(text: str) -> str | None:
+    for token in text.split():
+        parsed = urlsplit(token.strip("\"'"))
+        host = parsed.hostname
+        if (
+            parsed.scheme.casefold() == "https"
+            and host
+            and host.endswith(".trycloudflare.com")
+            and host.casefold() != "api.trycloudflare.com"
+        ):
+            return f"https://{host.casefold()}"
+    return None
+
+
+def _is_public_tunnel_host(host: str) -> bool:
+    origin = _public_tunnel_origin()
+    if origin is None:
+        return False
+    return urlsplit(origin).hostname == host.split(":", 1)[0].casefold()
+
+
 def _pairing_remote_url(port: int, scheme: str) -> str | None:
+    public_origin = _public_tunnel_origin()
+    if public_origin is not None:
+        return f"{public_origin}/remote"
     address = _default_route_ipv4_address() or _first_lan_ipv4_address()
     if address is None:
         return None
@@ -833,7 +880,7 @@ def _local_lan_ipv4_networks() -> list[IPv4Network]:
 
 
 def _is_controller_host(host: str) -> bool:
-    if host.casefold() == "localhost":
+    if host.casefold() == "localhost" or _is_public_tunnel_host(host):
         return True
     try:
         address = ip_address(host.split("%", maxsplit=1)[0])
