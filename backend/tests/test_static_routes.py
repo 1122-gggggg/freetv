@@ -61,3 +61,26 @@ def test_remote_route_serves_over_plain_http_to_a_lan_client(monkeypatch) -> Non
 
     assert response.status_code == 200
     assert 'id="root"' in response.text
+
+
+def test_remote_route_serves_public_tunnel_host_from_a_public_peer(monkeypatch) -> None:
+    app = create_app(settings=Settings())
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+
+    with TestClient(app, base_url="http://127.0.0.1:8765", client=("8.8.8.8", 50_000)) as client:
+        response = client.get("/remote", headers={"host": "abc.trycloudflare.com"})
+
+    assert response.status_code == 200
+    assert 'id="root"' in response.text
+
+
+def test_remote_route_rejects_public_peer_without_tunnel_host(monkeypatch) -> None:
+    app = create_app(settings=Settings())
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+
+    with TestClient(app, base_url="http://127.0.0.1:8765", client=("8.8.8.8", 50_000)) as client:
+        response = client.get("/remote", headers={"host": "127.0.0.1:8765"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Remote access requires a connection from the controller LAN."
+

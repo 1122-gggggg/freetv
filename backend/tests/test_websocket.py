@@ -425,6 +425,8 @@ def test_pairing_code_endpoint_rejects_an_untrusted_host_from_loopback(tmp_path)
 
 def test_pairing_code_endpoint_includes_lan_remote_url(tmp_path, monkeypatch) -> None:
     app = make_app(tmp_path)
+    monkeypatch.delenv("PC_TV_PUBLIC_ORIGIN", raising=False)
+    monkeypatch.setattr(main, "_public_tunnel_origin", lambda: None)
     monkeypatch.setattr(main, "_default_route_ipv4_address", lambda: IPv4Address("192.168.1.42"))
 
     with TestClient(app, client=("127.0.0.1", 50_000)) as client:
@@ -459,6 +461,37 @@ def test_pairing_accepts_public_tunnel_origin_from_loopback(tmp_path, monkeypatc
 
     assert response.status_code == 200
     assert app.state.runtime.pairing.verify_token(response.json()["token"])
+
+
+def test_pairing_accepts_public_tunnel_origin_from_public_peer(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+    headers = {
+        "host": "abc.trycloudflare.com",
+        "origin": "https://abc.trycloudflare.com",
+    }
+
+    with TestClient(app, base_url="http://127.0.0.1:8765", client=("8.8.8.8", 50_000)) as client:
+        response = client.post("/api/pair", json={"code": "482731"}, headers=headers)
+
+    assert response.status_code == 200
+    assert app.state.runtime.pairing.verify_token(response.json()["token"])
+
+
+def test_remote_socket_accepts_public_tunnel_origin_from_public_peer(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+    headers = {
+        "host": "abc.trycloudflare.com",
+        "origin": "https://abc.trycloudflare.com",
+    }
+
+    with TestClient(app, base_url="http://127.0.0.1:8765", client=("8.8.8.8", 50_000)) as client:
+        token = client.post("/api/pair", json={"code": "482731"}, headers=headers).json()["token"]
+        with client.websocket_connect(
+            "wss://abc.trycloudflare.com/ws/remote", headers=headers
+        ) as socket:
+            authenticate(socket, token, "req-public-tunnel")
 
 
 def test_pairing_rejects_unrelated_public_host_when_tunnel_is_configured(
@@ -593,6 +626,8 @@ def test_remote_socket_accepts_plain_websocket_from_the_lan_in_http_mode(tmp_pat
 
 def test_pairing_code_endpoint_uses_https_remote_url_in_https_mode(tmp_path, monkeypatch) -> None:
     app = make_app(tmp_path, transport="https")
+    monkeypatch.delenv("PC_TV_PUBLIC_ORIGIN", raising=False)
+    monkeypatch.setattr(main, "_public_tunnel_origin", lambda: None)
     monkeypatch.setattr(main, "_default_route_ipv4_address", lambda: IPv4Address("192.168.1.42"))
 
     with TestClient(app, client=("127.0.0.1", 50_000)) as client:

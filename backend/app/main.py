@@ -246,7 +246,7 @@ def create_app(
             websocket, app.state.settings.server.transport
         )
         if (
-            not _is_trusted_remote_peer(client_host)
+            not _is_trusted_remote_access(client_host, websocket.headers.get("host"))
             or expected_origin_scheme is None
             or not _has_trusted_remote_origin(
                 websocket.headers.get("origin"),
@@ -562,7 +562,7 @@ def _is_local_tv_host(host: str | None, port: int, *, default_port: int) -> bool
 
 
 def _require_trusted_remote_peer(request: Request) -> None:
-    if not _is_trusted_remote_peer(_client_host(request)):
+    if not _is_trusted_remote_access(_client_host(request), request.headers.get("host")):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Remote access requires a connection from the controller LAN.",
@@ -742,11 +742,11 @@ def _normalized_authority(
 
 
 def _public_tunnel_origin() -> str | None:
-    configured = os.environ.get("PC_TV_PUBLIC_ORIGIN", "").strip()
+    configured = os.environ.get("PC_TV_PUBLIC_ORIGIN", "").strip().lstrip("\ufeff")
     if not configured:
         origin_path = project_root() / "config" / "tunnel-origin.txt"
         if origin_path.is_file():
-            configured = origin_path.read_text(encoding="utf-8").strip()
+            configured = origin_path.read_text(encoding="utf-8-sig").strip()
     if not configured:
         return None
     parsed = urlsplit(configured)
@@ -823,6 +823,12 @@ def _is_lan_ipv4_address(address: IPv4Address) -> bool:
 
 def _is_local_lan_ipv4_address(address: IPv4Address) -> bool:
     return _is_lan_ipv4_address(address) and address in _local_interface_addresses()
+
+
+def _is_trusted_remote_access(peer_host: str, request_host: str | None) -> bool:
+    if request_host is not None and _is_public_tunnel_host(request_host):
+        return True
+    return _is_trusted_remote_peer(peer_host)
 
 
 def _is_trusted_remote_peer(host: str) -> bool:

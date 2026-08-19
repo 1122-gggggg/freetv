@@ -298,7 +298,7 @@ if (-not $NoTunnel) {
             Start-Sleep -Milliseconds 400
         } while ((Get-Date) -lt $TunnelDeadline)
         if ($PublicOrigin) {
-            Set-Content -Path $TunnelOriginFile -Value $PublicOrigin -Encoding utf8
+            [System.IO.File]::WriteAllText($TunnelOriginFile, $PublicOrigin)
             $env:PC_TV_PUBLIC_ORIGIN = $PublicOrigin
             $PairingInfo = Invoke-RestMethod -Uri $PairingUrl -TimeoutSec 15
             Write-Host "Cloudflare Tunnel: $PublicOrigin"
