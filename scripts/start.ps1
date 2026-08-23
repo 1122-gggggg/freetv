@@ -215,6 +215,24 @@ if ($null -eq $Listener) {
 
 $HealthUrl = "${Scheme}://${HealthHost}:$Port/api/health"
 $PairingUrl = "${Scheme}://${HealthHost}:$Port/api/pairing"
+$HealthRequestParameters = @{
+    Uri        = $HealthUrl
+    TimeoutSec = 2
+}
+$PairingRequestParameters = @{
+    Uri        = $PairingUrl
+    TimeoutSec = 15
+}
+if (
+    $Transport -eq 'https' -and
+    (Get-Command Invoke-RestMethod).Parameters.ContainsKey('SkipCertificateCheck')
+) {
+    # PowerShell 7 uses HttpClient and ignores the Windows PowerShell 5.1
+    # ServicePointManager callback below. Its native switch is scoped to these
+    # loopback readiness requests and does not weaken Remote TLS validation.
+    $HealthRequestParameters.SkipCertificateCheck = $true
+    $PairingRequestParameters.SkipCertificateCheck = $true
+}
 $Deadline = (Get-Date).AddSeconds(30)
 $Health = $null
 $PairingInfo = $null
@@ -252,14 +270,14 @@ namespace PcTvBox
     try {
         do {
             try {
-                $Health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2
+                $Health = Invoke-RestMethod @HealthRequestParameters
                 if ($Health.status -eq 'ok') { break }
             } catch {
                 Start-Sleep -Milliseconds 250
             }
         } while ((Get-Date) -lt $Deadline)
         if ($Health -and $Health.status -eq 'ok') {
-            $PairingInfo = Invoke-RestMethod -Uri $PairingUrl -TimeoutSec 15
+            $PairingInfo = Invoke-RestMethod @PairingRequestParameters
         }
     } finally {
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $PreviousCertificateValidationCallback
@@ -267,14 +285,14 @@ namespace PcTvBox
 } else {
     do {
         try {
-            $Health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2
+            $Health = Invoke-RestMethod @HealthRequestParameters
             if ($Health.status -eq 'ok') { break }
         } catch {
             Start-Sleep -Milliseconds 250
         }
     } while ((Get-Date) -lt $Deadline)
     if ($Health -and $Health.status -eq 'ok') {
-        $PairingInfo = Invoke-RestMethod -Uri $PairingUrl -TimeoutSec 15
+        $PairingInfo = Invoke-RestMethod @PairingRequestParameters
     }
 }
 
