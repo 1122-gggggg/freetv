@@ -5,7 +5,7 @@ A local Windows 11 controller that turns an HDMI-connected PC into a TV-style la
 ## Requirements
 
 - Windows 11, signed in as the user who will run the TV controller.
-- Python 3.11+ for appliance deployment; Node.js LTS only for frontend development.
+- Python 3.11+ for appliance deployment, available as `python` on `PATH` or through the Windows `py` launcher; Node.js LTS only for frontend development.
 - Microsoft Edge for Netflix. Windows 11 normally installs it.
 - Brave for YouTube. Existing Brave profiles are reused.
 - [mpv](https://mpv.io/installation/) for Live TV.
@@ -16,14 +16,15 @@ A local Windows 11 controller that turns an HDMI-connected PC into a TV-style la
 
 ### Appliance (Release zip)
 
-Download `pc-tv-box.zip` from GitHub Releases, unzip it, then in PowerShell:
+Download `pc-tv-box.zip` from GitHub Releases, unzip it, enter the extracted
+`pc-tv-box` directory, then in PowerShell:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\setup.ps1
 ```
 
-The zip includes a prebuilt `frontend\dist`, so setup needs only Python 3.11+. From a development checkout after `npm run build` in `frontend`, `.\scripts\package.ps1` writes the same zip locally.
+The zip includes a prebuilt `frontend\dist`, so setup needs Python 3.11+ and network access to install its Python packages. From a development checkout after `npm run build` in `frontend`, `.\scripts\package.ps1` writes the same zip locally.
 
 ### Development (git clone)
 
@@ -34,7 +35,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\setup.ps1
 ```
 
-The setup script creates `.venv`, installs Python dependencies, and builds the frontend when `frontend\dist` is missing (requires Node.js LTS). It also creates ignored `config/settings.json` and `config/channels.json` from their examples. Default transport is plain HTTP on the private LAN. HTTPS mode additionally creates a controller-specific local CA plus an IP-address TLS certificate in ignored `config\tls`.
+The setup script selects a qualifying `python` or `py` runtime, creates `.venv`, installs Python dependencies, and builds the frontend when `frontend\dist` is missing (requires Node.js LTS). An existing `.venv` must contain an isolated Python 3.11+ runtime; setup leaves an invalid environment untouched and asks you to remove or rename it manually. It also creates ignored `config/settings.json` and `config/channels.json` from their examples. Default transport is plain HTTP on the private LAN. HTTPS mode additionally creates a controller-specific local CA plus an IP-address TLS certificate in ignored `config\tls`.
 
 Configure nonstandard executable locations in `config/settings.json`:
 
@@ -57,11 +58,14 @@ Empty browser fields use the standard Windows locations where available. The gen
 .\scripts\start.ps1
 ```
 
-The script starts the controller on port `8765`, waits for `/api/health`, then opens the local TV Launcher in Edge full-screen kiosk mode when Edge is available. It falls back to the default browser with a warning otherwise. On the first Windows Firewall prompt, allow the controller only on **Private** networks; do not create port-forwarding rules. In HTTPS mode it also creates/refreshes the local TLS certificate for current LAN IPs.
+The script starts the controller on port `8765`, waits for `/api/health`, then opens the local TV Launcher in Edge full-screen kiosk mode when Edge is available. It falls back to the default browser with a warning otherwise. Re-running it safely restarts only this repository's production controller when HTTP/HTTPS or TLS material changed; it refuses to stop an unrelated listener on the configured port. On the first Windows Firewall prompt, allow the controller only on **Private** networks; do not create port-forwarding rules. In HTTPS mode it also creates/refreshes the local TLS certificate for current LAN IPs.
 
-- TV Launcher: `http://127.0.0.1:8765/tv` (or `https://` when `server.transport` is `"https"`)
-- Phone Remote: `http://<PC-LAN-IP>:8765/remote`
-- Health: `http://127.0.0.1:8765/api/health`
+- TV Launcher: `<scheme>://127.0.0.1:8765/tv`
+- Phone Remote: `<scheme>://<PC-LAN-IP>:8765/remote`
+- Health: `<scheme>://127.0.0.1:8765/api/health`
+
+Use `http` for the default transport and `https` when `server.transport` is
+`"https"`.
 
 Use the exact numeric LAN address printed by the script. The controller intentionally rejects device names and arbitrary hostnames for Remote traffic.
 
@@ -76,7 +80,7 @@ It runs Vite on `http://127.0.0.1:5173` and proxies `/api` and `/ws` to the loca
 ## Pair a phone
 
 1. Open the TV Launcher on the HDMI display.
-2. Scan the TV QR or open the printed `http://<PC-LAN-IP>:8765/remote` and enter the 6-digit code (QR prefills it).
+2. Scan the TV QR or open the printed `<scheme>://<PC-LAN-IP>:8765/remote` and enter the 6-digit code (QR prefills it).
 3. The PWA stores the opaque token in its local storage. The native app stores it in the OS secure store.
 4. The Remote reconnects automatically after temporary Wi-Fi or server interruptions.
 
@@ -158,9 +162,13 @@ Remove it with:
 .\scripts\install-autostart.ps1 -Remove
 ```
 
-The script changes only the current user's Task Scheduler entry; it does not install a Session-0 Windows service or modify system-wide startup settings.
+The script changes only the current user's verified Task Scheduler entry and refuses to overwrite or remove an unrelated same-name task. It does not install a Session-0 Windows service or modify system-wide startup settings. The task may start and continue on battery power, supervises the controller after launch, and uses three one-minute restart attempts rather than an unbounded retry loop.
 
-## Verification
+## Development checkout verification
+
+The following test suites require a full Git checkout; they are intentionally not
+included in the release appliance zip. Release users can instead run the
+integration smoke test shown below after `scripts\start.ps1 -NoBrowser` succeeds.
 
 Backend:
 
@@ -189,10 +197,17 @@ npx expo prebuild --platform android --no-install
 Pop-Location
 ```
 
-Integration smoke test (against an active `start.ps1 -NoBrowser` instance):
+Integration smoke test for the default HTTP transport (against an active
+`start.ps1 -NoBrowser` instance):
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\integration-smoke.py
+```
+
+For HTTPS mode, verify the same instance with its generated controller CA:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\integration-smoke.py --transport https --ca-cert config\tls\pc-tv-box-local-ca.cer
 ```
 
 ## Troubleshooting
@@ -203,6 +218,7 @@ Integration smoke test (against an active `start.ps1 -NoBrowser` instance):
 | Browser warns about the controller certificate | HTTPS mode only: import `config\tls\pc-tv-box-local-ca.cer` into **Current User → Trusted Root Certification Authorities**. On the phone, transfer and trust the same CA certificate, verifying the fingerprint printed by `start.ps1`. |
 | Pairing code rejected | Read the current TV code again; it expires after 10 minutes and becomes invalid after a successful pairing. |
 | Brave/Edge unavailable | Confirm the path in `config/settings.json`, then restart the controller. |
+| Browser tile reports that a managed window is unavailable | Close existing windows for that browser and retry. The controller waits up to 10 seconds for the exact window created by its child process and refuses to steer an unrelated browser process. |
 | Live TV error | Install mpv, set `applications.mpv_path` if needed, and validate your channel URL and authorization. |
 | TV Launcher does not foreground on Home | Keep the MY TV tab/window open. The launcher title is used to restore its specific browser window. |
 | Phone cannot install PWA | A trusted HTTPS controller origin is required for service workers and install prompts. HTTP mode serves Remote as a normal web page. |
@@ -225,7 +241,7 @@ Integration smoke test (against an active `start.ps1 -NoBrowser` instance):
 
 - The TV Launcher is a browser window, not a native Windows shell replacement. Configure Windows sign-in/autostart and use fullscreen/maximized browser behavior for the closest appliance flow.
 - HTTP mode cannot install the Remote as a PWA (service workers require a secure context). HTTPS mode requires explicit trust of the controller local CA; the certificate contains literal current IP addresses, so `start.ps1` refreshes it after LAN-address changes.
-- Native Remote pairing uses QR or a manually entered numeric IP and remains HTTPS-only; mDNS discovery is advertised only in HTTPS mode.
+- Native Remote pairing uses QR or a manually entered numeric IP and remains HTTPS-only. The controller advertises mDNS metadata only in HTTPS mode, but the current native app does not yet provide automatic mDNS discovery.
 - Native iOS builds require macOS/Xcode or an authenticated Expo EAS account.
 - This project launches existing browsers and mpv only; it does not discover streams, bypass DRM, block ads, or manage account credentials.
 

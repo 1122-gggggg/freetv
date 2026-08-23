@@ -30,6 +30,23 @@ interface PendingPointer {
   dy: number
 }
 
+interface GestureState {
+  mode: 'none' | 'move' | 'scroll'
+  x: number
+  y: number
+  startX: number
+  startY: number
+  moved: boolean
+}
+
+function idleGesture(): GestureState {
+  return { mode: 'none', x: 0, y: 0, startX: 0, startY: 0, moved: false }
+}
+
+function clampPointerDelta(value: number): number {
+  return Math.max(-100, Math.min(100, Math.round(value)))
+}
+
 function removePairingCodeFromAddressBar(): void {
   const url = new URL(window.location.href)
   if (!url.searchParams.has('code')) return
@@ -129,7 +146,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   const [text, setText] = useState('')
   const [forgetError, setForgetError] = useState<string | null>(null)
   const [forgetting, setForgetting] = useState(false)
-  const gesture = useRef({ mode: 'none' as 'none' | 'move' | 'scroll', x: 0, y: 0, moved: false })
+  const gesture = useRef<GestureState>(idleGesture())
   const pendingPointer = useRef<PendingPointer | null>(null)
   const pointerFrame = useRef<number | null>(null)
   const tapTimer = useRef<number | null>(null)
@@ -154,14 +171,33 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       sendPointer(action)
       return
     }
-    pendingPointer.current = { action, dx: Math.max(-100, Math.min(100, Math.round(dx))), dy: Math.max(-100, Math.min(100, Math.round(dy))) }
+    const pending = pendingPointer.current
+    pendingPointer.current = pending?.action === action
+      ? { action, dx: pending.dx + dx, dy: pending.dy + dy }
+      : { action, dx, dy }
     if (pointerFrame.current !== null) return
     pointerFrame.current = requestAnimationFrame(() => {
       pointerFrame.current = null
       const pending = pendingPointer.current
       pendingPointer.current = null
-      if (pending && (pending.dx !== 0 || pending.dy !== 0)) sendPointer(pending.action, pending.dx, pending.dy)
+      if (!pending) return
+      const pointerDx = clampPointerDelta(pending.dx)
+      const pointerDy = clampPointerDelta(pending.dy)
+      if (pointerDx !== 0 || pointerDy !== 0) sendPointer(pending.action, pointerDx, pointerDy)
     })
+  }
+
+  const flushPendingPointer = () => {
+    if (pointerFrame.current !== null) {
+      cancelAnimationFrame(pointerFrame.current)
+      pointerFrame.current = null
+    }
+    const pending = pendingPointer.current
+    pendingPointer.current = null
+    if (!pending) return
+    const pointerDx = clampPointerDelta(pending.dx)
+    const pointerDy = clampPointerDelta(pending.dy)
+    if (pointerDx !== 0 || pointerDy !== 0) sendPointer(pending.action, pointerDx, pointerDy)
   }
 
   const touchStart = (event: TouchEvent<HTMLDivElement>) => {
@@ -169,16 +205,27 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     if (controlsDisabled) return
     const touches = event.touches
     if (touches.length === 2) {
+      const x = (touches[0].clientX + touches[1].clientX) / 2
+      const y = (touches[0].clientY + touches[1].clientY) / 2
       gesture.current = {
         mode: 'scroll',
-        x: (touches[0].clientX + touches[1].clientX) / 2,
-        y: (touches[0].clientY + touches[1].clientY) / 2,
+        x,
+        y,
+        startX: x,
+        startY: y,
         moved: false,
       }
       return
     }
     if (touches.length === 1) {
-      gesture.current = { mode: 'move', x: touches[0].clientX, y: touches[0].clientY, moved: false }
+      gesture.current = {
+        mode: 'move',
+        x: touches[0].clientX,
+        y: touches[0].clientY,
+        startX: touches[0].clientX,
+        startY: touches[0].clientY,
+        moved: false,
+      }
     }
   }
 
@@ -192,7 +239,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       const dy = touch.clientY - current.y
       current.x = touch.clientX
       current.y = touch.clientY
-      current.moved ||= Math.abs(dx) + Math.abs(dy) > 3
+      current.moved ||= Math.abs(touch.clientX - current.startX) + Math.abs(touch.clientY - current.startY) > 3
       queuePointer('move', dx * 1.5, dy * 1.5)
       return
     }
@@ -200,7 +247,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       const y = (event.touches[0].clientY + event.touches[1].clientY) / 2
       const dy = current.y - y
       current.y = y
-      current.moved ||= Math.abs(dy) > 2
+      current.moved ||= Math.abs(y - current.startY) > 2
       queuePointer('scroll', 0, dy)
     }
   }
@@ -208,7 +255,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   const touchEnd = (event: TouchEvent<HTMLDivElement>) => {
     event.preventDefault()
     if (controlsDisabled) {
-      gesture.current = { mode: 'none', x: 0, y: 0, moved: false }
+      gesture.current = idleGesture()
       return
     }
     const current = gesture.current
@@ -224,7 +271,29 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         }, TAP_DELAY_MS)
       }
     }
-    if (event.touches.length === 0) gesture.current = { mode: 'none', x: 0, y: 0, moved: false }
+    if (current.mode === 'scroll' && event.touches.length === 1) {
+      flushPendingPointer()
+      gesture.current = {
+        mode: 'move',
+        x: event.touches[0].clientX,
+        y: event.touches[0].clientY,
+        startX: event.touches[0].clientX,
+        startY: event.touches[0].clientY,
+        moved: true,
+      }
+      return
+    }
+    if (event.touches.length === 0) gesture.current = idleGesture()
+  }
+
+  const touchCancel = (event: TouchEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    gesture.current = idleGesture()
+    pendingPointer.current = null
+    if (pointerFrame.current !== null) {
+      cancelAnimationFrame(pointerFrame.current)
+      pointerFrame.current = null
+    }
   }
 
   const submitText = (event: FormEvent<HTMLFormElement>) => {
@@ -311,7 +380,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
           onTouchStart={touchStart}
           onTouchMove={touchMove}
           onTouchEnd={touchEnd}
-          onTouchCancel={touchEnd}
+          onTouchCancel={touchCancel}
         >
           <span>{controlsDisabled ? 'Reconnect to use the touchpad.' : 'One finger: move · tap: click · two fingers: scroll'}</span>
         </div>

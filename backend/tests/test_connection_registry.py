@@ -35,6 +35,38 @@ class NonReadingSocket(FakeSocket):
         await asyncio.Event().wait()
 
 
+@dataclass
+class AsyncBarrier:
+    target: int
+    started: int = 0
+    all_started: asyncio.Event = field(default_factory=asyncio.Event)
+    release: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def wait(self) -> None:
+        self.started += 1
+        if self.started == self.target:
+            self.all_started.set()
+        await self.release.wait()
+
+
+@dataclass(eq=False)
+class BarrierSendSocket(FakeSocket):
+    barrier: AsyncBarrier = field(default_factory=lambda: AsyncBarrier(1))
+
+    async def send_json(self, payload: dict[str, object]) -> None:
+        await self.barrier.wait()
+        self.payloads.append(payload)
+
+
+@dataclass(eq=False)
+class BarrierCloseSocket(FakeSocket):
+    barrier: AsyncBarrier = field(default_factory=lambda: AsyncBarrier(1))
+
+    async def close(self) -> None:
+        await self.barrier.wait()
+        self.close_calls += 1
+
+
 def remote_session(token: str, expires_at: datetime) -> AuthenticatedRemoteSession:
     return AuthenticatedRemoteSession(hashlib.sha256(token.encode("utf-8")).digest(), expires_at)
 
@@ -91,6 +123,46 @@ def test_state_broadcast_evicts_a_nonreading_remote_after_a_bounded_send_timeout
         assert len(healthy.payloads) == 1
 
     monkeypatch.setattr(registry_module, "_STATE_SEND_TIMEOUT_SECONDS", 0.01, raising=False)
+    asyncio.run(scenario())
+
+
+def test_state_broadcast_sends_to_all_connections_concurrently() -> None:
+    async def scenario() -> None:
+        registry = ConnectionRegistry()
+        barrier = AsyncBarrier(4)
+        sockets = tuple(BarrierSendSocket(barrier=barrier) for _ in range(4))
+        for socket in sockets:
+            await registry.add(socket)  # type: ignore[arg-type]
+
+        broadcast = asyncio.create_task(
+            registry.broadcast_state(
+                StateMessage(active_app="launcher", focused_tile="youtube", volume=50, muted=False)
+            )
+        )
+        await asyncio.wait_for(barrier.all_started.wait(), timeout=0.5)
+        barrier.release.set()
+        await asyncio.wait_for(broadcast, timeout=0.5)
+
+        assert all(len(socket.payloads) == 1 for socket in sockets)
+
+    asyncio.run(scenario())
+
+
+def test_connection_closes_run_concurrently() -> None:
+    async def scenario() -> None:
+        registry = ConnectionRegistry()
+        barrier = AsyncBarrier(4)
+        sockets = tuple(BarrierCloseSocket(barrier=barrier) for _ in range(4))
+
+        closing = asyncio.create_task(
+            registry.close_connections(sockets)  # type: ignore[arg-type]
+        )
+        await asyncio.wait_for(barrier.all_started.wait(), timeout=0.5)
+        barrier.release.set()
+        await asyncio.wait_for(closing, timeout=0.5)
+
+        assert all(socket.close_calls == 1 for socket in sockets)
+
     asyncio.run(scenario())
 
 

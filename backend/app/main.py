@@ -5,7 +5,7 @@ import logging
 import socket
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
-from ipaddress import IPv4Address, IPv6Address, IPv4Network, ip_address
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, ip_address
 from pathlib import Path
 from time import monotonic
 from urllib.parse import urlsplit
@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 REMOTE_AUTHENTICATION_TIMEOUT_SECONDS = 10.0
 REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE = 4401
+ACKNOWLEDGEMENT_SEND_TIMEOUT_SECONDS = 2.0
 
 
 HTML_SECURITY_HEADERS = {
@@ -298,8 +299,6 @@ def create_app(
                 await websocket.close(code=REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE)
                 return
 
-            await authentication_guard.release(client_host)
-            admission_acquired = False
             connections: ConnectionRegistry = app.state.connections
             await connections.add(websocket, session=remote_session)
             log_event(logger, "remote_connected", client=client_host)
@@ -358,7 +357,8 @@ def create_app(
                         websocket, "invalid_message", "TV input accepts commands only."
                     )
                     continue
-                await _dispatch_and_broadcast(app, websocket, message)
+                if not await _dispatch_and_broadcast(app, websocket, message):
+                    return
         except WebSocketDisconnect:
             return
         finally:
@@ -416,6 +416,8 @@ async def _handle_remote_message(
         return True
     if await _dispatch_and_broadcast(app, websocket, message, session=session):
         return True
+    if not await app.state.connections.is_active(websocket):
+        return False
     log_event(logger, "remote_auth_failure", client=_websocket_host(websocket))
     await _send_error(websocket, "authentication_failed", "Remote token is invalid.")
     await websocket.close(code=REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE)
@@ -429,6 +431,7 @@ async def _dispatch_and_broadcast(
     *,
     session: AuthenticatedRemoteSession | None = None,
 ) -> bool:
+    close_connection = False
     async with app.state.dispatch_lock:
         if session is not None and (
             not app.state.runtime.pairing.session_is_valid(session)
@@ -452,21 +455,26 @@ async def _dispatch_and_broadcast(
             command=command_name,
         )
         try:
-            await _send_acknowledgement(
-                websocket,
-                message.request_id,
-                success=outcome.success,
-                error_code=outcome.error_code,
-                message=outcome.message,
-            )
-        except (OSError, RuntimeError, WebSocketDisconnect):
+            async with asyncio.timeout(ACKNOWLEDGEMENT_SEND_TIMEOUT_SECONDS):
+                await _send_acknowledgement(
+                    websocket,
+                    message.request_id,
+                    success=outcome.success,
+                    error_code=outcome.error_code,
+                    message=outcome.message,
+                )
+        except (TimeoutError, OSError, RuntimeError, WebSocketDisconnect):
             await app.state.connections.remove(websocket)
+            close_connection = True
         if outcome.state_changed:
             await app.state.connections.broadcast_state(
                 outcome.state.to_wire(),
                 session_is_valid=app.state.runtime.pairing.session_is_valid,
             )
-        return True
+    if close_connection:
+        await app.state.connections.close_connections((websocket,))
+        return False
+    return True
 
 
 def _bearer_token(request: Request) -> str | None:

@@ -56,22 +56,29 @@ class ConnectionRegistry:
             await self._remove_connections(invalid_sessions)
             await self.close_connections(invalid_sessions)
 
-        failed: list[WebSocket] = []
-        for websocket, session in connections:
+        async def send_state(
+            websocket: WebSocket,
+            session: AuthenticatedRemoteSession | None,
+        ) -> WebSocket | None:
             if websocket in invalid_sessions:
-                continue
+                return None
             if (
                 session is not None
                 and session_is_valid is not None
                 and not session_is_valid(session)
             ):
-                failed.append(websocket)
-                continue
+                return websocket
             try:
                 async with asyncio.timeout(_STATE_SEND_TIMEOUT_SECONDS):
                     await websocket.send_json(payload)
             except (TimeoutError, OSError, RuntimeError, WebSocketDisconnect):
-                failed.append(websocket)
+                return websocket
+            return None
+
+        results = await asyncio.gather(
+            *(send_state(websocket, session) for websocket, session in connections)
+        )
+        failed = [websocket for websocket in results if websocket is not None]
         if failed:
             failed_connections = tuple(failed)
             await self._remove_connections(failed_connections)
@@ -102,12 +109,14 @@ class ConnectionRegistry:
             return connections
 
     async def close_connections(self, connections: tuple[WebSocket, ...]) -> None:
-        for websocket in connections:
+        async def close_connection(websocket: WebSocket) -> None:
             try:
                 async with asyncio.timeout(_STATE_SEND_TIMEOUT_SECONDS):
                     await websocket.close()
             except (TimeoutError, OSError, RuntimeError, WebSocketDisconnect):
-                continue
+                return
+
+        await asyncio.gather(*(close_connection(websocket) for websocket in connections))
 
     async def close_token_sessions(self, token: str) -> None:
         await self.close_connections(await self.remove_token_sessions(token))

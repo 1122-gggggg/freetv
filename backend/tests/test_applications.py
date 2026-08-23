@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,15 +17,28 @@ from app.state import ActiveApp
 class FakeProcess:
     pid: int = 123
     terminated: bool = False
+    killed: bool = False
     exit_code: int | None = None
+    terminate_failures_remaining: int = 0
+    wait_timeouts_remaining: int = 0
 
     def poll(self) -> int | None:
         return self.exit_code
 
     def terminate(self) -> None:
+        if self.terminate_failures_remaining > 0:
+            self.terminate_failures_remaining -= 1
+            raise OSError("terminate failed")
         self.terminated = True
 
     def wait(self, timeout: float) -> None:
+        if self.wait_timeouts_remaining > 0:
+            self.wait_timeouts_remaining -= 1
+            raise subprocess.TimeoutExpired("fake-browser", timeout)
+        self.exit_code = 0
+
+    def kill(self) -> None:
+        self.killed = True
         return None
 
 
@@ -53,11 +67,14 @@ class FakeWindows:
     allow_activation: bool = True
 
     window_owned_by_process: bool = True
+    ownership_results: list[bool] = field(default_factory=list)
 
     def find_window_for_pid(self, pid: int, timeout_seconds: float) -> int | None:
         return self.window_for_pid
 
     def window_belongs_to_process(self, handle: int, pid: int) -> bool:
+        if self.ownership_results:
+            return self.ownership_results.pop(0)
         return self.window_owned_by_process
 
     def activate(self, handle: int) -> None:
@@ -191,6 +208,86 @@ def test_failed_application_launch_keeps_the_existing_tracked_window_visible() -
 
         assert windows.minimized == []
         assert manager.active_app is ActiveApp.YOUTUBE
+
+    import asyncio
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("window_handle,window_owned", [(None, True), (900, False)])
+def test_open_rejects_an_unowned_or_missing_browser_window(
+    window_handle: int | None,
+    window_owned: bool,
+) -> None:
+    async def scenario() -> None:
+        manager, launcher, windows, _ = make_manager()
+        windows.window_for_pid = window_handle
+        windows.window_owned_by_process = window_owned
+
+        with pytest.raises(CommandExecutionError) as caught:
+            await manager.open(ActiveApp.YOUTUBE)
+
+        assert caught.value.code == "application_window_unavailable"
+        assert "Close existing Brave browser windows" in caught.value.message
+        assert launcher.process.terminated
+        assert manager.active_app is ActiveApp.LAUNCHER
+        assert windows.maximized == []
+
+    import asyncio
+
+    asyncio.run(scenario())
+
+
+def test_unowned_browser_uses_kill_fallback_after_terminate_timeout() -> None:
+    async def scenario() -> None:
+        manager, launcher, windows, _ = make_manager()
+        launcher.process.wait_timeouts_remaining = 1
+        windows.window_for_pid = None
+
+        with pytest.raises(CommandExecutionError):
+            await manager.open(ActiveApp.YOUTUBE)
+
+        assert launcher.process.terminated
+        assert launcher.process.killed
+        assert launcher.process.exit_code == 0
+
+    import asyncio
+
+    asyncio.run(scenario())
+
+
+def test_window_that_disappears_while_maximizing_is_not_committed_as_active() -> None:
+    async def scenario() -> None:
+        manager, launcher, windows, _ = make_manager()
+        windows.ownership_results = [True, False]
+
+        with pytest.raises(CommandExecutionError) as caught:
+            await manager.open(ActiveApp.YOUTUBE)
+
+        assert caught.value.code == "application_window_unavailable"
+        assert manager.active_app is ActiveApp.LAUNCHER
+        assert windows.maximized == [900]
+        assert launcher.process.terminated
+
+    import asyncio
+
+    asyncio.run(scenario())
+
+
+def test_failed_orphan_cleanup_is_retried_during_shutdown() -> None:
+    async def scenario() -> None:
+        manager, launcher, windows, _ = make_manager()
+        launcher.process.terminate_failures_remaining = 1
+        windows.window_for_pid = None
+
+        with pytest.raises(CommandExecutionError):
+            await manager.open(ActiveApp.YOUTUBE)
+        assert not launcher.process.terminated
+
+        await manager.shutdown()
+
+        assert launcher.process.terminated
+        assert launcher.process.exit_code == 0
 
     import asyncio
 

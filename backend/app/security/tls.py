@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, ip_address
 from pathlib import Path
+from time import monotonic, sleep
 from typing import TypeAlias
 
 import psutil
@@ -111,6 +112,26 @@ def local_interface_addresses() -> set[IPAddress]:
             if _is_eligible_local_address(address):
                 addresses.add(address)
     return addresses
+
+
+def wait_for_lan_interface_addresses(
+    wait_seconds: float,
+    *,
+    poll_interval_seconds: float = 0.5,
+) -> set[IPAddress]:
+    if wait_seconds < 0 or poll_interval_seconds <= 0:
+        raise ValueError("LAN wait duration must be non-negative and polling must be positive.")
+    deadline = monotonic() + wait_seconds
+    while True:
+        addresses = local_interface_addresses()
+        if any(not address.is_loopback for address in addresses):
+            return addresses
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise LocalTLSMaterialError(
+                "No eligible private LAN address is ready. Connect Ethernet or Wi-Fi and retry."
+            )
+        sleep(min(poll_interval_seconds, remaining))
 
 def certificate_fingerprint(certificate_path: Path) -> str:
     certificate = _load_ca_certificate(certificate_path)
@@ -337,8 +358,21 @@ def _atomic_write(path: Path, content: bytes, *, private: bool) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create local PC TV Box TLS material.")
     parser.add_argument("--directory", required=True, type=Path)
+    parser.add_argument(
+        "--wait-for-lan-seconds",
+        type=float,
+        help="Wait up to this many seconds for an eligible private LAN address.",
+    )
     arguments = parser.parse_args()
-    materials = ensure_tls_materials(arguments.directory, local_interface_addresses())
+    try:
+        addresses = (
+            local_interface_addresses()
+            if arguments.wait_for_lan_seconds is None
+            else wait_for_lan_interface_addresses(arguments.wait_for_lan_seconds)
+        )
+    except (LocalTLSMaterialError, ValueError) as error:
+        parser.error(str(error))
+    materials = ensure_tls_materials(arguments.directory, addresses)
     print(
         json.dumps(
             {
@@ -346,6 +380,7 @@ def main() -> None:
                 "certificate": str(materials.certificate.resolve()),
                 "private_key": str(materials.private_key.resolve()),
                 "ca_sha256": certificate_fingerprint(materials.ca_certificate),
+                "addresses": [str(address) for address in _certificate_addresses(addresses)],
             }
         )
     )

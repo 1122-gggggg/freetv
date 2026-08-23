@@ -1,15 +1,21 @@
 from __future__ import annotations
 
-import ssl
 import socket
-from types import SimpleNamespace
+import ssl
 from ipaddress import IPv4Address, IPv6Address, ip_address
+from types import SimpleNamespace
 
 import psutil
+import pytest
 from cryptography import x509
 
 from app.security import tls
-from app.security.tls import ensure_tls_materials, local_interface_addresses
+from app.security.tls import (
+    LocalTLSMaterialError,
+    ensure_tls_materials,
+    local_interface_addresses,
+    wait_for_lan_interface_addresses,
+)
 
 
 def certificate_san_entries(certificate_path) -> set[tuple[str, str]]:
@@ -125,3 +131,32 @@ def test_local_interface_addresses_excludes_virtual_adapters(monkeypatch) -> Non
         IPv6Address("::1"),
         IPv4Address("192.168.1.10"),
     }
+
+
+def test_wait_for_lan_addresses_rejects_a_loopback_only_startup(monkeypatch) -> None:
+    monkeypatch.setattr(
+        tls,
+        "local_interface_addresses",
+        lambda: {IPv4Address("127.0.0.1"), IPv6Address("::1")},
+    )
+
+    with pytest.raises(LocalTLSMaterialError, match="No eligible private LAN address"):
+        wait_for_lan_interface_addresses(0)
+
+
+def test_wait_for_lan_addresses_accepts_an_interface_that_becomes_ready(monkeypatch) -> None:
+    address_sets = iter(
+        (
+            {IPv4Address("127.0.0.1"), IPv6Address("::1")},
+            {
+                IPv4Address("127.0.0.1"),
+                IPv6Address("::1"),
+                IPv4Address("192.168.1.10"),
+            },
+        )
+    )
+    monkeypatch.setattr(tls, "local_interface_addresses", lambda: next(address_sets))
+
+    addresses = wait_for_lan_interface_addresses(0.1, poll_interval_seconds=0.001)
+
+    assert IPv4Address("192.168.1.10") in addresses
