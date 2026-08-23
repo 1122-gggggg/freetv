@@ -60,6 +60,19 @@ Describe 'TVBox.Startup Module Tests' {
             Test-ControllerCommandLineOwnership -CommandLine $WrongApp -PythonPath $Python -Port 8765 | Should -Be $false
         }
 
+        It 'accepts the venv base runtime only with this checkout app directory' {
+            $Python = 'C:\freetv\.venv\Scripts\python.exe'
+            $BasePython = 'C:\hostedtoolcache\Python\3.11.9\x64\python.exe'
+            $Owned = 'C:\hostedtoolcache\Python\3.11.9\x64\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8765 --app-dir C:\freetv\backend'
+            $MissingAppDirectory = 'C:\hostedtoolcache\Python\3.11.9\x64\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8765'
+            $OtherAppDirectory = $MissingAppDirectory + ' --app-dir C:\other\backend'
+
+            Test-ControllerCommandLineOwnership -CommandLine $Owned -PythonPath $Python -BasePythonPath $BasePython -Port 8765 | Should -Be $true
+            Test-ControllerCommandLineOwnership -CommandLine $MissingAppDirectory -PythonPath $Python -BasePythonPath $BasePython -Port 8765 | Should -Be $false
+            Test-ControllerCommandLineOwnership -CommandLine $OtherAppDirectory -PythonPath $Python -BasePythonPath $BasePython -Port 8765 | Should -Be $false
+            Test-ControllerCommandLineOwnership -CommandLine $Owned -PythonPath $Python -BasePythonPath 'C:\other\python.exe' -Port 8765 | Should -Be $false
+        }
+
         It 'requires the actual process executable to match the repository venv' {
             $Python = 'C:\freetv\.venv\Scripts\python.exe'
             $CommandLine = 'C:\freetv\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8765'
@@ -70,9 +83,21 @@ Describe 'TVBox.Startup Module Tests' {
             Test-ControllerProcessOwnership -Process $Spoofed -PythonPath $Python -Port 8765 | Should -Be $false
         }
 
+        It 'does not own a base-runtime process without its venv parent' {
+            $Python = 'C:\freetv\.venv\Scripts\python.exe'
+            $BaseCommandLine = 'C:\Python311\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8765 --app-dir C:\freetv\backend'
+            $VenvCommandLine = 'C:\freetv\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8765 --app-dir C:\freetv\backend'
+            $Owned = [PSCustomObject]@{ ExecutablePath = 'C:\Python311\python.exe'; CommandLine = $BaseCommandLine }
+            $Mismatched = [PSCustomObject]@{ ExecutablePath = 'C:\Python311\python.exe'; CommandLine = $VenvCommandLine }
+
+            Test-ControllerProcessOwnership -Process $Owned -PythonPath $Python -Port 8765 | Should -Be $false
+            Test-ControllerProcessOwnership -Process $Mismatched -PythonPath $Python -Port 8765 | Should -Be $false
+        }
+
         It 'accepts the Windows venv launcher and base-Python child topology only as one owned tree' {
             $Python = 'C:\freetv\.venv\Scripts\python.exe'
             $CommandLine = 'C:\freetv\.venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8765 --app-dir C:\freetv\backend'
+            $BaseCommandLine = 'C:\Python314\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8765 --app-dir C:\freetv\backend'
             $Child = [PSCustomObject]@{
                 ProcessId = 202
                 ParentProcessId = 101
@@ -91,9 +116,39 @@ Describe 'TVBox.Startup Module Tests' {
                 ExecutablePath = $Python
                 CommandLine = $CommandLine
             }
+            $ForeignParent = [PSCustomObject]@{
+                ProcessId = 101
+                ParentProcessId = 50
+                ExecutablePath = 'C:\other\python.exe'
+                CommandLine = 'C:\other\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8765 --app-dir C:\freetv\backend'
+            }
+            $WrongChildExecutable = [PSCustomObject]@{
+                ProcessId = 303
+                ParentProcessId = 101
+                ExecutablePath = 'C:\other\python.exe'
+                CommandLine = $CommandLine
+            }
+            $BaseCommandChild = [PSCustomObject]@{
+                ProcessId = 404
+                ParentProcessId = 101
+                ExecutablePath = 'C:\Python314\python.exe'
+                CommandLine = $BaseCommandLine
+            }
+            $BaseChildWithoutAppDirectory = [PSCustomObject]@{
+                ProcessId = 505
+                ParentProcessId = 101
+                ExecutablePath = 'C:\Python314\python.exe'
+                CommandLine = 'C:\Python314\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8765'
+            }
 
-            Test-ControllerProcessTreeOwnership -Process $Child -ParentProcess $Parent -PythonPath $Python -Port 8765 | Should -Be $true
-            Test-ControllerProcessTreeOwnership -Process $Child -ParentProcess $WrongParent -PythonPath $Python -Port 8765 | Should -Be $false
+            Test-ControllerProcessTreeOwnership -Process $Child -ParentProcess $Parent -PythonPath $Python -BasePythonPath 'C:\Python314\python.exe' -Port 8765 | Should -Be $true
+            Test-ControllerProcessTreeOwnership -Process $BaseCommandChild -ParentProcess $Parent -PythonPath $Python -BasePythonPath 'C:\Python314\python.exe' -Port 8765 | Should -Be $true
+            Test-ControllerProcessTreeOwnership -Process $BaseCommandChild -ParentProcess $null -PythonPath $Python -BasePythonPath 'C:\Python314\python.exe' -Port 8765 | Should -Be $false
+            Test-ControllerProcessTreeOwnership -Process $BaseCommandChild -ParentProcess $Parent -PythonPath $Python -Port 8765 | Should -Be $false
+            Test-ControllerProcessTreeOwnership -Process $BaseChildWithoutAppDirectory -ParentProcess $Parent -PythonPath $Python -BasePythonPath 'C:\Python314\python.exe' -Port 8765 | Should -Be $false
+            Test-ControllerProcessTreeOwnership -Process $Child -ParentProcess $WrongParent -PythonPath $Python -BasePythonPath 'C:\Python314\python.exe' -Port 8765 | Should -Be $false
+            Test-ControllerProcessTreeOwnership -Process $Child -ParentProcess $ForeignParent -PythonPath $Python -BasePythonPath 'C:\Python314\python.exe' -Port 8765 | Should -Be $false
+            Test-ControllerProcessTreeOwnership -Process $WrongChildExecutable -ParentProcess $Parent -PythonPath $Python -BasePythonPath 'C:\Python314\python.exe' -Port 8765 | Should -Be $false
         }
 
         It 'rejects loopback or duplicate host bindings' {

@@ -34,6 +34,7 @@ function Get-ManagedControllerProcess {
     param(
         [int]$ProcessId,
         [string]$PythonPath,
+        [string]$BasePythonPath,
         [int]$Port
     )
 
@@ -48,6 +49,7 @@ function Get-ManagedControllerProcess {
         -Process $Process `
         -ParentProcess $ParentProcess `
         -PythonPath $PythonPath `
+        -BasePythonPath $BasePythonPath `
         -Port $Port)) {
         return $null
     }
@@ -113,6 +115,7 @@ try {
 }
 
 if (-not (Test-Path $Python)) { throw 'Python virtual environment was not found. Run .\scripts\setup.ps1 first.' }
+$BasePython = Resolve-PythonBaseExecutable -PythonPath $Python
 if (-not (Test-Path $FrontendIndex)) {
     Write-Host 'Frontend build was not found; building it now...'
     Push-Location (Join-Path $Root 'frontend')
@@ -158,6 +161,7 @@ if ($null -ne $Listener) {
     $ExistingController = Get-ManagedControllerProcess `
         -ProcessId $Listener.OwningProcess `
         -PythonPath $Python `
+        -BasePythonPath $BasePython `
         -Port $Port
     if ($null -eq $ExistingController) {
         throw "Configured server port $Port is already in use by a process that is not this PC TV Controller."
@@ -314,6 +318,7 @@ if ($Supervise) {
     $SupervisedProcess = Get-ManagedControllerProcess `
         -ProcessId $SupervisedListener.OwningProcess `
         -PythonPath $Python `
+        -BasePythonPath $BasePython `
         -Port $Port
     if ($null -eq $SupervisedProcess) {
         throw 'Cannot supervise a controller process that is not owned by this checkout.'

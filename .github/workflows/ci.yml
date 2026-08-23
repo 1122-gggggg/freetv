@@ -88,13 +88,52 @@ jobs:
             $process = Get-CimInstance Win32_Process -Filter "ProcessId = $($listener.OwningProcess)"
             $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.ParentProcessId)"
             $python = (Resolve-Path ./.venv/Scripts/python.exe).Path
+            $basePython = Resolve-PythonBaseExecutable -PythonPath $python
             if (-not (Test-ControllerProcessTreeOwnership `
-              -Process $process -ParentProcess $parent -PythonPath $python -Port 8765)) {
+              -Process $process `
+              -ParentProcess $parent `
+              -PythonPath $python `
+              -BasePythonPath $basePython `
+              -Port 8765)) {
+              $listenerCommandOwned = Test-ControllerCommandLineOwnership `
+                -CommandLine ([string]$process.CommandLine) `
+                -PythonPath $python `
+                -BasePythonPath $basePython `
+                -Port 8765
+              $parentOwned = Test-ControllerProcessOwnership `
+                -Process $parent -PythonPath $python -Port 8765
+              $listenerExecutableName = [System.IO.Path]::GetFileName(
+                [string]$process.ExecutablePath
+              )
+              $parentExecutableName = [System.IO.Path]::GetFileName(
+                [string]$parent.ExecutablePath
+              )
+              Write-Warning -WarningAction Continue -Message (
+                "Listener PID $($process.ProcessId) failed ownership: " +
+                "parent_pid=$($process.ParentProcessId), " +
+                "listener_exe=$listenerExecutableName, " +
+                "parent_exe=$parentExecutableName, " +
+                "listener_command_owned=$listenerCommandOwned, " +
+                "parent_owned=$parentOwned."
+              )
               throw 'Refusing to stop a controller process that is not owned by this checkout.'
             }
             Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+            $deadline = (Get-Date).AddSeconds(10)
+            do {
+              $remaining = Get-NetTCPConnection `
+                -LocalPort 8765 `
+                -State Listen `
+                -ErrorAction SilentlyContinue |
+                Where-Object { $_.OwningProcess -eq $process.ProcessId } |
+                Select-Object -First 1
+              if ($null -eq $remaining) { return }
+              Start-Sleep -Milliseconds 250
+            } while ((Get-Date) -lt $deadline)
+            throw "Controller process $($process.ProcessId) did not release port 8765."
           }
 
+          $smokeFailure = $null
           try {
             ./scripts/start.ps1 -NoBrowser
             & ./.venv/Scripts/python.exe ./scripts/integration-smoke.py `
@@ -121,8 +160,21 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "HTTPS integration smoke failed with exit code $LASTEXITCODE."
             }
+          } catch {
+            $smokeFailure = $_
+            throw
           } finally {
-            Stop-OwnedController
+            try {
+              Stop-OwnedController
+            } catch {
+              if ($null -eq $smokeFailure) {
+                throw
+              }
+              $cleanupMessage = ([string]$_.Exception.Message) -replace '[\r\n]+', ' '
+              Write-Warning -WarningAction Continue -Message (
+                "Controller cleanup also failed after the smoke failure: $cleanupMessage"
+              )
+            }
           }
 
   mobile:

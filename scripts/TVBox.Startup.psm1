@@ -85,6 +85,50 @@ function ConvertFrom-ControllerCommandLine {
     )
 }
 
+function Resolve-PythonBaseExecutable {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PythonPath
+    )
+
+    if (
+        -not [System.IO.Path]::IsPathRooted($PythonPath) -or
+        -not (Test-Path -LiteralPath $PythonPath -PathType Leaf)
+    ) {
+        throw "Python virtual-environment executable was not found: $PythonPath"
+    }
+
+    $ProbeExitCode = -1
+    $ProbeOutput = @()
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    try {
+        # Some Windows Python installations use a small venv launcher while
+        # the listening process runs from sys._base_executable. Query that
+        # relationship from the trusted venv instead of guessing paths.
+        $ErrorActionPreference = 'Continue'
+        $ProbeOutput = @(& $PythonPath -I -S -c 'import sys;print(sys._base_executable)' 2>$null)
+        $ProbeExitCode = $LASTEXITCODE
+    } catch {
+        throw "Could not query the base Python executable from $PythonPath."
+    } finally {
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
+    if ($ProbeExitCode -ne 0) {
+        throw "Could not query the base Python executable from $PythonPath (exit code $ProbeExitCode)."
+    }
+
+    $Candidate = [string]($ProbeOutput | Select-Object -Last 1)
+    if (
+        [string]::IsNullOrWhiteSpace($Candidate) -or
+        -not [System.IO.Path]::IsPathRooted($Candidate.Trim()) -or
+        -not (Test-Path -LiteralPath $Candidate.Trim() -PathType Leaf)
+    ) {
+        throw "The virtual environment reported an invalid base Python executable: $Candidate"
+    }
+    return (Resolve-Path -LiteralPath $Candidate.Trim()).Path
+}
+
 function Test-CommandLineOptionValue {
     [CmdletBinding()]
     param(
@@ -160,6 +204,8 @@ function Test-ControllerCommandLineOwnership {
         [Parameter(Mandatory = $true)]
         [string]$PythonPath,
 
+        [string]$BasePythonPath = '',
+
         [Parameter(Mandatory = $true)]
         [int]$Port
     )
@@ -181,7 +227,29 @@ function Test-ControllerCommandLineOwnership {
     } catch {
         return $false
     }
-    if (-not [string]::Equals($ActualPythonPath, $ExpectedPythonPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+
+    $UsesVenvPython = [string]::Equals(
+        $ActualPythonPath,
+        $ExpectedPythonPath,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )
+    $UsesBasePython = $false
+    if (-not [string]::IsNullOrWhiteSpace($BasePythonPath)) {
+        try {
+            if (-not [System.IO.Path]::IsPathRooted($BasePythonPath)) {
+                return $false
+            }
+            $ExpectedBasePythonPath = [System.IO.Path]::GetFullPath($BasePythonPath)
+            $UsesBasePython = [string]::Equals(
+                $ActualPythonPath,
+                $ExpectedBasePythonPath,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        } catch {
+            return $false
+        }
+    }
+    if (-not $UsesVenvPython -and -not $UsesBasePython) {
         return $false
     }
     if ($Tokens[1] -ine '-m' -or $Tokens[2] -ine 'uvicorn' -or $Tokens[3] -ine 'app.main:app') {
@@ -200,10 +268,20 @@ function Test-ControllerCommandLineOwnership {
 
     $ExpectedProjectRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $ExpectedPythonPath))
     $ExpectedAppDirectory = Join-Path $ExpectedProjectRoot 'backend'
-    $AppDirectoryMatches = (
-        (Test-CommandLineOptionAbsent -Tokens $Tokens -Name '--app-dir') -or
-        (Test-CommandLineOptionValue -Tokens $Tokens -Name '--app-dir' -ExpectedValue $ExpectedAppDirectory -PathValue)
-    )
+    $HasNoAppDirectory = Test-CommandLineOptionAbsent -Tokens $Tokens -Name '--app-dir'
+    $AppDirectoryMatches = Test-CommandLineOptionValue `
+        -Tokens $Tokens `
+        -Name '--app-dir' `
+        -ExpectedValue $ExpectedAppDirectory `
+        -PathValue
+
+    # Older launches made directly through this repository's venv omitted
+    # --app-dir. A base-runtime command is only safe to own when it names this
+    # checkout's backend explicitly, because that executable may be shared by
+    # multiple virtual environments.
+    if ($UsesVenvPython -and $HasNoAppDirectory) {
+        $AppDirectoryMatches = $true
+    }
 
     return (
         (Test-CommandLineOptionValue -Tokens $Tokens -Name '--host' -ExpectedValue '0.0.0.0') -and
@@ -234,14 +312,25 @@ function Test-ControllerProcessOwnership {
     }
     try {
         $ActualExecutablePath = [System.IO.Path]::GetFullPath($ExecutablePath)
-        $ExpectedPythonPath = [System.IO.Path]::GetFullPath($PythonPath)
+        $CommandTokens = @(ConvertFrom-ControllerCommandLine -CommandLine $CommandLine)
+        if ($CommandTokens.Count -eq 0 -or -not [System.IO.Path]::IsPathRooted($CommandTokens[0])) {
+            return $false
+        }
+        $CommandExecutablePath = [System.IO.Path]::GetFullPath($CommandTokens[0])
     } catch {
         return $false
     }
-    if (-not [string]::Equals($ActualExecutablePath, $ExpectedPythonPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if (-not [string]::Equals(
+        $ActualExecutablePath,
+        $CommandExecutablePath,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )) {
         return $false
     }
-    return Test-ControllerCommandLineOwnership -CommandLine $CommandLine -PythonPath $PythonPath -Port $Port
+    return Test-ControllerCommandLineOwnership `
+        -CommandLine $CommandLine `
+        -PythonPath $PythonPath `
+        -Port $Port
 }
 
 function Test-ControllerProcessTreeOwnership {
@@ -254,11 +343,16 @@ function Test-ControllerProcessTreeOwnership {
         [Parameter(Mandatory = $true)]
         [string]$PythonPath,
 
+        [string]$BasePythonPath = '',
+
         [Parameter(Mandatory = $true)]
         [int]$Port
     )
 
-    if (Test-ControllerProcessOwnership -Process $Process -PythonPath $PythonPath -Port $Port) {
+    if (Test-ControllerProcessOwnership `
+        -Process $Process `
+        -PythonPath $PythonPath `
+        -Port $Port) {
         return $true
     }
     if ($null -eq $Process -or $null -eq $ParentProcess) {
@@ -267,17 +361,42 @@ function Test-ControllerProcessTreeOwnership {
 
     $ParentProcessId = Get-OptionalSetting -Target $Process -PropertyName 'ParentProcessId'
     $ActualParentProcessId = Get-OptionalSetting -Target $ParentProcess -PropertyName 'ProcessId'
+    $ExecutablePath = [string](Get-OptionalSetting -Target $Process -PropertyName 'ExecutablePath' -Default '')
     $CommandLine = [string](Get-OptionalSetting -Target $Process -PropertyName 'CommandLine' -Default '')
+    try {
+        if (
+            [string]::IsNullOrWhiteSpace($BasePythonPath) -or
+            [string]::IsNullOrWhiteSpace($ExecutablePath) -or
+            -not [System.IO.Path]::IsPathRooted($BasePythonPath) -or
+            -not [System.IO.Path]::IsPathRooted($ExecutablePath) -or
+            -not [string]::Equals(
+                [System.IO.Path]::GetFullPath($ExecutablePath),
+                [System.IO.Path]::GetFullPath($BasePythonPath),
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        ) {
+            return $false
+        }
+    } catch {
+        return $false
+    }
     if (
         $null -eq $ParentProcessId -or
         $null -eq $ActualParentProcessId -or
         [int]$ParentProcessId -ne [int]$ActualParentProcessId -or
-        -not (Test-ControllerProcessOwnership -Process $ParentProcess -PythonPath $PythonPath -Port $Port)
+        -not (Test-ControllerProcessOwnership `
+            -Process $ParentProcess `
+            -PythonPath $PythonPath `
+            -Port $Port)
     ) {
         return $false
     }
 
-    return Test-ControllerCommandLineOwnership -CommandLine $CommandLine -PythonPath $PythonPath -Port $Port
+    return Test-ControllerCommandLineOwnership `
+        -CommandLine $CommandLine `
+        -PythonPath $PythonPath `
+        -BasePythonPath $BasePythonPath `
+        -Port $Port
 }
 
 function Test-ControllerCommandLineTransport {
@@ -639,6 +758,7 @@ function Remove-AutostartTask {
 Export-ModuleMember -Function @(
     'Get-OptionalSetting',
     'Get-StartupSettings',
+    'Resolve-PythonBaseExecutable',
     'Test-ControllerCommandLineOwnership',
     'Test-ControllerProcessOwnership',
     'Test-ControllerProcessTreeOwnership',
