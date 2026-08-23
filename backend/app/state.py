@@ -60,5 +60,7 @@ class StateStore:
 
     async def update(self, **changes: object) -> ControllerState:
         async with self._lock:
-            self._state = self._state.model_copy(update=changes)
+            state_data = self._state.model_dump()
+            state_data.update(changes)
+            self._state = ControllerState.model_validate(state_data)
             return self._state.model_copy(deep=True)

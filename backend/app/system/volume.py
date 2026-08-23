@@ -44,9 +44,13 @@ class WindowsVolumeController:
 
             CoInitialize()
             device = AudioUtilities.GetSpeakers()
-            interface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            self._endpoint = cast(interface, POINTER(IAudioEndpointVolume))
+            self._endpoint = getattr(device, "EndpointVolume", None)
+            if self._endpoint is None:
+                interface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                self._endpoint = cast(interface, POINTER(IAudioEndpointVolume))
             return self._endpoint
+        except CommandExecutionError:
+            raise
         except Exception as error:
             raise CommandExecutionError(
                 "volume_unavailable", "Windows system volume is unavailable."

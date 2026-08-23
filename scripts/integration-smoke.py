@@ -296,10 +296,17 @@ async def connect_ws(
         "open_timeout": timeout,
         "close_timeout": timeout,
     }
-    if "additional_headers" in sig.parameters:
-        kwargs["additional_headers"] = headers
-    else:
-        kwargs["extra_headers"] = headers
+    origin = next((value for name, value in headers.items() if name.casefold() == "origin"), None)
+    if origin is not None:
+        kwargs["origin"] = origin
+    additional_headers = {
+        name: value for name, value in headers.items() if name.casefold() not in {"host", "origin"}
+    }
+    if additional_headers:
+        if "additional_headers" in sig.parameters:
+            kwargs["additional_headers"] = additional_headers
+        else:
+            kwargs["extra_headers"] = additional_headers
     return await websockets.connect(uri, **kwargs)
 
 

@@ -333,6 +333,26 @@ def test_remote_socket_rejects_connections_when_pre_auth_capacity_is_exhausted(t
     assert error.value.code == 1008
 
 
+def test_remote_socket_holds_its_capacity_slot_until_disconnect(tmp_path) -> None:
+    app = make_app(tmp_path)
+    app.state.remote_authentication_guard = RemoteAuthenticationGuard(
+        max_connections=1,
+        max_connections_per_client=1,
+    )
+    token = app.state.runtime.pairing.pair("482731")
+
+    with secure_remote_client(app) as client:
+        with client.websocket_connect(REMOTE_SOCKET_URL, headers=TRUSTED_REMOTE_HEADERS) as first:
+            authenticate(first, token, "auth-1")
+            with pytest.raises(WebSocketDisconnect) as error:
+                with client.websocket_connect(REMOTE_SOCKET_URL, headers=TRUSTED_REMOTE_HEADERS):
+                    pass
+
+        assert error.value.code == 1008
+        with client.websocket_connect(REMOTE_SOCKET_URL, headers=TRUSTED_REMOTE_HEADERS) as next_socket:
+            authenticate(next_socket, token, "auth-2")
+
+
 def test_remote_socket_closes_an_idle_pre_authentication_connection(tmp_path, monkeypatch) -> None:
     app = make_app(tmp_path)
     monkeypatch.setattr(main, "REMOTE_AUTHENTICATION_TIMEOUT_SECONDS", 0.01)

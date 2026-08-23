@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { RemotePage } from './RemotePage'
 
+const TAP_DELAY_MS = 260
+
 const socketMock = vi.hoisted(() => ({
   status: 'connected' as 'connecting' | 'authenticating' | 'connected' | 'disconnected' | 'error',
   sendCommand: vi.fn(() => 'request-id'),
@@ -33,6 +35,7 @@ describe('RemotePage', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     window.history.replaceState(null, '', '/remote')
   })
@@ -114,5 +117,132 @@ describe('RemotePage', () => {
     expect((screen.getByRole('button', { name: 'Volume +' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByLabelText('Text to send to the active application') as HTMLInputElement).disabled).toBe(true)
     expect(screen.getByText('Controls unlock automatically when the TV Box reconnects.')).toBeTruthy()
+  })
+
+  it('accumulates and clamps multiple touchpad moves queued in one animation frame', () => {
+    const frames: FrameRequestCallback[] = []
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    vi.stubGlobal('requestAnimationFrame', requestFrame)
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    render(
+      <RemotePage
+        token="paired-token-value-that-is-long-enough"
+        onPaired={vi.fn()}
+        onForget={vi.fn()}
+        onAuthenticationFailed={vi.fn()}
+      />,
+    )
+    const touchpad = screen.getByRole('application', { name: /Touchpad:/ })
+
+    fireEvent.touchStart(touchpad, { touches: [{ clientX: 0, clientY: 0 }] })
+    fireEvent.touchMove(touchpad, { touches: [{ clientX: 40, clientY: 0 }] })
+    fireEvent.touchMove(touchpad, { touches: [{ clientX: 80, clientY: 0 }] })
+
+    expect(requestFrame).toHaveBeenCalledOnce()
+    expect(socketMock.sendPointer).not.toHaveBeenCalled()
+    frames[0](0)
+    expect(socketMock.sendPointer).toHaveBeenCalledOnce()
+    expect(socketMock.sendPointer).toHaveBeenCalledWith('move', 100, 0)
+  })
+
+  it('does not turn accumulated small movements into a tap', () => {
+    vi.useFakeTimers()
+    const frames: FrameRequestCallback[] = []
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    render(
+      <RemotePage
+        token="paired-token-value-that-is-long-enough"
+        onPaired={vi.fn()}
+        onForget={vi.fn()}
+        onAuthenticationFailed={vi.fn()}
+      />,
+    )
+    const touchpad = screen.getByRole('application', { name: /Touchpad:/ })
+
+    fireEvent.touchStart(touchpad, { touches: [{ clientX: 10, clientY: 10 }] })
+    fireEvent.touchMove(touchpad, { touches: [{ clientX: 12, clientY: 10 }] })
+    fireEvent.touchMove(touchpad, { touches: [{ clientX: 14, clientY: 10 }] })
+    fireEvent.touchEnd(touchpad, { touches: [] })
+    frames[0](0)
+    vi.advanceTimersByTime(TAP_DELAY_MS + 1)
+
+    expect(socketMock.sendPointer).toHaveBeenCalledOnce()
+    expect(socketMock.sendPointer).toHaveBeenCalledWith('move', 6, 0)
+  })
+
+  it('cancels queued touchpad movement without dispatching a move or tap', () => {
+    vi.useFakeTimers()
+    const frames: FrameRequestCallback[] = []
+    const cancelFrame = vi.fn()
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    }))
+    vi.stubGlobal('cancelAnimationFrame', cancelFrame)
+
+    render(
+      <RemotePage
+        token="paired-token-value-that-is-long-enough"
+        onPaired={vi.fn()}
+        onForget={vi.fn()}
+        onAuthenticationFailed={vi.fn()}
+      />,
+    )
+    const touchpad = screen.getByRole('application', { name: /Touchpad:/ })
+
+    fireEvent.touchStart(touchpad, { touches: [{ clientX: 10, clientY: 10 }] })
+    fireEvent.touchMove(touchpad, { touches: [{ clientX: 11, clientY: 10 }] })
+    fireEvent.touchCancel(touchpad, { touches: [] })
+
+    expect(cancelFrame).toHaveBeenCalledWith(1)
+    frames[0](0)
+    vi.advanceTimersByTime(TAP_DELAY_MS + 1)
+    expect(socketMock.sendPointer).not.toHaveBeenCalled()
+  })
+
+  it('continues as pointer movement when a two-finger scroll drops to one finger', () => {
+    vi.useFakeTimers()
+    const frames: FrameRequestCallback[] = []
+    const cancelFrame = vi.fn()
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    }))
+    vi.stubGlobal('cancelAnimationFrame', cancelFrame)
+
+    render(
+      <RemotePage
+        token="paired-token-value-that-is-long-enough"
+        onPaired={vi.fn()}
+        onForget={vi.fn()}
+        onAuthenticationFailed={vi.fn()}
+      />,
+    )
+    const touchpad = screen.getByRole('application', { name: /Touchpad:/ })
+
+    fireEvent.touchStart(touchpad, {
+      touches: [{ clientX: 10, clientY: 20 }, { clientX: 20, clientY: 20 }],
+    })
+    fireEvent.touchMove(touchpad, {
+      touches: [{ clientX: 10, clientY: 10 }, { clientX: 20, clientY: 10 }],
+    })
+    fireEvent.touchEnd(touchpad, { touches: [{ clientX: 20, clientY: 10 }] })
+    fireEvent.touchMove(touchpad, { touches: [{ clientX: 30, clientY: 10 }] })
+    fireEvent.touchEnd(touchpad, { touches: [] })
+    frames[1](0)
+    vi.advanceTimersByTime(TAP_DELAY_MS + 1)
+
+    expect(cancelFrame).toHaveBeenCalledWith(1)
+    expect(socketMock.sendPointer).toHaveBeenNthCalledWith(1, 'scroll', 0, 10)
+    expect(socketMock.sendPointer).toHaveBeenNthCalledWith(2, 'move', 15, 0)
   })
 })

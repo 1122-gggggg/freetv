@@ -85,6 +85,45 @@ input:disabled {
   touch-action: auto;
 }
 
+@media (min-width: 761px) and (max-height: 820px) {
+  .pairing-card {
+    min-width: 0;
+    padding: 0.55rem 0.8rem;
+  }
+
+  .pairing-card-content { gap: 0.85rem; }
+
+  .pairing-qr-wrapper { padding: 0.35rem; }
+
+  .pairing-qr-wrapper svg {
+    width: 92px;
+    height: 92px;
+  }
+
+  .pairing-code {
+    font-size: clamp(1.85rem, 2vw, 2.4rem);
+    line-height: 0.92;
+  }
+
+  .pairing-instructions {
+    margin: 0.3rem 0 0.25rem;
+    font-size: 0.85rem;
+    line-height: 1.2;
+  }
+
+  .pairing-url {
+    padding: 0.35rem 0.5rem;
+    font-size: clamp(0.8rem, 0.95vw, 1rem);
+    line-height: 1.25;
+  }
+
+  .pairing-url-unavailable {
+    margin-top: 0.25rem;
+    font-size: 0.82rem;
+    line-height: 1.25;
+  }
+}
+
 @media (max-width: 760px) {
   .pairing-card-content {
     align-items: center;
