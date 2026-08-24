@@ -22,6 +22,8 @@ class ChildProcess(Protocol):
 
     def terminate(self) -> None: ...
 
+    def kill(self) -> None: ...
+
     def wait(self, timeout: float) -> object: ...
 
 
@@ -47,6 +49,7 @@ class TrackedApplication:
 
 
 logger = logging.getLogger(__name__)
+_WINDOW_DISCOVERY_TIMEOUT_SECONDS = 10.0
 
 
 class ApplicationManager:
@@ -141,17 +144,36 @@ class ApplicationManager:
                 "application_launch_failed", f"無法開啟{app_name}。"
             ) from error
 
-        window_handle = await asyncio.to_thread(self._windows.find_window_for_pid, process.pid, 2.5)
+        window_handle = await asyncio.to_thread(
+            self._windows.find_window_for_pid,
+            process.pid,
+            _WINDOW_DISCOVERY_TIMEOUT_SECONDS,
+        )
         tracked = TrackedApplication(app=app, process=process, window_handle=window_handle)
+        if window_handle is None or not self._tracked_window_is_owned(tracked):
+            if not await self._terminate_process(process):
+                self._children.append(tracked)
+            raise CommandExecutionError(
+                "application_window_unavailable",
+                (
+                    f"無法取得控制器管理的{app_name}視窗。"
+                    f"請先關閉現有的{app_name}視窗再試一次。"
+                ),
+            )
+        self._windows.maximize(window_handle)
+        if not self._tracked_window_is_owned(tracked):
+            if not await self._terminate_process(process):
+                self._children.append(tracked)
+            raise CommandExecutionError(
+                "application_window_unavailable",
+                f"控制器管理的{app_name}視窗在就緒前已關閉。",
+            )
         self._minimize_current_window()
         self._children.append(tracked)
         self._current = tracked
         self._active_app = app
-        if window_handle is not None and self._tracked_window_is_owned(tracked):
-            self._windows.maximize(window_handle)
-        else:
-            tracked.window_handle = None
         log_event(logger, "application_launched", app=app.value, process_id=process.pid)
+
     async def return_home(self) -> None:
         self._minimize_current_window()
         self._active_app = ActiveApp.LAUNCHER
@@ -201,15 +223,11 @@ class ApplicationManager:
             )
 
     async def shutdown(self) -> None:
+        remaining: list[TrackedApplication] = []
         for tracked in self._children:
-            if tracked.process.poll() is not None:
-                continue
-            try:
-                tracked.process.terminate()
-                await asyncio.to_thread(tracked.process.wait, 2.0)
-            except (OSError, subprocess.TimeoutExpired):
-                continue
-        self._children.clear()
+            if not await self._terminate_process(tracked.process):
+                remaining.append(tracked)
+        self._children = remaining
         self._current = None
         self._active_app = ActiveApp.LAUNCHER
 
@@ -236,6 +254,24 @@ class ApplicationManager:
         except OSError:
             return False
         return self._windows.window_belongs_to_process(tracked.window_handle, tracked.process.pid)
+
+    @staticmethod
+    async def _terminate_process(process: ChildProcess) -> bool:
+        try:
+            if process.poll() is not None:
+                return True
+            process.terminate()
+            await asyncio.to_thread(process.wait, 2.0)
+            return True
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+                await asyncio.to_thread(process.wait, 2.0)
+                return True
+            except (OSError, subprocess.TimeoutExpired):
+                return False
+        except OSError:
+            return False
 
     @staticmethod
     def _default_process_launcher(arguments: list[str]) -> ChildProcess:

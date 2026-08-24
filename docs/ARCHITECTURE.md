@@ -4,8 +4,8 @@
 
 ```mermaid
 flowchart LR
-  Phone[Paired phone Remote] -->|LAN HTTPS / WSS| API[FastAPI controller]
-  TV[Local TV Launcher] -->|loopback HTTPS / WSS| API
+  Phone[Paired phone Remote] -->|LAN HTTP(S) / WS(S)| API[FastAPI controller]
+  TV[Local TV Launcher] -->|loopback HTTP(S) / WS(S)| API
   API --> Bus[CommandBus]
   Bus --> Apps[ApplicationManager]
   Bus --> Player[MpvController]
@@ -71,7 +71,7 @@ Browser lookup, process launch, mpv IPC, volume access, named-pipe input, and Wi
 
 ## Remote transport security
 
-Default `server.transport` is `"http"`: the controller accepts plaintext LAN Remote traffic at the controller's literal LAN IP with pairing-token auth and Host/Origin checks. The mDNS advertiser starts only in HTTPS mode because the native app consumes its `https_port` TXT record.
+Default `server.transport` is `"http"`: the controller accepts plaintext LAN Remote traffic at the controller's literal LAN IP with pairing-token auth and Host/Origin checks. The mDNS advertiser starts only in HTTPS mode and publishes an `https_port` TXT record for future discovery clients. The current native app pairs through the TV QR code or a manually entered numeric IP; it does not yet browse mDNS advertisements.
 
 Set `"transport": "https"` to restore encrypted Remote. In that mode `start.ps1` generates or reuses a CA under ignored `config\tls`, refreshes its leaf certificate when the controller IP changes, and starts Uvicorn with that certificate and key. The CA uses a DER `.cer` file so Windows and mobile OS certificate installers can consume it. It must be trusted separately on the TV Windows user and every Remote phone; the script prints its SHA-256 fingerprint for an out-of-band comparison.
 

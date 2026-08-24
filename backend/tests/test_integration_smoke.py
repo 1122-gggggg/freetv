@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import re
 import ssl
@@ -11,6 +12,7 @@ from typing import Any
 import pytest
 
 from app.security.tls import ensure_tls_materials
+
 
 def _load_smoke_module():
     root = Path(__file__).resolve().parents[2]
@@ -30,6 +32,56 @@ def _load_smoke_module():
     return module
 
 smoke = _load_smoke_module()
+
+
+def test_connect_ws_uses_protocol_origin_without_duplicate_host_headers(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+    expected_connection = object()
+
+    async def fake_connect(
+        uri: str,
+        *,
+        ssl: ssl.SSLContext,
+        open_timeout: float,
+        close_timeout: float,
+        origin: str | None = None,
+        additional_headers: dict[str, str] | None = None,
+    ) -> object:
+        captured.update(
+            uri=uri,
+            ssl=ssl,
+            open_timeout=open_timeout,
+            close_timeout=close_timeout,
+            origin=origin,
+            additional_headers=additional_headers,
+        )
+        return expected_connection
+
+    monkeypatch.setattr(smoke.websockets, "connect", fake_connect)
+    context = ssl.create_default_context()
+
+    connection = asyncio.run(
+        smoke.connect_ws(
+            "wss://192.168.1.44:8765/ws/remote",
+            ssl_context=context,
+            headers={
+                "Host": "192.168.1.44:8765",
+                "Origin": "https://192.168.1.44:8765",
+                "X-Smoke-Test": "yes",
+            },
+            timeout=3.0,
+        )
+    )
+
+    assert connection is expected_connection
+    assert captured == {
+        "uri": "wss://192.168.1.44:8765/ws/remote",
+        "ssl": context,
+        "open_timeout": 3.0,
+        "close_timeout": 3.0,
+        "origin": "https://192.168.1.44:8765",
+        "additional_headers": {"X-Smoke-Test": "yes"},
+    }
 
 
 def test_validate_host_address_accepts_valid_loopback_and_ipv4() -> None:
@@ -207,10 +259,16 @@ def test_validate_acknowledgement_invalid_structure_raises() -> None:
         smoke.validate_acknowledgement("not-a-dict", "req-1")  # type: ignore[arg-type]
 
     with pytest.raises(smoke.SmokeValidationError, match="Expected protocol version 1"):
-        smoke.validate_acknowledgement({"version": 2, "type": "ack", "request_id": "req-1", "success": True}, "req-1")
+        smoke.validate_acknowledgement(
+            {"version": 2, "type": "ack", "request_id": "req-1", "success": True},
+            "req-1",
+        )
 
     with pytest.raises(smoke.SmokeValidationError, match="Expected message type 'ack'"):
-        smoke.validate_acknowledgement({"version": 1, "type": "error", "request_id": "req-1", "success": True}, "req-1")
+        smoke.validate_acknowledgement(
+            {"version": 1, "type": "error", "request_id": "req-1", "success": True},
+            "req-1",
+        )
 
 
 def test_validate_state_valid_structure() -> None:

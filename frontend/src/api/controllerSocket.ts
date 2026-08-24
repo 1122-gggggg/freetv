@@ -17,6 +17,25 @@ type AcknowledgementListener = (acknowledgement: Acknowledgement) => void
 type ErrorListener = (error: ProtocolError) => void
 
 const MAX_RECONNECT_DELAY_MS = 10_000
+const MAX_RECONNECT_ATTEMPTS = 8
+const NON_RETRYABLE_CLOSE_CODES = new Set([1000, 1008, 4401])
+let fallbackRequestSequence = 0
+
+function createFallbackRequestId(cryptoApi: Crypto | undefined): string {
+  fallbackRequestSequence = fallbackRequestSequence >= Number.MAX_SAFE_INTEGER ? 1 : fallbackRequestSequence + 1
+
+  const randomWords = new Uint32Array(2)
+  if (typeof cryptoApi?.getRandomValues === 'function') {
+    cryptoApi.getRandomValues(randomWords)
+  } else {
+    for (let index = 0; index < randomWords.length; index += 1) {
+      randomWords[index] = Math.floor(Math.random() * 0x1_0000_0000)
+    }
+  }
+
+  const entropy = Array.from(randomWords, (word) => word.toString(16).padStart(8, '0')).join('')
+  return `req-${Date.now().toString(36)}-${fallbackRequestSequence.toString(36)}-${entropy}`
+}
 
 export class ControllerSocket {
   private readonly url: string
@@ -47,7 +66,6 @@ export class ControllerSocket {
 
     socket.addEventListener('open', () => {
       if (socket !== this.socket || this.closed) return
-      this.reconnectAttempt = 0
       if (this.token) {
         const requestId = this.requestId()
         this.authenticationRequestId = requestId
@@ -59,6 +77,7 @@ export class ControllerSocket {
         })
         this.setStatus('authenticating')
       } else {
+        this.reconnectAttempt = 0
         this.setStatus('connected')
       }
     })
@@ -72,12 +91,16 @@ export class ControllerSocket {
       if (socket === this.socket) this.setStatus('error')
     })
 
-    socket.addEventListener('close', () => {
+    socket.addEventListener('close', (event) => {
       if (socket !== this.socket) return
       this.socket = undefined
       if (this.closed) return
+      if (NON_RETRYABLE_CLOSE_CODES.has(event.code)) {
+        this.setStatus('error')
+        return
+      }
       this.setStatus('disconnected')
-      this.scheduleReconnect()
+      if (!this.scheduleReconnect()) this.setStatus('error')
     })
   }
 
@@ -156,6 +179,7 @@ export class ControllerSocket {
     if (message.type === 'ack') {
       if (message.request_id === this.authenticationRequestId) {
         this.authenticationRequestId = undefined
+        if (message.success) this.reconnectAttempt = 0
         this.setStatus(message.success ? 'connected' : 'error')
       }
       this.acknowledgementListeners.forEach((listener) => listener(message))
@@ -164,17 +188,20 @@ export class ControllerSocket {
     this.errorListeners.forEach((listener) => listener(message))
   }
 
-  private scheduleReconnect(): void {
+  private scheduleReconnect(): boolean {
+    if (this.reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) return false
     const delay = Math.min(500 * 2 ** this.reconnectAttempt, MAX_RECONNECT_DELAY_MS)
     this.reconnectAttempt += 1
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = undefined
       this.connect()
     }, delay)
+    return true
   }
 
   private requestId(): string {
-    return crypto.randomUUID()
+    const cryptoApi = globalThis.crypto
+    return typeof cryptoApi?.randomUUID === 'function' ? cryptoApi.randomUUID() : createFallbackRequestId(cryptoApi)
   }
 
   private setStatus(status: ConnectionStatus): void {

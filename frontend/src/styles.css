@@ -56,7 +56,7 @@ button:focus-visible, input:focus-visible {
   overflow: hidden;
   padding: clamp(1.5rem, 3vw, 3.5rem) clamp(2.5rem, 7vw, 10rem);
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   gap: clamp(1rem, 1.8vw, 2rem);
   background:
     radial-gradient(circle at 10% 0%, rgb(48 74 116 / 55%), transparent 32rem),
@@ -270,6 +270,78 @@ button:focus-visible, input:focus-visible {
 .pairing-submit { border-color: #f7d488; color: #1a1b20; background: #f7d488; }
 .pairing-submit:disabled { opacity: 0.6; }
 .form-status { min-height: 2.8rem; }
+
+@media (min-width: 761px) and (max-height: 820px) {
+  .tv-shell {
+    padding: 1rem clamp(2rem, 4vw, 6rem);
+    gap: 0.75rem;
+  }
+
+  .tv-header h1 {
+    font-size: clamp(2.6rem, 3.2vw, 3.6rem);
+    line-height: 0.9;
+  }
+
+  .tv-content { gap: clamp(1.25rem, 2.4vw, 2.5rem); }
+  .tv-grid { gap: 0.75rem; }
+
+  .tv-tile {
+    grid-template-rows: auto minmax(0, 1fr);
+    column-gap: 0.75rem;
+    padding: 0.75rem;
+    border-radius: 1rem;
+  }
+
+  .tile-badge {
+    width: clamp(2.6rem, 3vw, 3.1rem);
+    height: clamp(2.6rem, 3vw, 3.1rem);
+    border-radius: 0.75rem;
+    font-size: clamp(0.78rem, 1vw, 1rem);
+  }
+
+  .tile-label {
+    min-width: 0;
+    font-size: clamp(1.25rem, 1.75vw, 1.75rem);
+    line-height: 1.1;
+  }
+
+  .tile-detail {
+    min-width: 0;
+    max-height: 2.5em;
+    overflow: hidden;
+    display: -webkit-box;
+    color: #d2dae6;
+    font-size: clamp(0.78rem, 0.9vw, 0.9rem);
+    line-height: 1.25;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .tv-status-panel {
+    min-height: 11rem;
+    padding: 1rem;
+  }
+
+  .tv-status-panel strong { font-size: clamp(1.45rem, 2vw, 2rem); }
+
+  .tv-footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 1rem;
+  }
+
+  .tv-help {
+    max-width: 22rem;
+    gap: 0.5rem 1rem;
+    font-size: 0.82rem;
+  }
+
+  .live-region {
+    min-height: 1rem;
+    font-size: 0.85rem;
+    line-height: 1;
+  }
+}
 
 @media (max-width: 760px) {
   .tv-shell { height: auto; min-height: 100dvh; padding: 1.5rem; overflow: auto; }

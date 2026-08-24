@@ -36,6 +36,7 @@ describe('RemotePage', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     window.history.replaceState(null, '', '/remote')
   })
@@ -218,4 +219,5 @@ describe('RemotePage', () => {
     expect((screen.getByRole('button', { name: '語音' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText('電視盒重新連線後，按鍵會自動解鎖。')).toBeTruthy()
   })
+
 })

@@ -2,11 +2,13 @@
 
 ## First installation
 
-1. Install Python 3.11+. Node.js LTS is needed only if you clone the repo and `frontend\dist` is missing.
+1. Install Python 3.11+ as `python` on `PATH` or through the Windows `py` launcher. Node.js LTS is needed only if you clone the repo and `frontend\dist` is missing.
 2. Install Brave if YouTube should use Brave.
 3. Install [mpv](https://mpv.io/installation/) if Live TV is required. Add its directory to `PATH` or set `applications.mpv_path` in `config/settings.json`.
 4. In PowerShell at the repository root or unzipped Release directory, run `Set-ExecutionPolicy -Scope Process Bypass` then `./scripts/setup.ps1`.
 5. Review local `config/settings.json` and `config/channels.json`. Those files are intentionally ignored by Git because they are machine-specific. Default `server.transport` is `"http"`.
+
+Setup validates any existing `.venv` as an isolated Python 3.11+ environment. If it is incomplete, unusable, or too old, setup does not delete it; remove or rename it manually before retrying.
 
 ## Network and firewall
 
@@ -16,7 +18,7 @@ Find the Remote address by running `./scripts/start.ps1`; it prints the selected
 
 ## TV appliance behavior
 
-Run `./scripts/start.ps1` to start the backend, wait for health, and open the local TV page. When Edge is available, it starts the launcher in Edge's documented full-screen kiosk mode with an absolute dedicated profile directory (`--user-data-dir` under `config\edge-profile`), extensions disabled, and sync disabled. The launcher itself has no account state, and this dedicated user data directory ensures the TV kiosk runs in a separate process that does not share, lock, or affect YouTube or Netflix's normal browser profiles. If Edge is unavailable, the script warns and falls back to the default browser without profile overrides. The controller uses the MY TV page as the Home destination; keep that page open.
+Run `./scripts/start.ps1` to start the backend, wait for health, and open the local TV page. Re-running it restarts only this repository's non-reload production controller when transport or TLS material changed; an unrelated listener on the configured port is rejected. In HTTPS mode startup waits up to 30 seconds for an eligible private LAN address before issuing the controller certificate. If Wi-Fi is still unavailable, startup fails instead of creating a loopback-only certificate; the autostart task then uses its finite retry policy. When Edge is available, it starts the launcher in Edge's documented full-screen kiosk mode with an absolute dedicated profile directory (`--user-data-dir` under `config\edge-profile`), extensions disabled, and sync disabled. The launcher itself has no account state, and this dedicated user data directory ensures the TV kiosk runs in a separate process that does not share, lock, or affect YouTube or Netflix's normal browser profiles. If Edge is unavailable, the script warns and falls back to the default browser without profile overrides. The controller uses the MY TV page as the Home destination; keep that page open.
 
 For automatic start after sign-in:
 
@@ -24,7 +26,7 @@ For automatic start after sign-in:
 ./scripts/install-autostart.ps1
 ```
 
-This creates one current-user Task Scheduler task. It is not a Windows service and does not run in Session 0. Remove it with `./scripts/install-autostart.ps1 -Remove`.
+This creates one current-user Task Scheduler task that can start and continue on battery power. Its startup action remains attached as a controller supervisor and makes three one-minute restart attempts after a failure. Installation and removal refuse to touch an unrelated same-name task. It is not a Windows service and does not run in Session 0. Remove it with `./scripts/install-autostart.ps1 -Remove`.
 
 ## Application paths
 

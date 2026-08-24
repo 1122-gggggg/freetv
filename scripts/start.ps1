@@ -1,12 +1,18 @@
 [CmdletBinding()]
 param(
     [switch]$NoBrowser,
-    [switch]$NoTunnel
+    [switch]$NoTunnel,
+    [switch]$Supervise,
+    [switch]$AllowLoopbackOnlyTlsForTesting
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'TVBox.Startup.psm1') -Force
+
+if ($AllowLoopbackOnlyTlsForTesting -and $env:GITHUB_ACTIONS -ne 'true') {
+    throw '-AllowLoopbackOnlyTlsForTesting is reserved for isolated GitHub Actions smoke tests.'
+}
 
 $Root = Split-Path -Parent $PSScriptRoot
 
@@ -29,36 +35,23 @@ function Get-ManagedControllerProcess {
     param(
         [int]$ProcessId,
         [string]$PythonPath,
-        [string]$CertificatePath,
-        [int]$Port,
-        [string]$Transport = 'https'
+        [string]$BasePythonPath,
+        [int]$Port
     )
 
     $Process = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
     if ($null -eq $Process -or [string]::IsNullOrWhiteSpace($Process.CommandLine)) {
         return $null
     }
-    $PortPattern = [regex]::Escape([string]$Port)
-    $CertificateParameterPattern = $null
-    if ($Transport -eq 'https') {
-        $PythonPattern = [regex]::Escape((Resolve-Path -LiteralPath $PythonPath).Path)
-        $CertificatePattern = [regex]::Escape((Resolve-Path -LiteralPath $CertificatePath).Path)
-        $CertificateParameterPattern = '(?i)--ssl-certfile\s+"?' + $CertificatePattern + '"?(?:\s|$)'
-        if (
-            $Process.CommandLine -notmatch "(?i)$PythonPattern" -or
-            $Process.CommandLine -notmatch '(?i)(?:^|\s)-m\s+uvicorn\s+app\.main:app(?:\s|$)' -or
-            $Process.CommandLine -notmatch "(?i)--port\s+$PortPattern(?:\s|$)" -or
-            $Process.CommandLine -notmatch $CertificateParameterPattern
-        ) {
-            return $null
-        }
-        return $Process
-    }
-    if (
-        $Process.CommandLine -notmatch '(?i)(?:^|\s)-m\s+uvicorn\s+app\.main:app(?:\s|$)' -or
-        $Process.CommandLine -notmatch "(?i)--port\s+$PortPattern(?:\s|$)" -or
-        $Process.CommandLine -match '(?i)--ssl-certfile'
-    ) {
+    $ParentProcess = Get-CimInstance Win32_Process `
+        -Filter "ProcessId = $($Process.ParentProcessId)" `
+        -ErrorAction SilentlyContinue
+    if (-not (Test-ControllerProcessTreeOwnership `
+        -Process $Process `
+        -ParentProcess $ParentProcess `
+        -PythonPath $PythonPath `
+        -BasePythonPath $BasePythonPath `
+        -Port $Port)) {
         return $null
     }
     return $Process
@@ -74,9 +67,10 @@ function Test-ManagedControllerUsesCurrentCertificate {
         if ($null -eq $Process.CreationDate) {
             return $false
         }
-        $ControllerStartedAt = $Process.CreationDate.ToUniversalTime()
         $CertificateLastWrite = (Get-Item -LiteralPath $CertificatePath).LastWriteTimeUtc
-        return $ControllerStartedAt -ge $CertificateLastWrite
+        return Test-ControllerCertificateFreshness `
+            -ProcessCreationDate $Process.CreationDate `
+            -CertificateLastWriteTimeUtc $CertificateLastWrite
     } catch {
         return $false
     }
@@ -151,6 +145,7 @@ try {
 }
 
 if (-not (Test-Path $Python)) { throw 'Python virtual environment was not found. Run .\scripts\setup.ps1 first.' }
+$BasePython = Resolve-PythonBaseExecutable -PythonPath $Python
 if (-not (Test-Path $FrontendIndex)) {
     Write-Host 'Frontend build was not found; building it now...'
     Push-Location (Join-Path $Root 'frontend')
@@ -169,7 +164,13 @@ if ($Transport -eq 'https') {
     $TlsOutput = $null
     Push-Location $BackendDirectory
     try {
-        $TlsOutput = & $Python -m app.security.tls --directory $TlsDirectory
+        $TlsArguments = @('-m', 'app.security.tls', '--directory', $TlsDirectory)
+        if ($AllowLoopbackOnlyTlsForTesting) {
+            Write-Warning 'GitHub Actions smoke is issuing loopback-only TLS material.'
+        } else {
+            $TlsArguments += @('--wait-for-lan-seconds', '30')
+        }
+        $TlsOutput = & $Python @TlsArguments
         Assert-NativeSuccess 'Creating local TLS materials'
     } finally {
         Pop-Location
@@ -190,31 +191,45 @@ if ($null -ne $Listener) {
     $ExistingController = Get-ManagedControllerProcess `
         -ProcessId $Listener.OwningProcess `
         -PythonPath $Python `
-        -CertificatePath $(if ($null -ne $Tls) { $Tls.certificate } else { '' }) `
-        -Port $Port `
-        -Transport $Transport
+        -BasePythonPath $BasePython `
+        -Port $Port
     if ($null -eq $ExistingController) {
         throw "Configured server port $Port is already in use by a process that is not this PC TV Controller."
     }
-    if ($Transport -eq 'https') {
-        if (-not (Test-ManagedControllerUsesCurrentCertificate -Process $ExistingController -CertificatePath $Tls.certificate)) {
-            Write-Host 'Restarting PC TV Controller to load current TLS material...'
-            Stop-ManagedController -ProcessId $Listener.OwningProcess -Port $Port
-            $Listener = Get-Listener -Port $Port
-            if ($null -ne $Listener) {
-                throw "Configured server port $Port remained in use after stopping the previous PC TV Controller."
-            }
+
+    $TransportMatches = Test-ControllerCommandLineTransport `
+        -CommandLine $ExistingController.CommandLine `
+        -Transport $Transport `
+        -CertificatePath $(if ($null -ne $Tls) { [string]$Tls.certificate } else { '' }) `
+        -PrivateKeyPath $(if ($null -ne $Tls) { [string]$Tls.private_key } else { '' })
+    $CertificateIsCurrent = (
+        $Transport -ne 'https' -or
+        (Test-ManagedControllerUsesCurrentCertificate -Process $ExistingController -CertificatePath $Tls.certificate)
+    )
+
+    if (-not $TransportMatches -or -not $CertificateIsCurrent) {
+        if (-not $TransportMatches) {
+            Write-Host "Restarting PC TV Controller to apply the configured $($Transport.ToUpperInvariant()) transport and TLS paths..."
         } else {
-            Write-Host "Using existing PC TV Controller with current TLS material on port $Port."
+            Write-Host 'Restarting PC TV Controller to load current TLS material...'
         }
+        Stop-ManagedController -ProcessId $Listener.OwningProcess -Port $Port
+        $Listener = Get-Listener -Port $Port
+        if ($null -ne $Listener) {
+            throw "Configured server port $Port remained in use after stopping the previous PC TV Controller."
+        }
+    } elseif ($Transport -eq 'https') {
+        Write-Host "Using existing PC TV Controller with current HTTPS TLS material on port $Port."
     } else {
-        Write-Host "Using existing PC TV Controller on port $Port."
+        Write-Host "Using existing HTTP PC TV Controller on port $Port."
     }
 }
 if ($null -eq $Listener) {
     Write-Host 'Starting PC TV Controller...'
+    $BackendDirectoryArgument = '"{0}"' -f $BackendDirectory
     $UvicornArguments = @(
         '-m', 'uvicorn', 'app.main:app', '--host', $BindHost, '--port', $Port,
+        '--app-dir', $BackendDirectoryArgument,
         '--ws', 'websockets-sansio',
         '--limit-concurrency', '64', '--backlog', '64',
         '--ws-max-size', '65536', '--ws-max-queue', '16', '--timeout-keep-alive', '10'
@@ -230,6 +245,24 @@ if ($null -eq $Listener) {
 
 $HealthUrl = "${Scheme}://${HealthHost}:$Port/api/health"
 $PairingUrl = "${Scheme}://${HealthHost}:$Port/api/pairing"
+$HealthRequestParameters = @{
+    Uri        = $HealthUrl
+    TimeoutSec = 2
+}
+$PairingRequestParameters = @{
+    Uri        = $PairingUrl
+    TimeoutSec = 15
+}
+if (
+    $Transport -eq 'https' -and
+    (Get-Command Invoke-RestMethod).Parameters.ContainsKey('SkipCertificateCheck')
+) {
+    # PowerShell 7 uses HttpClient and ignores the Windows PowerShell 5.1
+    # ServicePointManager callback below. Its native switch is scoped to these
+    # loopback readiness requests and does not weaken Remote TLS validation.
+    $HealthRequestParameters.SkipCertificateCheck = $true
+    $PairingRequestParameters.SkipCertificateCheck = $true
+}
 $Deadline = (Get-Date).AddSeconds(30)
 $Health = $null
 $PairingInfo = $null
@@ -267,14 +300,14 @@ namespace PcTvBox
     try {
         do {
             try {
-                $Health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2
+                $Health = Invoke-RestMethod @HealthRequestParameters
                 if ($Health.status -eq 'ok') { break }
             } catch {
                 Start-Sleep -Milliseconds 250
             }
         } while ((Get-Date) -lt $Deadline)
         if ($Health -and $Health.status -eq 'ok') {
-            $PairingInfo = Invoke-RestMethod -Uri $PairingUrl -TimeoutSec 15
+            $PairingInfo = Invoke-RestMethod @PairingRequestParameters
         }
     } finally {
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $PreviousCertificateValidationCallback
@@ -282,14 +315,14 @@ namespace PcTvBox
 } else {
     do {
         try {
-            $Health = Invoke-RestMethod -Uri $HealthUrl -TimeoutSec 2
+            $Health = Invoke-RestMethod @HealthRequestParameters
             if ($Health.status -eq 'ok') { break }
         } catch {
             Start-Sleep -Milliseconds 250
         }
     } while ((Get-Date) -lt $Deadline)
     if ($Health -and $Health.status -eq 'ok') {
-        $PairingInfo = Invoke-RestMethod -Uri $PairingUrl -TimeoutSec 15
+        $PairingInfo = Invoke-RestMethod @PairingRequestParameters
     }
 }
 
@@ -364,4 +397,22 @@ if (-not $NoBrowser) {
         Write-Warning 'Microsoft Edge was not found; opening the TV Launcher with the default browser instead of kiosk mode.'
         Start-Process $LocalUrl
     }
+}
+
+if ($Supervise) {
+    $SupervisedListener = Get-Listener -Port $Port
+    if ($null -eq $SupervisedListener) {
+        throw "Cannot supervise the PC TV Controller because port $Port has no listener."
+    }
+    $SupervisedProcess = Get-ManagedControllerProcess `
+        -ProcessId $SupervisedListener.OwningProcess `
+        -PythonPath $Python `
+        -BasePythonPath $BasePython `
+        -Port $Port
+    if ($null -eq $SupervisedProcess) {
+        throw 'Cannot supervise a controller process that is not owned by this checkout.'
+    }
+    Write-Host "Supervising PC TV Controller process $($SupervisedProcess.ProcessId)."
+    Wait-Process -Id $SupervisedProcess.ProcessId -ErrorAction SilentlyContinue
+    throw "PC TV Controller process $($SupervisedProcess.ProcessId) exited unexpectedly."
 }

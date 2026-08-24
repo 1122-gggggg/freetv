@@ -15,26 +15,141 @@ function Assert-NativeSuccess {
     }
 }
 
-$Python = Get-Command python -ErrorAction SilentlyContinue
-$Node = Get-Command node -ErrorAction SilentlyContinue
+function Get-PythonRuntimeProbe {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Executable,
+
+        [string[]]$PrefixArguments = @(),
+
+        [Parameter(Mandatory = $true)]
+        [string]$DisplayName
+    )
+
+    $ProbeArguments = @($PrefixArguments) + @(
+        '-c',
+        'import json, sys; print(json.dumps({''version'': ''.''.join(str(part) for part in sys.version_info[:3]), ''prefix'': sys.prefix, ''base_prefix'': sys.base_prefix}))'
+    )
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $VersionOutput = & $Executable @ProbeArguments 2>$null
+        $ProbeExitCode = $LASTEXITCODE
+    } catch {
+        return $null
+    } finally {
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
+    if ($ProbeExitCode -ne 0) {
+        return $null
+    }
+
+    try {
+        $RuntimeMetadata = ([string](@($VersionOutput) | Select-Object -Last 1)) | ConvertFrom-Json
+        $Version = [version]([string]$RuntimeMetadata.version)
+    } catch {
+        return $null
+    }
+    return [PSCustomObject]@{
+        Executable      = $Executable
+        PrefixArguments = @($PrefixArguments)
+        DisplayName     = $DisplayName
+        Version         = $Version
+        Prefix          = [string]$RuntimeMetadata.prefix
+        BasePrefix      = [string]$RuntimeMetadata.base_prefix
+    }
+}
+
 $Npm = Get-Command npm -ErrorAction SilentlyContinue
 $SettingsPath = Join-Path $Root 'config\settings.json'
 $SettingsSource = if (Test-Path $SettingsPath) { $SettingsPath } else { Join-Path $Root 'config\settings.example.json' }
 $RawSettings = Get-Content -Raw -Path $SettingsSource | ConvertFrom-Json
 $Transport = (Get-StartupSettings -Settings $RawSettings).Transport
 
-if (-not $Python) { throw 'Python 3.11 or newer is required. Install it from https://www.python.org/downloads/windows/.' }
-
-$PythonVersionText = (& $Python.Source --version 2>&1).ToString().Trim()
-Assert-NativeSuccess 'Checking Python version'
-$PythonVersion = [version]($PythonVersionText -replace '^Python\s+', '')
-if ($PythonVersion -lt [version]'3.11') { throw "Python 3.11 or newer is required; found $PythonVersionText." }
-
+$MinimumPythonVersion = [version]'3.11'
+$VenvDirectory = Join-Path $Root '.venv'
 $VenvPython = Join-Path $Root '.venv\Scripts\python.exe'
-if (-not (Test-Path $VenvPython)) {
-    Write-Host 'Creating Python virtual environment...'
-    & $Python.Source -m venv (Join-Path $Root '.venv')
+if (Test-Path -LiteralPath $VenvDirectory) {
+    if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
+        throw 'Existing .venv is incomplete and was not changed. Remove or rename .venv manually, then re-run setup.ps1.'
+    }
+    $ExistingVenvRuntime = Get-PythonRuntimeProbe `
+        -Executable $VenvPython `
+        -DisplayName 'existing .venv Python'
+    if ($null -eq $ExistingVenvRuntime) {
+        throw 'Existing .venv Python could not run and was not changed. Remove or rename .venv manually, then re-run setup.ps1.'
+    }
+    if (-not (Test-PythonRuntimeVersion `
+        -VersionValue $ExistingVenvRuntime.Version `
+        -MinimumVersion $MinimumPythonVersion)) {
+        throw "Existing .venv uses Python $($ExistingVenvRuntime.Version), but Python 3.11 or newer is required. The environment was not changed; remove or rename .venv manually, then re-run setup.ps1."
+    }
+    if (-not (Test-PythonVirtualEnvironmentRuntime `
+        -Runtime $ExistingVenvRuntime `
+        -ExpectedDirectory $VenvDirectory `
+        -MinimumVersion $MinimumPythonVersion)) {
+        throw 'Existing .venv Python is not isolated to this project and was not changed. Remove or rename .venv manually, then re-run setup.ps1.'
+    }
+    Write-Host "Using existing .venv Python $($ExistingVenvRuntime.Version)."
+} else {
+    $RuntimeCandidates = @()
+    $PathPython = Get-Command python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $PathPython) {
+        $Candidate = Get-PythonRuntimeProbe `
+            -Executable $PathPython.Source `
+            -DisplayName 'python on PATH'
+        if ($null -ne $Candidate) {
+            $RuntimeCandidates += $Candidate
+        }
+    }
+
+    $PyLauncher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $PyLauncher) {
+        $LauncherProbes = @(
+            [PSCustomObject]@{ DisplayName = 'py -3.11'; PrefixArguments = @('-3.11') },
+            [PSCustomObject]@{ DisplayName = 'py -3'; PrefixArguments = @('-3') }
+        )
+        foreach ($LauncherProbe in $LauncherProbes) {
+            $Candidate = Get-PythonRuntimeProbe `
+                -Executable $PyLauncher.Source `
+                -PrefixArguments $LauncherProbe.PrefixArguments `
+                -DisplayName $LauncherProbe.DisplayName
+            if ($null -ne $Candidate) {
+                $RuntimeCandidates += $Candidate
+            }
+        }
+    }
+
+    $SelectedRuntime = Select-PythonRuntimeCandidate `
+        -Candidates $RuntimeCandidates `
+        -MinimumVersion $MinimumPythonVersion
+    if ($null -eq $SelectedRuntime) {
+        $DetectedRuntimes = @(
+            $RuntimeCandidates | ForEach-Object { "$($_.DisplayName): Python $($_.Version)" }
+        ) -join ', '
+        if ([string]::IsNullOrWhiteSpace($DetectedRuntimes)) {
+            $DetectedRuntimes = 'none'
+        }
+        throw "Python 3.11 or newer is required through 'python' on PATH or the Windows 'py' launcher; detected: $DetectedRuntimes. Install it from https://www.python.org/downloads/windows/."
+    }
+
+    Write-Host "Creating Python virtual environment with $($SelectedRuntime.DisplayName) (Python $($SelectedRuntime.Version))..."
+    $CreateVenvArguments = @($SelectedRuntime.PrefixArguments) + @('-m', 'venv', $VenvDirectory)
+    & $SelectedRuntime.Executable @CreateVenvArguments
     Assert-NativeSuccess 'Creating Python virtual environment'
+
+    $CreatedVenvRuntime = Get-PythonRuntimeProbe `
+        -Executable $VenvPython `
+        -DisplayName 'new .venv Python'
+    if (
+        -not (Test-PythonVirtualEnvironmentRuntime `
+            -Runtime $CreatedVenvRuntime `
+            -ExpectedDirectory $VenvDirectory `
+            -MinimumVersion $MinimumPythonVersion)
+    ) {
+        throw 'The new .venv does not contain a usable Python 3.11+ runtime. It was not deleted; inspect or remove it manually before retrying.'
+    }
 }
 
 Write-Host 'Installing backend dependencies...'

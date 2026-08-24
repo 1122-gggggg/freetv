@@ -213,6 +213,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     } catch {
       setListening(false)
     }
+
   }
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
