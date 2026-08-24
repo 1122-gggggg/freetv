@@ -10,8 +10,8 @@ class WindowsPowerController:
     async def sleep(self) -> None:
         if os.name != "nt":
             raise CommandExecutionError(
-                "windows_only", "Sleep control is only available on Windows."
+                "windows_only", "僅能在 Windows 上使用休眠控制。"
             )
         result = ctypes.windll.powrprof.SetSuspendState(False, True, False)
         if not result:
-            raise CommandExecutionError("sleep_failed", "Windows could not enter sleep mode.")
+            raise CommandExecutionError("sleep_failed", "Windows 無法進入休眠。")

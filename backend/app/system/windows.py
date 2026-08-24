@@ -62,7 +62,7 @@ class WindowsWindowController:
 
     def bring_launcher_to_foreground(self) -> None:
         self._require_windows()
-        handle = self._window_handle_with_title("MY TV")
+        handle = self._window_handle_with_title("我的電視")
         if handle is None:
             return
         user32 = ctypes.windll.user32

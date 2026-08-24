@@ -198,7 +198,7 @@ def create_app(
         if not attempts.may_attempt(client_host):
             log_event(logger, "pair_failure", client=client_host, reason="rate_limited")
             raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many pairing attempts."
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="配對嘗試次數過多。"
             )
         try:
             token = app.state.runtime.pairing.pair(payload.code)
@@ -206,13 +206,13 @@ def create_app(
             attempts.record_failure(client_host)
             log_event(logger, "pair_failure", client=client_host, reason="expired_code")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Pairing code expired."
+                status_code=status.HTTP_400_BAD_REQUEST, detail="配對碼已過期。"
             ) from error
         except PairingCodeInvalid as error:
             attempts.record_failure(client_host)
             log_event(logger, "pair_failure", client=client_host, reason="invalid_code")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Pairing code is invalid."
+                status_code=status.HTTP_400_BAD_REQUEST, detail="配對碼無效。"
             ) from error
         stale_sessions = await app.state.connections.remove_invalid_sessions(
             app.state.runtime.pairing.session_is_valid
@@ -230,7 +230,7 @@ def create_app(
         token = _bearer_token(request)
         if token is None or not app.state.runtime.pairing.verify_token(token):
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Remote token is invalid."
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="遙控器權杖無效。"
             )
         connections: ConnectionRegistry = app.state.connections
         async with app.state.dispatch_lock:
@@ -277,7 +277,7 @@ def create_app(
                 await _send_error(
                     websocket,
                     "authentication_required",
-                    "Authenticate before sending remote controls.",
+                    "請先驗證後再傳送遙控指令。",
                 )
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 return
@@ -288,7 +288,7 @@ def create_app(
                 await _send_error(
                     websocket,
                     "authentication_required",
-                    "Authenticate before sending remote controls.",
+                    "請先驗證後再傳送遙控指令。",
                 )
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 return
@@ -297,7 +297,7 @@ def create_app(
                 remote_session
             ):
                 log_event(logger, "remote_auth_failure", client=client_host)
-                await _send_error(websocket, "authentication_failed", "Remote token is invalid.")
+                await _send_error(websocket, "authentication_failed", "遙控器權杖無效。")
                 await websocket.close(code=REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE)
                 return
 
@@ -321,7 +321,7 @@ def create_app(
             except TimeoutError:
                 log_event(logger, "remote_session_expired", client=client_host)
                 await _send_error(
-                    websocket, "authentication_failed", "Remote token has expired."
+                    websocket, "authentication_failed", "遙控器權杖已過期。"
                 )
                 await websocket.close(code=REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE)
             except WebSocketDisconnect:
@@ -353,12 +353,12 @@ def create_app(
                     message = parse_client_message(await websocket.receive_json())
                 except (ValidationError, ValueError, TypeError):
                     await _send_error(
-                        websocket, "invalid_message", "Message does not match protocol version 1."
+                        websocket, "invalid_message", "訊息不符合通訊協定第 1 版。"
                     )
                     continue
                 if not isinstance(message, CommandMessage):
                     await _send_error(
-                        websocket, "invalid_message", "TV input accepts commands only."
+                        websocket, "invalid_message", "電視端只接受指令。"
                     )
                     continue
                 await _dispatch_and_broadcast(app, websocket, message)
@@ -377,7 +377,7 @@ def create_app(
         path = frontend / request.url.path.rsplit("/", maxsplit=1)[-1]
         if not path.is_file():
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Frontend asset was not built."
+                status_code=status.HTTP_404_NOT_FOUND, detail="尚未建置前端資源。"
             )
         return FileResponse(path)
 
@@ -393,7 +393,7 @@ def create_app(
         if not index.is_file():
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Frontend has not been built.",
+                detail="尚未建置前端。",
             )
         return FileResponse(index, headers=HTML_SECURITY_HEADERS)
 
@@ -408,19 +408,19 @@ async def _handle_remote_message(
         message = parse_client_message(payload)
     except (ValidationError, ValueError, TypeError):
         await _send_error(
-            websocket, "invalid_message", "Message does not match protocol version 1."
+            websocket, "invalid_message", "訊息不符合通訊協定第 1 版。"
         )
         return True
 
     if isinstance(message, AuthenticationMessage):
         await _send_error(
-            websocket, "invalid_message", "Authentication is only accepted when connecting."
+            websocket, "invalid_message", "僅能在連線時進行驗證。"
         )
         return True
     if await _dispatch_and_broadcast(app, websocket, message, session=session):
         return True
     log_event(logger, "remote_auth_failure", client=_websocket_host(websocket))
-    await _send_error(websocket, "authentication_failed", "Remote token is invalid.")
+    await _send_error(websocket, "authentication_failed", "遙控器權杖無效。")
     await websocket.close(code=REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE)
     return False
 
@@ -522,7 +522,7 @@ def _require_loopback_request(request: Request) -> None:
     if not _is_loopback(_client_host(request)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint is available only to the local TV launcher.",
+            detail="這個端點僅供本機電視啟動器使用。",
         )
 
 
@@ -552,7 +552,7 @@ def _require_local_tv_host(request: Request, port: int) -> None:
     if not _is_local_tv_host(request.headers.get("host"), port, default_port=default_port):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint is available only to the local TV launcher.",
+            detail="這個端點僅供本機電視啟動器使用。",
         )
 
 
@@ -565,7 +565,7 @@ def _require_trusted_remote_peer(request: Request) -> None:
     if not _is_trusted_remote_access(_client_host(request), request.headers.get("host")):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Remote access requires a connection from the controller LAN.",
+            detail="遠端連線必須來自控制器區網。",
         )
 
 
@@ -578,9 +578,9 @@ def _require_trusted_remote_host(request: Request, port: int, transport: str) ->
         default_port=_default_port_for_scheme(expected_scheme),
     ):
         detail = (
-            "Remote access requires HTTPS at this controller's LAN IP."
+            "遠端連線必須使用此控制器區網 IP 的 HTTPS。"
             if transport == "https"
-            else "Remote access requires this controller's LAN IP."
+            else "遠端連線必須使用此控制器的區網 IP。"
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -598,9 +598,9 @@ def _require_trusted_remote_origin(request: Request, port: int, transport: str) 
         expected_scheme=expected_scheme,
     ):
         detail = (
-            "Remote access requires HTTPS at this controller's LAN IP."
+            "遠端連線必須使用此控制器區網 IP 的 HTTPS。"
             if transport == "https"
-            else "Remote access requires this controller's LAN IP."
+            else "遠端連線必須使用此控制器的區網 IP。"
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

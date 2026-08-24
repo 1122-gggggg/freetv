@@ -82,5 +82,5 @@ def test_remote_route_rejects_public_peer_without_tunnel_host(monkeypatch) -> No
         response = client.get("/remote", headers={"host": "127.0.0.1:8765"})
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "Remote access requires a connection from the controller LAN."
+    assert response.json()["detail"] == "遠端連線必須來自控制器區網。"
 

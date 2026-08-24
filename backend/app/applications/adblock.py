@@ -14,16 +14,18 @@ import zipfile
 import httpx
 
 ADBLOCK_EXTENSION_ID = "gighmmpiobklfepjocnamgkkbiglidom"
-ADBLOCK_DOWNLOAD_URL = (
-    "https://clients2.google.com/service/update2/crx"
-    "?response=redirect&prodversion=120.0&acceptformat=crx3"
-    "&x=id%3Dgighmmpiobklfepjocnamgkkbiglidom%26uc"
-)
-ADBLOCK_DOWNLOAD_URL_FALLBACK = (
-    "https://clients2.google.com/service/update2/crx"
-    "?response=redirect&prodversion=128.0&acceptformat=crx3"
-    "&x=id%3Dgighmmpiobklfepjocnamgkkbiglidom%26uc"
-)
+
+
+def store_crx_url(extension_id: str, prodversion: str = "120.0") -> str:
+    return (
+        "https://clients2.google.com/service/update2/crx"
+        f"?response=redirect&prodversion={prodversion}&acceptformat=crx3"
+        f"&x=id%3D{extension_id}%26uc"
+    )
+
+
+ADBLOCK_DOWNLOAD_URL = store_crx_url(ADBLOCK_EXTENSION_ID)
+ADBLOCK_DOWNLOAD_URL_FALLBACK = store_crx_url(ADBLOCK_EXTENSION_ID, "128.0")
 
 
 def compute_extension_id(key_or_manifest: dict[str, Any] | str | bytes) -> str:
@@ -96,8 +98,36 @@ def unpack_crx(crx_bytes: bytes) -> tuple[bytes, str | None]:
     return zip_bytes, crx_id
 
 
+def download_store_crx(extension_id: str) -> bytes:
+    """Download a Chrome Web Store CRX3 from Google's update servers with fallback."""
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/128.0.0.0 Safari/537.36"
+        )
+    }
+    primary = store_crx_url(extension_id)
+    fallback = store_crx_url(extension_id, "128.0")
+    with httpx.Client(follow_redirects=True, timeout=30.0) as client:
+        resp = client.get(primary, headers=headers)
+        if resp.status_code == 200 and len(resp.content) >= 12:
+            return resp.content
+
+        fallback_resp = client.get(fallback, headers=headers)
+        if fallback_resp.status_code == 200 and len(fallback_resp.content) >= 12:
+            return fallback_resp.content
+
+        raise ValueError(
+            f"Failed to download CRX {extension_id}: primary HTTP {resp.status_code}, "
+            f"fallback HTTP {fallback_resp.status_code}"
+        )
+
+
 def download_adblock_crx(url: str = ADBLOCK_DOWNLOAD_URL) -> bytes:
     """Download AdBlock CRX3 file from Google Chrome update servers with fallback."""
+    if url == ADBLOCK_DOWNLOAD_URL:
+        return download_store_crx(ADBLOCK_EXTENSION_ID)
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -110,7 +140,6 @@ def download_adblock_crx(url: str = ADBLOCK_DOWNLOAD_URL) -> bytes:
         if resp.status_code == 200 and len(resp.content) >= 12:
             return resp.content
 
-        # Fallback to newer prodversion if 204 or empty
         fallback_resp = client.get(ADBLOCK_DOWNLOAD_URL_FALLBACK, headers=headers)
         if fallback_resp.status_code == 200 and len(fallback_resp.content) >= 12:
             return fallback_resp.content
@@ -121,8 +150,12 @@ def download_adblock_crx(url: str = ADBLOCK_DOWNLOAD_URL) -> bytes:
         )
 
 
-def ensure_adblock(directory: Path, crx_bytes: bytes | None = None) -> Path:
-    """Ensure unpacked AdBlock extension exists at directory with verified ID."""
+def ensure_store_extension(
+    directory: Path,
+    extension_id: str,
+    crx_bytes: bytes | None = None,
+) -> Path:
+    """Ensure an unpacked Chrome Web Store extension exists with the verified ID."""
     manifest_file = directory / "manifest.json"
 
     if manifest_file.is_file() and crx_bytes is None:
@@ -130,18 +163,18 @@ def ensure_adblock(directory: Path, crx_bytes: bytes | None = None) -> Path:
             manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
             computed_id = compute_extension_id(manifest_data)
             if computed_id:
-                if computed_id == ADBLOCK_EXTENSION_ID:
+                if computed_id == extension_id:
                     return directory
                 shutil.rmtree(directory, ignore_errors=True)
                 raise ValueError(
-                    f"Extension ID mismatch: expected {ADBLOCK_EXTENSION_ID}, got {computed_id}"
+                    f"Extension ID mismatch: expected {extension_id}, got {computed_id}"
                 )
             return directory
         except json.JSONDecodeError:
             shutil.rmtree(directory, ignore_errors=True)
 
     if crx_bytes is None:
-        crx_bytes = download_adblock_crx()
+        crx_bytes = download_store_crx(extension_id)
 
     try:
         zip_bytes, header_crx_id = unpack_crx(crx_bytes)
@@ -168,9 +201,9 @@ def ensure_adblock(directory: Path, crx_bytes: bytes | None = None) -> Path:
         if not computed_id and header_crx_id:
             computed_id = header_crx_id
 
-        if computed_id and computed_id != ADBLOCK_EXTENSION_ID:
+        if computed_id and computed_id != extension_id:
             raise ValueError(
-                f"Extension ID mismatch: expected {ADBLOCK_EXTENSION_ID}, got {computed_id}"
+                f"Extension ID mismatch: expected {extension_id}, got {computed_id}"
             )
 
         if directory.exists():
@@ -187,17 +220,21 @@ def ensure_adblock(directory: Path, crx_bytes: bytes | None = None) -> Path:
     return directory
 
 
+def ensure_adblock(directory: Path, crx_bytes: bytes | None = None) -> Path:
+    """Ensure unpacked AdBlock extension exists at directory with verified ID."""
+    return ensure_store_extension(directory, ADBLOCK_EXTENSION_ID, crx_bytes)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Download and verify AdBlock extension for TV Chrome profile.")
+    parser = argparse.ArgumentParser(description="下載並驗證電視 Chrome 設定檔使用的 AdBlock 擴充功能。")
     parser.add_argument(
         "--directory",
         type=Path,
         default=Path(__file__).resolve().parents[2] / "vendor" / "adblock",
-        help="Target directory for unpacked AdBlock extension",
+        help="解壓後 AdBlock 擴充功能的目標目錄",
     )
-    args = parser.parse_args()
     installed = ensure_adblock(args.directory)
-    print(f"AdBlock is ready at {installed}")
+    print(f"AdBlock 已就緒：{installed}")
 
 
 if __name__ == "__main__":

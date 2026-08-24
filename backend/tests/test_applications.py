@@ -123,13 +123,14 @@ def test_youtube_uses_isolated_chrome_kiosk_and_adblock(tmp_path: Path) -> None:
     assert argv[0].endswith("chrome.exe")
     assert "--kiosk" in argv
     assert any(part.startswith("--user-data-dir=") and "chrome-tv-profile" in part for part in argv)
-    assert any(
-        part.startswith("--load-extension=") and str(adblock).replace("\\", "/") in part.replace("\\", "/")
-        for part in argv
-    )
+    load_extension = next(part for part in argv if part.startswith("--load-extension="))
+    disable_except = next(part for part in argv if part.startswith("--disable-extensions-except="))
+    assert load_extension == f"--load-extension={adblock}"
+    assert disable_except == f"--disable-extensions-except={adblock}"
+    assert "," not in load_extension
+    assert "," not in disable_except
     assert "--start-maximized" not in argv
     assert argv[-1] == "https://www.youtube.com/"
-
 
 def test_netflix_stays_on_edge_without_adblock() -> None:
     manager, launcher, windows, _ = make_manager()
@@ -152,6 +153,32 @@ def test_missing_chrome_returns_chrome_not_found(tmp_path: Path) -> None:
 def test_missing_adblock_returns_adblock_not_installed() -> None:
     with pytest.raises(CommandExecutionError) as error:
         asyncio.run(make_manager(adblock_dir=Path("C:/missing-adblock"))[0].open(ActiveApp.YOUTUBE))
+    assert error.value.code == "adblock_not_installed"
+
+
+def test_default_adblock_dir_loads_vendor_adblock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adblock = tmp_path / "vendor" / "adblock"
+    adblock.mkdir(parents=True)
+    (adblock / "manifest.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr("app.applications.manager.project_root", lambda: tmp_path)
+    manager, launcher, _, _ = make_manager()
+    asyncio.run(manager.open(ActiveApp.YOUTUBE))
+    argv = launcher.calls[0]
+    load_extension = next(part for part in argv if part.startswith("--load-extension="))
+    disable_except = next(part for part in argv if part.startswith("--disable-extensions-except="))
+    assert load_extension == f"--load-extension={adblock}"
+    assert disable_except == f"--disable-extensions-except={adblock}"
+    assert "," not in load_extension
+
+
+def test_missing_default_adblock_dir_returns_adblock_not_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.applications.manager.project_root", lambda: tmp_path)
+    with pytest.raises(CommandExecutionError) as error:
+        asyncio.run(make_manager()[0].open(ActiveApp.YOUTUBE))
     assert error.value.code == "adblock_not_installed"
 
 
@@ -229,7 +256,7 @@ def test_failed_application_launch_keeps_the_existing_tracked_window_visible() -
         await manager.open(ActiveApp.NETFLIX)
         launcher.fail_next_launch = True
 
-        with pytest.raises(CommandExecutionError, match="Could not open Configured browser"):
+        with pytest.raises(CommandExecutionError, match="無法開啟已設定的瀏覽器"):
             await manager.open(ActiveApp.BROWSER)
 
         assert windows.minimized == []
@@ -247,7 +274,7 @@ def test_forwarding_rejects_input_when_the_tracked_window_loses_foreground() -> 
         windows.foreground_window = 123
         windows.allow_activation = False
 
-        with pytest.raises(CommandExecutionError, match="Bring the controller-opened application"):
+        with pytest.raises(CommandExecutionError, match="請先把控制器開啟的應用程式"):
             await manager.forward_command(Command.OK)
 
         assert input_controller.commands == []
@@ -264,7 +291,7 @@ def test_forwarding_rejects_input_after_the_tracked_process_exits() -> None:
         launcher.process.exit_code = 0
 
         with pytest.raises(
-            CommandExecutionError, match="controller-managed application window is not available"
+            CommandExecutionError, match="控制器管理的應用程式視窗目前無法接受遙控輸入"
         ):
             await manager.forward_command(Command.OK)
 
@@ -283,7 +310,7 @@ def test_forwarding_rejects_a_reused_tracked_window_handle() -> None:
         windows.window_owned_by_process = False
 
         with pytest.raises(
-            CommandExecutionError, match="controller-managed application window is not available"
+            CommandExecutionError, match="控制器管理的應用程式視窗目前無法接受遙控輸入"
         ):
             await manager.forward_command(Command.OK)
 

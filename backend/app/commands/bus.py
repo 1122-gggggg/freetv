@@ -83,14 +83,14 @@ class CommandBus:
                 return CommandOutcome(False, state, error.code, error.message)
             except Exception:
                 state = await self._state.update(
-                    error_message="The controller could not complete that action.",
+                    error_message="控制器無法完成這個操作。",
                     status_message=None,
                 )
                 return CommandOutcome(
                     False,
                     state,
                     "controller_error",
-                    "The controller could not complete that action.",
+                    "控制器無法完成這個操作。",
                 )
 
     async def dispatch_pointer(self, message: PointerActionMessage) -> CommandOutcome:
@@ -167,7 +167,7 @@ class CommandBus:
 
         if command is Command.POWER_SLEEP:
             await self._power.sleep()
-            state = await self._success_state(status_message="PC is going to sleep.")
+            state = await self._success_state(status_message="電腦即將進入休眠。")
             return CommandOutcome(True, state)
 
         if command in _LAUNCH_TARGETS:
@@ -240,7 +240,7 @@ class CommandBus:
             target = _TILE_COMMANDS.get(current.focused_tile)
             if target is None:
                 state = await self._success_state(
-                    status_message="Settings are configured in config/settings.json."
+                    status_message="請在 config/settings.json 設定此電視盒。"
                 )
                 return CommandOutcome(True, state)
             return await self._dispatch_command(target)
@@ -282,7 +282,7 @@ class CommandBus:
                 )
                 return CommandOutcome(True, state)
             raise CommandExecutionError(
-                "channel_source_not_active", "Open News or Live TV before changing channels."
+                "channel_source_not_active", "請先開啟新聞或電視再切換頻道。"
             )
         if command is Command.VOLUME_UP:
             level, muted = await self._volume.increase()
@@ -305,7 +305,7 @@ class CommandBus:
             await self._applications.forward_command(command)
             return await self._passive_success()
         raise CommandExecutionError(
-            "command_not_supported", "That control is not available for the active application."
+            "command_not_supported", "目前應用程式不支援這個操作。"
         )
 
     async def _navigate(self, current: ControllerState, command: Command) -> CommandOutcome:
@@ -319,7 +319,7 @@ class CommandBus:
                 await self._applications.forward_command(command)
                 return await self._passive_success()
             raise CommandExecutionError(
-                "command_not_supported", "That control is not available for the active application."
+                "command_not_supported", "目前應用程式不支援這個操作。"
             )
 
         focused_tile = _FOCUS_TRANSITIONS.get((current.focused_tile, command), current.focused_tile)
@@ -335,7 +335,7 @@ class CommandBus:
         }:
             raise CommandExecutionError(
                 "input_target_not_active",
-                "Open a controller-managed browser before using remote input.",
+                "請先開啟控制器管理的瀏覽器再使用遙控輸入。",
             )
         self._applications.require_input_target(current.active_app)
 
@@ -353,6 +353,6 @@ class CommandBus:
         return CommandOutcome(False, state, error.code, error.message)
 
     async def _unknown_failure(self) -> CommandOutcome:
-        message = "The controller could not complete that action."
+        message = "控制器無法完成這個操作。"
         state = await self._state.update(error_message=message, status_message=None)
         return CommandOutcome(False, state, "controller_error", message)

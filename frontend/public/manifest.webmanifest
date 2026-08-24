@@ -1,11 +1,12 @@
 {
-  "name": "MY TV Remote",
-  "short_name": "MY TV",
-  "description": "Local paired remote for PC TV Box.",
+  "name": "我的電視遙控器",
+  "short_name": "我的電視",
+  "description": "電腦電視盒的本機配對遙控器。",
   "start_url": "/remote",
   "display": "standalone",
   "background_color": "#080b12",
   "theme_color": "#080b12",
+  "lang": "zh-Hant",
   "icons": [
     {
       "src": "/icon.svg",

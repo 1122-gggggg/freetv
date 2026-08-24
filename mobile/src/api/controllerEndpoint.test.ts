@@ -42,13 +42,13 @@ describe('parseControllerPort', () => {
   })
 
   it('rejects out of range or non-numeric port strings', () => {
-    expect(() => parseControllerPort('0')).toThrow('Port must be a number')
-    expect(() => parseControllerPort('65536')).toThrow('Port must be a number')
-    expect(() => parseControllerPort('-1')).toThrow('Port must be a number')
-    expect(() => parseControllerPort('abc')).toThrow('Port must be a number')
-    expect(() => parseControllerPort('8765a')).toThrow('Port must be a number')
-    expect(() => parseControllerPort(0)).toThrow('Port must be a number')
-    expect(() => parseControllerPort(65536)).toThrow('Port must be a number')
+    expect(() => parseControllerPort('0')).toThrow('連接埠必須是 1 到 65535 之間的數字。')
+    expect(() => parseControllerPort('65536')).toThrow('連接埠必須是 1 到 65535 之間的數字。')
+    expect(() => parseControllerPort('-1')).toThrow('連接埠必須是 1 到 65535 之間的數字。')
+    expect(() => parseControllerPort('abc')).toThrow('連接埠必須是 1 到 65535 之間的數字。')
+    expect(() => parseControllerPort('8765a')).toThrow('連接埠必須是 1 到 65535 之間的數字。')
+    expect(() => parseControllerPort(0)).toThrow('連接埠必須是 1 到 65535 之間的數字。')
+    expect(() => parseControllerPort(65536)).toThrow('連接埠必須是 1 到 65535 之間的數字。')
   })
 })
 
@@ -66,16 +66,16 @@ describe('validateControllerTarget', () => {
 
   it('throws for invalid IPv4 host', () => {
     expect(() => validateControllerTarget('pc-tv.local', '8765')).toThrow(
-      'Please enter a valid IPv4 address',
+      '請輸入有效的 IPv4 位址（例如 192.168.1.10）。',
     )
     expect(() => validateControllerTarget('', '8765')).toThrow(
-      'Please enter a valid IPv4 address',
+      '請輸入有效的 IPv4 位址（例如 192.168.1.10）。',
     )
   })
 
   it('throws for invalid port', () => {
     expect(() => validateControllerTarget('192.168.1.50', 'invalid')).toThrow(
-      'Port must be a number',
+      '連接埠必須是 1 到 65535 之間的數字。',
     )
   })
 })
@@ -86,11 +86,11 @@ describe('controllerOrigin', () => {
   })
 
   it('rejects an authority that could change the request destination', () => {
-    expect(() => controllerOrigin('192.168.1.42:444', 8765)).toThrow('controller host')
-    expect(() => controllerOrigin('https://192.168.1.42', 8765)).toThrow('controller host')
+    expect(() => controllerOrigin('192.168.1.42:444', 8765)).toThrow('控制器主機或連接埠無效。')
+    expect(() => controllerOrigin('https://192.168.1.42', 8765)).toThrow('控制器主機或連接埠無效。')
   })
   it('rejects hostnames and malformed IPv4 controller addresses', () => {
-    expect(() => controllerOrigin('pc-tv.local', 8765)).toThrow('controller host')
-    expect(() => controllerOrigin('192.168.1.256', 8765)).toThrow('controller host')
+    expect(() => controllerOrigin('pc-tv.local', 8765)).toThrow('控制器主機或連接埠無效。')
+    expect(() => controllerOrigin('192.168.1.256', 8765)).toThrow('控制器主機或連接埠無效。')
   })
 })

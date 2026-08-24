@@ -18,7 +18,7 @@ export function AppLaunchers({ onCommand, activeApp, disabled }: AppLaunchersPro
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title} accessibilityRole="header">QUICK LAUNCH</Text>
+      <Text style={styles.title} accessibilityRole="header">快速啟動</Text>
       <View style={styles.grid}>
         <TouchableOpacity
           style={[
@@ -29,8 +29,8 @@ export function AppLaunchers({ onCommand, activeApp, disabled }: AppLaunchersPro
           onPress={() => launch('OPEN_YOUTUBE')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Open YouTube"
-          accessibilityHint="Launches YouTube on the TV."
+          accessibilityLabel="開啟 YouTube"
+          accessibilityHint="在電視上啟動 YouTube。"
           accessibilityState={{
             disabled: Boolean(disabled),
             selected: activeApp === 'youtube',
@@ -51,8 +51,8 @@ export function AppLaunchers({ onCommand, activeApp, disabled }: AppLaunchersPro
           onPress={() => launch('OPEN_NETFLIX')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Open Netflix"
-          accessibilityHint="Launches Netflix on the TV."
+          accessibilityLabel="開啟 Netflix"
+          accessibilityHint="在電視上啟動 Netflix。"
           accessibilityState={{
             disabled: Boolean(disabled),
             selected: activeApp === 'netflix',
@@ -73,17 +73,17 @@ export function AppLaunchers({ onCommand, activeApp, disabled }: AppLaunchersPro
           onPress={() => launch('OPEN_LIVE_TV')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Open Live TV"
-          accessibilityHint="Launches live television on the TV."
+          accessibilityLabel="開啟電視"
+          accessibilityHint="在電視上啟動電視。"
           accessibilityState={{
             disabled: Boolean(disabled),
             selected: activeApp === 'live_tv',
           }}
         >
           <View style={[styles.badge, styles.tvBadge]}>
-            <Text style={styles.badgeText}>TV</Text>
+            <Text style={styles.badgeText}>電視</Text>
           </View>
-          <Text style={styles.label}>Live TV</Text>
+          <Text style={styles.label}>電視</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -95,17 +95,17 @@ export function AppLaunchers({ onCommand, activeApp, disabled }: AppLaunchersPro
           onPress={() => launch('OPEN_BROWSER')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Open browser"
-          accessibilityHint="Launches the web browser on the TV."
+          accessibilityLabel="開啟瀏覽器"
+          accessibilityHint="在電視上啟動瀏覽器。"
           accessibilityState={{
             disabled: Boolean(disabled),
             selected: activeApp === 'browser',
           }}
         >
           <View style={[styles.badge, styles.webBadge]}>
-            <Text style={styles.badgeText}>WEB</Text>
+            <Text style={styles.badgeText}>網頁</Text>
           </View>
-          <Text style={styles.label}>Browser</Text>
+          <Text style={styles.label}>瀏覽器</Text>
         </TouchableOpacity>
       </View>
     </View>

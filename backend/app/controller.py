@@ -131,7 +131,7 @@ def _build_player(settings: Settings, mpv_path: Path | None) -> MpvController | 
         channels = ChannelManager(load_channels(channels_path))
     except ValueError:
         return UnavailablePlayer(
-            "No enabled Live TV channels are configured. Update config/channels.json."
+            "尚未設定可用的電視頻道。請更新 config/channels.json。"
         )
     return MpvController(channels, mpv_path=mpv_path)
 
@@ -145,5 +145,5 @@ def _build_news(settings: Settings) -> NewsChannelManager | UnavailableNews:
         return NewsChannelManager(channels)
     except (ValueError, FileNotFoundError):
         return UnavailableNews(
-            "No enabled news channels are configured. Update config/news.json."
+            "尚未設定可用的新聞頻道。請更新 config/news.json。"
         )

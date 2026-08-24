@@ -121,3 +121,5 @@ def test_ensure_adblock_rejects_unpacked_crx_with_wrong_id(tmp_path: Path) -> No
         ensure_adblock(adblock_dir, crx_bytes=wrong_crx)
     assert ADBLOCK_EXTENSION_ID in str(excinfo.value)
     assert not adblock_dir.exists()
+
+

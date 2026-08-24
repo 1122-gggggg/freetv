@@ -51,7 +51,7 @@ The TV socket accepts only `CommandMessage`, requires both a loopback client add
 
 ## Ownership and Home
 
-`ApplicationManager` creates and records each browser child process. `HOME` calls `ApplicationManager.home()`: it minimizes the specific tracked window, closes the controller-owned mpv process through its adapter, and restores the window titled `MY TV`. It never searches for or terminates arbitrary Brave, Edge, or mpv processes.
+`ApplicationManager` creates and records each browser child process. `HOME` calls `ApplicationManager.home()`: it minimizes the specific tracked window, closes the controller-owned mpv process through its adapter, and restores the window titled `我的電視`. It never searches for or terminates arbitrary Brave, Edge, or mpv processes.
 
 ## State model
 

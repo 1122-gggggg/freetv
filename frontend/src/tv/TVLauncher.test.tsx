@@ -57,7 +57,7 @@ describe('TVLauncher pairing code', () => {
     render(<TVLauncher />)
     await act(async () => {})
     expect(screen.getByText('111111')).toBeTruthy()
-    expect(screen.getByText('Connect this box to a private Wi-Fi/LAN to create the Remote link.')).toBeTruthy()
+    expect(screen.getByText('請把電視盒連上區網，才會產生遙控器連結。')).toBeTruthy()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(55_000)
@@ -90,11 +90,13 @@ describe('TVLauncher pairing code', () => {
     render(<TVLauncher />)
     await act(async () => {})
 
-    expect(screen.getByRole('button', { name: 'Open YouTube' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Open Netflix' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Open 新聞 / News' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Open Live TV' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Open Browser' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Open Settings' })).toBeTruthy()
+    expect(document.title).toBe('我的電視')
+    expect(screen.getByRole('heading', { name: '我的電視' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '開啟 YouTube' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '開啟 Netflix' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '開啟 新聞' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '開啟 電視' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '開啟 瀏覽器' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '開啟 設定' })).toBeTruthy()
   })
 })

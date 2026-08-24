@@ -91,7 +91,7 @@ class WindowsInputController:
             self._send(self._mouse(0, 0, wheel_delta, MOUSEEVENTF_WHEEL))
         else:  # pragma: no cover - Pydantic prevents unknown actions.
             raise CommandExecutionError(
-                "invalid_pointer_action", "That touchpad action is not allowed."
+                "invalid_pointer_action", "不允許這個觸控板操作。"
             )
 
     async def text(self, text: str) -> None:
@@ -110,7 +110,7 @@ class WindowsInputController:
         if virtual_key is None:
             raise CommandExecutionError(
                 "unsupported_forward_command",
-                "That control is not valid for the active application.",
+                "這個操作不適用於目前的應用程式。",
             )
         self._send(self._key(virtual_key, 0, 0), self._key(virtual_key, 0, KEYEVENTF_KEYUP))
 
@@ -126,7 +126,7 @@ class WindowsInputController:
     def _require_windows() -> None:
         if os.name != "nt":
             raise CommandExecutionError(
-                "windows_only", "Windows input control is only available on Windows."
+                "windows_only", "僅能在 Windows 上使用輸入控制。"
             )
 
     @staticmethod
@@ -139,5 +139,5 @@ class WindowsInputController:
         )
         if sent != len(events):
             raise CommandExecutionError(
-                "windows_input_failed", "Windows did not accept the requested input."
+                "windows_input_failed", "Windows 未接受這個輸入。"
             )

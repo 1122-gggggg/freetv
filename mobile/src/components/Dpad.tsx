@@ -24,8 +24,8 @@ export function Dpad({ onCommand, disabled }: DpadProps): React.ReactElement {
           onPress={() => handlePress('NAV_UP')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Move up"
-          accessibilityHint="Moves focus up on the TV."
+          accessibilityLabel="上"
+          accessibilityHint="將電視焦點往上移動。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.arrow}>▲</Text>
@@ -39,8 +39,8 @@ export function Dpad({ onCommand, disabled }: DpadProps): React.ReactElement {
           onPress={() => handlePress('NAV_LEFT')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Move left"
-          accessibilityHint="Moves focus left on the TV."
+          accessibilityLabel="左"
+          accessibilityHint="將電視焦點往左移動。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.arrow}>◀</Text>
@@ -52,11 +52,11 @@ export function Dpad({ onCommand, disabled }: DpadProps): React.ReactElement {
           onPress={() => handlePress('OK')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Select"
-          accessibilityHint="Activates the focused item on the TV."
+          accessibilityLabel="確定"
+          accessibilityHint="啟動電視上目前焦點項目。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
-          <Text style={styles.okText}>OK</Text>
+          <Text style={styles.okText}>確定</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -65,8 +65,8 @@ export function Dpad({ onCommand, disabled }: DpadProps): React.ReactElement {
           onPress={() => handlePress('NAV_RIGHT')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Move right"
-          accessibilityHint="Moves focus right on the TV."
+          accessibilityLabel="右"
+          accessibilityHint="將電視焦點往右移動。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.arrow}>▶</Text>
@@ -80,8 +80,8 @@ export function Dpad({ onCommand, disabled }: DpadProps): React.ReactElement {
           onPress={() => handlePress('NAV_DOWN')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Move down"
-          accessibilityHint="Moves focus down on the TV."
+          accessibilityLabel="下"
+          accessibilityHint="將電視焦點往下移動。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
           <Text style={styles.arrow}>▼</Text>

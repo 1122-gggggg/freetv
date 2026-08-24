@@ -54,17 +54,17 @@ const mockGetSavedDevices = getSavedDevices as jest.MockedFunction<typeof getSav
 const mockSaveCurrentDevice = saveCurrentDevice as jest.MockedFunction<typeof saveCurrentDevice>
 
 function getHostInput(root: ReactTestRenderer.ReactTestInstance): ReactTestRenderer.ReactTestInstance {
-  return root.findByProps({ placeholder: 'IP Address (e.g. 172.20.10.8)' })
+  return root.findByProps({ placeholder: 'IP 位址（例如 172.20.10.8）' })
 }
 
 function getPortInput(root: ReactTestRenderer.ReactTestInstance): ReactTestRenderer.ReactTestInstance {
-  return root.findByProps({ placeholder: 'Port' })
+  return root.findByProps({ placeholder: '連接埠' })
 }
 
 function getManualPairButton(root: ReactTestRenderer.ReactTestInstance): ReactTestRenderer.ReactTestInstance {
   const touchables = root.findAllByType(TouchableOpacity)
   const btn = touchables.find((t) =>
-    t.findAll((child) => child.props?.children === 'PAIR').length > 0,
+    t.findAll((child) => child.props?.children === '配對').length > 0,
   )
   if (!btn) throw new Error('Manual PAIR button not found')
   return btn
@@ -92,21 +92,21 @@ function getCodeInput(root: ReactTestRenderer.ReactTestInstance): ReactTestRende
 function getConfirmPairButton(root: ReactTestRenderer.ReactTestInstance): ReactTestRenderer.ReactTestInstance | undefined {
   const touchables = root.findAllByType(TouchableOpacity)
   return touchables.find((t) =>
-    t.findAll((c) => c.props?.children === 'CONFIRM' || c.props?.children === 'PAIRING...').length > 0,
+    t.findAll((c) => c.props?.children === '確認' || c.props?.children === '配對中…').length > 0,
   )
 }
 
 function getCancelPairButton(root: ReactTestRenderer.ReactTestInstance): ReactTestRenderer.ReactTestInstance | undefined {
   const touchables = root.findAllByType(TouchableOpacity)
   return touchables.find((t) =>
-    t.findAll((c) => c.props?.children === 'CANCEL').length > 0,
+    t.findAll((c) => c.props?.children === '取消').length > 0,
   )
 }
 
 function getQRScanButton(root: ReactTestRenderer.ReactTestInstance): ReactTestRenderer.ReactTestInstance {
   const touchables = root.findAllByType(TouchableOpacity)
   const btn = touchables.find((t) =>
-    t.findAll((c) => c.props?.children === 'SCAN TV QR CODE').length > 0,
+    t.findAll((c) => c.props?.children === '掃描電視 QR 碼').length > 0,
   )
   if (!btn) throw new Error('QR Scan button not found')
   return btn
@@ -212,7 +212,7 @@ describe('DiscoveryScreen', () => {
       pairBtn.props.onPress()
     })
 
-    expect(alertSpy).toHaveBeenCalledWith('Invalid Endpoint', expect.any(String))
+    expect(alertSpy).toHaveBeenCalledWith('端點無效', expect.any(String))
     expect(getPairModal(root).props.visible).toBe(false)
     expect(mockPairWithDevice).not.toHaveBeenCalled()
 
@@ -226,7 +226,7 @@ describe('DiscoveryScreen', () => {
       pairBtn.props.onPress()
     })
 
-    expect(alertSpy).toHaveBeenCalledWith('Invalid Endpoint', expect.any(String))
+    expect(alertSpy).toHaveBeenCalledWith('端點無效', expect.any(String))
     expect(getPairModal(root).props.visible).toBe(false)
 
     alertSpy.mockClear()
@@ -241,7 +241,7 @@ describe('DiscoveryScreen', () => {
       pairBtn.props.onPress()
     })
 
-    expect(alertSpy).toHaveBeenCalledWith('Invalid Endpoint', expect.any(String))
+    expect(alertSpy).toHaveBeenCalledWith('端點無效', expect.any(String))
     expect(getPairModal(root).props.visible).toBe(false)
   })
 
@@ -320,7 +320,7 @@ describe('DiscoveryScreen', () => {
 
     expect(mockSaveCurrentDevice).toHaveBeenCalledWith({
       id: '192.168.1.50:8765',
-      name: 'PC TV (192.168.1.50)',
+      name: '電腦電視盒 (192.168.1.50)',
       host: '192.168.1.50',
       port: 8765,
       token: 'paired-jwt-token',
@@ -362,7 +362,7 @@ describe('DiscoveryScreen', () => {
       getConfirmPairButton(root)!.props.onPress()
     })
 
-    expect(alertSpy).toHaveBeenCalledWith('Pairing Failed', 'Incorrect pairing code entered.')
+    expect(alertSpy).toHaveBeenCalledWith('配對失敗', 'Incorrect pairing code entered.')
     expect(mockSaveCurrentDevice).not.toHaveBeenCalled()
     expect(mockOnDeviceConnected).not.toHaveBeenCalled()
 
@@ -397,7 +397,7 @@ describe('DiscoveryScreen', () => {
       getConfirmPairButton(root)!.props.onPress()
     })
 
-    expect(alertSpy).toHaveBeenCalledWith('Pairing Failed', 'Secure storage unavailable')
+    expect(alertSpy).toHaveBeenCalledWith('配對失敗', 'Secure storage unavailable')
   })
 
   it('opens camera scanner and handles full QR code payload', async () => {
@@ -458,7 +458,7 @@ describe('DiscoveryScreen', () => {
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: 'invalid-qr-text' })
     })
-    expect(alertSpy).toHaveBeenCalledWith('Invalid QR Code', expect.any(String))
+    expect(alertSpy).toHaveBeenCalledWith('QR 碼無效', expect.any(String))
 
     alertSpy.mockClear()
 
@@ -466,6 +466,6 @@ describe('DiscoveryScreen', () => {
     await act(async () => {
       cameraView.props.onBarcodeScanned({ data: '123456' })
     })
-    expect(alertSpy).toHaveBeenCalledWith('Controller Address Required', expect.any(String))
+    expect(alertSpy).toHaveBeenCalledWith('需要控制器位址', expect.any(String))
   })
 })

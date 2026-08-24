@@ -484,7 +484,7 @@ def test_channel_up_on_youtube_is_rejected() -> None:
 
         assert not outcome.success
         assert outcome.error_code == "channel_source_not_active"
-        assert outcome.message == "Open News or Live TV before changing channels."
+        assert outcome.message == "請先開啟新聞或電視再切換頻道。"
 
     asyncio.run(scenario())
 
@@ -550,13 +550,13 @@ def test_unavailable_news_raises_news_not_configured_on_open_news() -> None:
     async def scenario() -> None:
         from app.controller import UnavailableNews
 
-        news = UnavailableNews("No enabled news channels are configured. Update config/news.json.")
+        news = UnavailableNews("尚未設定可用的新聞頻道。請更新 config/news.json。")
         bus, applications, _, _ = make_bus(news=news)
         outcome = await bus.dispatch_command(Command.OPEN_NEWS)
 
         assert not outcome.success
         assert outcome.error_code == "news_not_configured"
-        assert outcome.message == "No enabled news channels are configured. Update config/news.json."
+        assert outcome.message == "尚未設定可用的新聞頻道。請更新 config/news.json。"
         assert applications.opened_news == []
 
     asyncio.run(scenario())

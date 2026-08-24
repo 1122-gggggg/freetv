@@ -41,7 +41,7 @@ describe('RemotePage', () => {
   })
 
   it('keeps the paired remote visible and reports a failed server-side revocation', async () => {
-    const onForget = vi.fn().mockRejectedValue(new Error('Could not unpair this remote.'))
+    const onForget = vi.fn().mockRejectedValue(new Error('無法解除這支遙控器的配對。'))
 
     render(
       <RemotePage
@@ -51,11 +51,11 @@ describe('RemotePage', () => {
         onAuthenticationFailed={vi.fn()}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Forget' }))
+    fireEvent.click(screen.getByRole('button', { name: '解除配對' }))
 
     await waitFor(() => expect(onForget).toHaveBeenCalledOnce())
-    expect(await screen.findByText('Could not unpair this remote.')).toBeTruthy()
-    expect((screen.getByRole('button', { name: 'Forget' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(await screen.findByText('無法解除這支遙控器的配對。')).toBeTruthy()
+    expect((screen.getByRole('button', { name: '解除配對' }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('is a handset with YouTube, Netflix, news, voice, and search', () => {
@@ -67,16 +67,24 @@ describe('RemotePage', () => {
         onAuthenticationFailed={vi.fn()}
       />,
     )
-
+    expect(document.title).toBe('我的電視遙控器')
     expect(screen.getByRole('button', { name: 'YouTube' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Netflix' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '新聞' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '返回' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '主畫面' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '頻道 +' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '音量 +' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '語音' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '搜片' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Live TV' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Browser' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Sleep PC' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^電視$/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: '瀏覽器' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '休眠電腦' })).toBeNull()
     expect(screen.queryByLabelText(/Touchpad/i)).toBeNull()
+    expect(screen.queryByLabelText(/觸控板/)).toBeNull()
   })
 
   it('sends search_video for 搜片', () => {
@@ -184,8 +192,8 @@ describe('RemotePage', () => {
       />,
     )
 
-    expect((screen.getByLabelText('Pairing code') as HTMLInputElement).value).toBe('123456')
-    fireEvent.click(screen.getByRole('button', { name: 'Pair remote' }))
+    expect((screen.getByLabelText('配對碼') as HTMLInputElement).value).toBe('123456')
+    fireEvent.click(screen.getByRole('button', { name: '配對遙控器' }))
 
     await waitFor(() => expect(onPaired).toHaveBeenCalledWith('paired-token-value-that-is-long-enough'))
     expect(window.location.pathname).toBe('/remote')
@@ -204,10 +212,10 @@ describe('RemotePage', () => {
       />,
     )
 
-    expect((screen.getByRole('button', { name: 'Volume +' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '音量 +' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByLabelText('搜片') as HTMLInputElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: '搜片' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: '語音' }) as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByText('Controls unlock automatically when the TV Box reconnects.')).toBeTruthy()
+    expect(screen.getByText('電視盒重新連線後，按鍵會自動解鎖。')).toBeTruthy()
   })
 })

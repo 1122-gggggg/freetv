@@ -35,7 +35,7 @@ class BoundedPairingRequestBodyMiddleware:
 
         content_length = self._content_length(scope)
         if content_length is not None and content_length > self._max_body_bytes:
-            await self._send_rejection(send, 413, "Pairing request is too large.")
+            await self._send_rejection(send, 413, "配對請求過大。")
             return
 
         body = bytearray()
@@ -43,13 +43,13 @@ class BoundedPairingRequestBodyMiddleware:
         while True:
             remaining_seconds = deadline - asyncio.get_running_loop().time()
             if remaining_seconds <= 0:
-                await self._send_rejection(send, 408, "Pairing request timed out.")
+                await self._send_rejection(send, 408, "配對請求逾時。")
                 return
             try:
                 async with asyncio.timeout(remaining_seconds):
                     message = await receive()
             except TimeoutError:
-                await self._send_rejection(send, 408, "Pairing request timed out.")
+                await self._send_rejection(send, 408, "配對請求逾時。")
                 return
             if message.get("type") == "http.disconnect":
                 return
@@ -57,7 +57,7 @@ class BoundedPairingRequestBodyMiddleware:
                 continue
             chunk = message.get("body", b"")
             if not isinstance(chunk, bytes) or len(body) + len(chunk) > self._max_body_bytes:
-                await self._send_rejection(send, 413, "Pairing request is too large.")
+                await self._send_rejection(send, 413, "配對請求過大。")
                 return
             body.extend(chunk)
             if not message.get("more_body", False):

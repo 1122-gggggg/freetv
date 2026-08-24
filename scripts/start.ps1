@@ -103,6 +103,35 @@ function Stop-ManagedController {
     throw "Existing PC TV Controller process $ProcessId did not release port $Port."
 }
 
+function Stop-RepoCloudflareTunnel {
+    param(
+        [string]$TunnelUrl,
+        [string]$TunnelLog,
+        [string]$TunnelOut
+    )
+
+    try {
+        $Processes = @(Get-CimInstance Win32_Process -Filter "Name = 'cloudflared.exe'" -ErrorAction SilentlyContinue)
+    } catch {
+        return
+    }
+
+    $Markers = @($TunnelUrl, $TunnelLog, $TunnelOut) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    foreach ($Process in $Processes) {
+        $CommandLine = [string]$Process.CommandLine
+        if ([string]::IsNullOrWhiteSpace($CommandLine)) {
+            continue
+        }
+        foreach ($Marker in $Markers) {
+            if ($CommandLine.IndexOf($Marker, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                Stop-Process -Id $Process.ProcessId -Force -ErrorAction SilentlyContinue
+                break
+            }
+        }
+    }
+}
+
+
 
 $Python = Join-Path $Root '.venv\Scripts\python.exe'
 $FrontendIndex = Join-Path $Root 'frontend\dist\index.html'
@@ -280,8 +309,9 @@ if (-not $NoTunnel) {
         $TunnelLog = Join-Path $Root 'config\cloudflared.log'
         $TunnelOut = Join-Path $Root 'config\cloudflared.out.log'
         New-Item -ItemType Directory -Force -Path (Join-Path $Root 'config') | Out-Null
-        if (Test-Path $TunnelLog) { Remove-Item -LiteralPath $TunnelLog -Force }
-        if (Test-Path $TunnelOut) { Remove-Item -LiteralPath $TunnelOut -Force }
+        Stop-RepoCloudflareTunnel -TunnelUrl "http://${HealthHost}:$Port" -TunnelLog $TunnelLog -TunnelOut $TunnelOut
+        if (Test-Path $TunnelLog) { Remove-Item -LiteralPath $TunnelLog -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $TunnelOut) { Remove-Item -LiteralPath $TunnelOut -Force -ErrorAction SilentlyContinue }
         Start-Process -FilePath $Cloudflared.Source -ArgumentList @('tunnel', '--url', "http://${HealthHost}:$Port") -RedirectStandardOutput $TunnelOut -RedirectStandardError $TunnelLog -WindowStyle Hidden | Out-Null
         $TunnelDeadline = (Get-Date).AddSeconds(30)
         $PublicOrigin = $null

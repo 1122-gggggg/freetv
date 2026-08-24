@@ -26,11 +26,11 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
           onPress={() => trigger('BACK')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Back"
-          accessibilityHint="Returns to the previous screen on the TV."
+          accessibilityLabel="返回"
+          accessibilityHint="返回電視上一個畫面。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
-          <Text style={styles.btnText}>◀ BACK</Text>
+          <Text style={styles.btnText}>◀ 返回</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -38,11 +38,11 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
           onPress={() => trigger('HOME')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Home"
-          accessibilityHint="Opens the TV home screen."
+          accessibilityLabel="主畫面"
+          accessibilityHint="開啟電視主畫面。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
-          <Text style={[styles.btnText, styles.homeText]}>⌂ HOME</Text>
+          <Text style={[styles.btnText, styles.homeText]}>⌂ 主畫面</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -50,11 +50,11 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
           onPress={() => trigger('PLAY_PAUSE')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Play or pause media"
-          accessibilityHint="Toggles media playback on the TV."
+          accessibilityLabel="播放或暫停"
+          accessibilityHint="切換電視媒體播放或暫停。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
-          <Text style={styles.btnText}>⏯ PLAY</Text>
+          <Text style={styles.btnText}>⏯ 播放</Text>
         </TouchableOpacity>
       </View>
 
@@ -65,11 +65,11 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
           onPress={() => trigger('VOLUME_DOWN')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Volume down"
-          accessibilityHint="Lowers the TV volume."
+          accessibilityLabel="音量降低"
+          accessibilityHint="降低電視音量。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
-          <Text style={styles.btnText}>VOL −</Text>
+          <Text style={styles.btnText}>音量 −</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -81,12 +81,12 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
           onPress={() => trigger('MUTE')}
           disabled={disabled}
           accessibilityRole="togglebutton"
-          accessibilityLabel={muted ? 'Unmute TV' : 'Mute TV'}
-          accessibilityHint={muted ? 'Turns TV sound back on.' : 'Turns TV sound off.'}
+          accessibilityLabel={muted ? '取消靜音' : '靜音'}
+          accessibilityHint={muted ? '恢復電視聲音。' : '關閉電視聲音。'}
           accessibilityState={{ disabled: Boolean(disabled), checked: Boolean(muted) }}
         >
           <Text style={[styles.btnText, muted && styles.mutedText]}>
-            {muted ? '🔇 MUTED' : '🔊 MUTE'}
+            {muted ? '🔇 已靜音' : '🔊 靜音'}
           </Text>
         </TouchableOpacity>
 
@@ -95,11 +95,11 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
           onPress={() => trigger('VOLUME_UP')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Volume up"
-          accessibilityHint="Raises the TV volume."
+          accessibilityLabel="音量提高"
+          accessibilityHint="提高電視音量。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
-          <Text style={styles.btnText}>VOL ＋</Text>
+          <Text style={styles.btnText}>音量 ＋</Text>
         </TouchableOpacity>
       </View>
 
@@ -110,11 +110,11 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
           onPress={() => trigger('CHANNEL_DOWN')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Previous channel"
-          accessibilityHint="Changes to the previous TV channel."
+          accessibilityLabel="上一台"
+          accessibilityHint="切換到上一台頻道。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
-          <Text style={styles.btnText}>CH ▼</Text>
+          <Text style={styles.btnText}>頻道 ▼</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -122,11 +122,11 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
           onPress={() => trigger('POWER_SLEEP')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Put TV to sleep"
-          accessibilityHint="Puts the TV Box into sleep mode."
+          accessibilityLabel="讓電視盒休眠"
+          accessibilityHint="讓電視盒進入休眠。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
-          <Text style={styles.powerText}>⏻ SLEEP</Text>
+          <Text style={styles.powerText}>⏻ 休眠</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -134,11 +134,11 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
           onPress={() => trigger('CHANNEL_UP')}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Next channel"
-          accessibilityHint="Changes to the next TV channel."
+          accessibilityLabel="下一台"
+          accessibilityHint="切換到下一台頻道。"
           accessibilityState={{ disabled: Boolean(disabled) }}
         >
-          <Text style={styles.btnText}>CH ▲</Text>
+          <Text style={styles.btnText}>頻道 ▲</Text>
         </TouchableOpacity>
       </View>
     </View>

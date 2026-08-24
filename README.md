@@ -107,7 +107,7 @@ Pop-Location
 - Arrow keys: choose an application tile.
 - Enter: launch selected tile.
 - Escape: Back.
-- Home: minimize/stop the project-owned active application and return to MY TV.
+- Home: minimize/stop the project-owned active application and return to 我的電視.
 - Space: Play/Pause.
 
 The phone Remote exposes a dedicated physical-remote layout with three app keys (YouTube, Netflix, 新聞), D-pad navigation, Back/Home, Channel Up/Down, Volume/Mute, one-touch voice recognition, video search, text input, and a constrained touchpad:
@@ -223,7 +223,7 @@ Integration smoke test (against an active `start.ps1 -NoBrowser` instance):
 | Pairing code rejected | Read the current TV code again; it expires after 10 minutes and becomes invalid after a successful pairing. |
 | Brave/Edge unavailable | Confirm the path in `config/settings.json`, then restart the controller. |
 | Live TV error | Install mpv, set `applications.mpv_path` if needed, and validate your channel URL and authorization. |
-| TV Launcher does not foreground on Home | Keep the MY TV tab/window open. The launcher title is used to restore its specific browser window. |
+| TV Launcher does not foreground on Home | Keep the 我的電視 tab/window open. The launcher title is used to restore its specific browser window. |
 | Phone cannot install PWA | A trusted HTTPS controller origin is required for service workers and install prompts. HTTP mode serves Remote as a normal web page. |
 | Native Remote cannot connect | Native app is HTTPS-only. Set `server.transport` to `"https"`, install the controller CA as an app CA on Android or enable full trust on iOS, then confirm the numeric IP matches the QR code or `start.ps1` output. Native Remote does not accept PC names. |
 

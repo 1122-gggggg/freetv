@@ -34,7 +34,7 @@ class WindowsVolumeController:
             return self._endpoint
         if os.name != "nt":
             raise CommandExecutionError(
-                "windows_only", "System volume control is only available on Windows."
+                "windows_only", "僅能在 Windows 上調整系統音量。"
             )
         try:
             from ctypes import POINTER, cast
@@ -49,7 +49,7 @@ class WindowsVolumeController:
             return self._endpoint
         except Exception as error:
             raise CommandExecutionError(
-                "volume_unavailable", "Windows system volume is unavailable."
+                "volume_unavailable", "無法使用 Windows 系統音量。"
             ) from error
 
     @staticmethod

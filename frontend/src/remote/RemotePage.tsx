@@ -80,7 +80,7 @@ export function RemotePage({
   onAuthenticationFailed,
 }: RemotePageProps): ReactElement {
   useEffect(() => {
-    document.title = 'MY TV Remote'
+    document.title = '我的電視遙控器'
   }, [])
 
   if (!token) return <PairingScreen onPaired={onPaired} />
@@ -103,7 +103,7 @@ function PairingScreen({ onPaired }: Pick<RemotePageProps, 'onPaired'>): ReactEl
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!/^\d{6}$/.test(code)) {
-      setError('Enter the six-digit code shown on the TV.')
+      setError('請輸入電視上顯示的六位數配對碼。')
       return
     }
     setSubmitting(true)
@@ -116,13 +116,13 @@ function PairingScreen({ onPaired }: Pick<RemotePageProps, 'onPaired'>): ReactEl
       })
       const payload = (await response.json()) as Partial<PairResponse> & { detail?: string }
       if (!response.ok || typeof payload.token !== 'string') {
-        throw new Error(payload.detail ?? 'Pairing was not accepted.')
+        throw new Error(payload.detail ?? '配對未被接受。')
       }
       rememberRemoteToken(payload.token)
       removePairingCodeFromAddressBar()
       onPaired(payload.token)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Pairing was not accepted.')
+      setError(reason instanceof Error ? reason.message : '配對未被接受。')
     } finally {
       setSubmitting(false)
     }
@@ -131,11 +131,11 @@ function PairingScreen({ onPaired }: Pick<RemotePageProps, 'onPaired'>): ReactEl
   return (
     <main className="remote-shell pairing-shell">
       <section className="pairing-form-card" aria-labelledby="pairing-title">
-        <p className="eyebrow">MY TV REMOTE</p>
-        <h1 id="pairing-title">Pair this phone</h1>
-        <p>Scan the QR code on the TV or enter its current six-digit code.</p>
+        <p className="eyebrow">電視遙控器</p>
+        <h1 id="pairing-title">配對這支手機</h1>
+        <p>掃描電視上的 QR 碼，或輸入目前的六位數配對碼。</p>
         <form onSubmit={submit}>
-          <label htmlFor="pairing-code">Pairing code</label>
+          <label htmlFor="pairing-code">配對碼</label>
           <input
             id="pairing-code"
             autoComplete="one-time-code"
@@ -146,10 +146,10 @@ function PairingScreen({ onPaired }: Pick<RemotePageProps, 'onPaired'>): ReactEl
             onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
           />
           <button className="pairing-submit" disabled={submitting || code.length !== 6} type="submit">
-            {submitting ? 'Pairing…' : 'Pair remote'}
+            {submitting ? '配對中…' : '配對遙控器'}
           </button>
         </form>
-        <p className="form-status" aria-live="polite">{error ?? 'This remote controls only the paired PC TV Box.'}</p>
+        <p className="form-status" aria-live="polite">{error ?? '此遙控器只能控制已配對的電腦電視盒。'}</p>
       </section>
     </main>
   )
@@ -228,59 +228,59 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     try {
       await onForget()
     } catch (reason) {
-      setForgetError(reason instanceof Error ? reason.message : 'Could not unpair this remote.')
+      setForgetError(reason instanceof Error ? reason.message : '無法解除這支遙控器的配對。')
       setForgetting(false)
     }
   }
 
   return (
-    <main className="remote-shell" aria-label="MY TV remote">
+    <main className="remote-shell" aria-label="電視遙控器">
       <header className="remote-header">
         <div>
-          <p className="eyebrow">MY TV REMOTE</p>
-          <h1>Control room</h1>
+          <p className="eyebrow">電視遙控器</p>
+          <h1>遙控器</h1>
         </div>
         <button className="forget-button" disabled={forgetting} type="button" onClick={() => void forget()}>
-          {forgetting ? 'Forgetting…' : 'Forget'}
+          {forgetting ? '解除中…' : '解除配對'}
         </button>
       </header>
 
       <div className={`connection-chip connection-${status}`} aria-live="polite">
         <span className="status-dot" aria-hidden="true" />
-        {status === 'connected' ? 'Connected' : status === 'authenticating' ? 'Authenticating' : status}
+        {status === 'connected' ? '已連線' : status === 'authenticating' ? '驗證中' : status === 'connecting' ? '連線中' : status === 'disconnected' ? '已斷線' : '連線失敗'}
       </div>
       <p className="remote-connection-note" aria-live="polite">
         {controlsDisabled
-          ? 'Controls unlock automatically when the TV Box reconnects.'
-          : 'Hold arrows, volume, or channel buttons to repeat.'}
+          ? '電視盒重新連線後，按鍵會自動解鎖。'
+          : '長按方向、音量或頻道鍵可連續送出。'}
       </p>
 
-      <section className="remote-grid three-column apps-row" aria-label="Applications">
+      <section className="remote-grid three-column apps-row" aria-label="應用程式">
         <CommandButton command="OPEN_YOUTUBE" label="YouTube" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="OPEN_NETFLIX" label="Netflix" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="OPEN_NEWS" label="新聞" onCommand={command} disabled={controlsDisabled} />
       </section>
 
-      <section className="remote-direction-pad" aria-label="Navigation controls">
-        <CommandButton command="NAV_UP" label="Up" onCommand={command} className="direction-up" disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="NAV_LEFT" label="Left" onCommand={command} className="direction-left" disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="OK" label="OK" onCommand={command} className="direction-ok" disabled={controlsDisabled} />
-        <CommandButton command="NAV_RIGHT" label="Right" onCommand={command} className="direction-right" disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="NAV_DOWN" label="Down" onCommand={command} className="direction-down" disabled={controlsDisabled} repeatOnHold />
+      <section className="remote-direction-pad" aria-label="方向鍵">
+        <CommandButton command="NAV_UP" label="上" onCommand={command} className="direction-up" disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="NAV_LEFT" label="左" onCommand={command} className="direction-left" disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="OK" label="確定" onCommand={command} className="direction-ok" disabled={controlsDisabled} />
+        <CommandButton command="NAV_RIGHT" label="右" onCommand={command} className="direction-right" disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="NAV_DOWN" label="下" onCommand={command} className="direction-down" disabled={controlsDisabled} repeatOnHold />
       </section>
 
-      <section className="remote-grid two-column" aria-label="Core controls">
-        <CommandButton command="BACK" label="Back" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="HOME" label="Home" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="CHANNEL_UP" label="Channel +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="CHANNEL_DOWN" label="Channel −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="VOLUME_UP" label="Volume +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="VOLUME_DOWN" label="Volume −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="MUTE" label="Mute" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="PLAY_PAUSE" label="Play / Pause" onCommand={command} disabled={controlsDisabled} />
+      <section className="remote-grid two-column" aria-label="主要按鍵">
+        <CommandButton command="BACK" label="返回" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="HOME" label="主畫面" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="CHANNEL_UP" label="頻道 +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="CHANNEL_DOWN" label="頻道 −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="VOLUME_UP" label="音量 +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="VOLUME_DOWN" label="音量 −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="MUTE" label="靜音" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="PLAY_PAUSE" label="播放／暫停" onCommand={command} disabled={controlsDisabled} />
       </section>
 
-      <section className="remote-voice-row" aria-label="Voice search">
+      <section className="remote-voice-row" aria-label="語音搜尋">
         <button
           className={`remote-button voice-button ${listening ? 'is-listening' : ''}`}
           disabled={controlsDisabled || !speechSupported}
@@ -292,7 +292,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       </section>
 
       <section className="search-card" aria-labelledby="search-title">
-        <p className="eyebrow">VIDEO SEARCH</p>
+        <p className="eyebrow">影片搜尋</p>
         <h2 id="search-title">搜尋影片</h2>
         <form onSubmit={submitSearch}>
           <input
@@ -310,7 +310,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       </section>
 
       <footer className="remote-feedback" aria-live="polite">
-        {forgetError ?? state?.error_message ?? state?.status_message ?? lastError?.message ?? lastAcknowledgement?.message ?? (lastAcknowledgement?.success ? 'Command accepted.' : 'Ready.')}
+        {forgetError ?? state?.error_message ?? state?.status_message ?? lastError?.message ?? lastAcknowledgement?.message ?? (lastAcknowledgement?.success ? '指令已送出。' : '就緒。')}
       </footer>
     </main>
   )

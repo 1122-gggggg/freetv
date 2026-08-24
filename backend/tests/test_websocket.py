@@ -196,7 +196,7 @@ def test_remote_socket_rejects_commands_before_token_authentication(tmp_path) ->
         "version": 1,
         "type": "error",
         "code": "authentication_required",
-        "message": "Authenticate before sending remote controls.",
+        "message": "請先驗證後再傳送遙控指令。",
     }
 
 
@@ -758,7 +758,7 @@ def test_authenticated_remote_cannot_dispatch_after_its_token_is_revoked(tmp_pat
         "version": 1,
         "type": "error",
         "code": "authentication_failed",
-        "message": "Remote token is invalid.",
+        "message": "遙控器權杖無效。",
     }
 
 

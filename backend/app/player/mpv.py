@@ -50,7 +50,7 @@ class MpvController:
         if self._mpv_path is None:
             raise CommandExecutionError(
                 "mpv_not_found",
-                "mpv is not installed or configured. Install mpv, then set its path in Settings.",
+                "未安裝或尚未設定 mpv。請安裝 mpv，然後在設定中指定路徑。",
             )
 
         if self._process is not None and self._process.poll() is None:
@@ -66,7 +66,7 @@ class MpvController:
             try:
                 self._process = self._launch_process(arguments)
             except OSError as error:
-                raise CommandExecutionError("mpv_launch_failed", "Could not start mpv.") from error
+                raise CommandExecutionError("mpv_launch_failed", "無法啟動 mpv。") from error
             log_event(logger, "mpv_started", process_id=self._process.pid, channel=channel.id)
         return channel.number, channel.name
 
@@ -97,7 +97,7 @@ class MpvController:
         self._channels.move(direction)
         try:
             await self._send_command(
-                ["show-text", f"CH {channel.number:02d}\n{channel.name}", 3000]
+                ["show-text", f"頻道 {channel.number:02d}\n{channel.name}", 3000]
             )
         except CommandExecutionError:
             log_event(logger, "mpv_osd_failed", channel=channel.id, number=channel.number)
@@ -114,14 +114,14 @@ class MpvController:
 
     async def _send_command(self, command: list[object]) -> None:
         if self._process is None or self._process.poll() is not None:
-            raise CommandExecutionError("mpv_not_running", "Live TV is not running.")
+            raise CommandExecutionError("mpv_not_running", "電視尚未播放。")
         try:
             await asyncio.to_thread(self._send_ipc, command)
         except CommandExecutionError:
             raise
         except OSError as error:
             raise CommandExecutionError(
-                "mpv_ipc_unavailable", "mpv did not accept the requested control."
+                "mpv_ipc_unavailable", "mpv 未接受這個控制指令。"
             ) from error
 
     def _default_ipc_sender(self, command: list[object]) -> None:

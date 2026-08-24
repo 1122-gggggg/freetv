@@ -81,18 +81,19 @@ class ApplicationManager:
         if chrome is None:
             raise CommandExecutionError(
                 "chrome_not_found",
-                "Chrome is not installed or configured. Install Chrome or set applications.chrome_path.",
+                "未安裝或尚未設定 Chrome。請安裝 Chrome，或在 applications.chrome_path 指定路徑。",
             )
         if not (self._adblock_dir / "manifest.json").is_file():
             raise CommandExecutionError(
                 "adblock_not_installed",
-                "AdBlock is not installed. Re-run setup.ps1.",
+                "尚未安裝 AdBlock。請重新執行 setup.ps1。",
             )
+        extension_path = str(self._adblock_dir)
         return [
             chrome.as_posix(),
             f"--user-data-dir={self._profile_dir}",
-            f"--disable-extensions-except={self._adblock_dir}",
-            f"--load-extension={self._adblock_dir}",
+            f"--disable-extensions-except={extension_path}",
+            f"--load-extension={extension_path}",
             "--kiosk",
             "--no-first-run",
             "--no-default-browser-check",
@@ -103,7 +104,7 @@ class ApplicationManager:
     async def open(self, app: ActiveApp) -> None:
         if app not in {ActiveApp.YOUTUBE, ActiveApp.NETFLIX, ActiveApp.BROWSER}:
             raise CommandExecutionError(
-                "unsupported_application", f"{app.value} is not opened by this launcher."
+                "unsupported_application", f"這個啟動器無法開啟 {app.value}。"
             )
 
         if app is ActiveApp.YOUTUBE:
@@ -115,7 +116,7 @@ class ApplicationManager:
         if executable is None:
             raise CommandExecutionError(
                 "application_not_found",
-                f"{app_name} is not installed or configured. Open Settings to configure it.",
+                f"未安裝或尚未設定{app_name}。請開啟設定進行設定。",
             )
 
         arguments = [executable.as_posix(), "--new-window", "--start-maximized", url]
@@ -123,7 +124,7 @@ class ApplicationManager:
 
     async def open_news(self, url: str) -> None:
         arguments = self._chrome_kiosk_args(url)
-        await self._launch_and_track(ActiveApp.NEWS, arguments, "News")
+        await self._launch_and_track(ActiveApp.NEWS, arguments, "新聞")
 
     async def search_youtube(self, query: str) -> None:
         url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
@@ -137,7 +138,7 @@ class ApplicationManager:
             process = self._launch_process(arguments)
         except OSError as error:
             raise CommandExecutionError(
-                "application_launch_failed", f"Could not open {app_name}."
+                "application_launch_failed", f"無法開啟{app_name}。"
             ) from error
 
         window_handle = await asyncio.to_thread(self._windows.find_window_for_pid, process.pid, 2.5)
@@ -170,7 +171,7 @@ class ApplicationManager:
         }:
             raise CommandExecutionError(
                 "input_target_not_active",
-                "Open a controller-managed browser before using remote input.",
+                "請先開啟控制器管理的瀏覽器再使用遙控輸入。",
             )
         tracked = self._current
         if (
@@ -181,21 +182,21 @@ class ApplicationManager:
         ):
             raise CommandExecutionError(
                 "input_target_unavailable",
-                "The controller-managed application window is not available for remote input.",
+                "控制器管理的應用程式視窗目前無法接受遙控輸入。",
             )
         assert tracked.window_handle is not None
         self._windows.activate(tracked.window_handle)
         if not self._tracked_window_is_owned(tracked):
             raise CommandExecutionError(
                 "input_target_unavailable",
-                "The controller-managed application window is not available for remote input.",
+                "控制器管理的應用程式視窗目前無法接受遙控輸入。",
             )
         if not self._windows.is_foreground(tracked.window_handle):
             raise CommandExecutionError(
                 "input_target_not_foreground",
                 (
-                    "Bring the controller-opened application to the foreground "
-                    "before using remote input."
+                    "請先把控制器開啟的應用程式切到前景，"
+                    "再使用遙控輸入。"
                 ),
             )
 
@@ -214,11 +215,11 @@ class ApplicationManager:
 
     def _launch_spec(self, app: ActiveApp) -> tuple[Path | None, str, str]:
         if app is ActiveApp.YOUTUBE:
-            return self._executables.get("brave"), self._settings.urls.youtube, "Brave browser"
+            return self._executables.get("brave"), self._settings.urls.youtube, "Brave 瀏覽器"
         if app is ActiveApp.NETFLIX:
             return self._executables.get("edge"), self._settings.urls.netflix, "Microsoft Edge"
         browser = self._executables.get("browser") or self._executables.get("edge")
-        return browser, self._settings.urls.browser, "Configured browser"
+        return browser, self._settings.urls.browser, "已設定的瀏覽器"
 
     def _minimize_current_window(self) -> None:
         if self._current is None or not self._tracked_window_is_owned(self._current):

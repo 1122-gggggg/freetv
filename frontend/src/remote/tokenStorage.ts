@@ -20,9 +20,9 @@ export async function revokeRemoteToken(token: string): Promise<void> {
       headers: { Authorization: `Bearer ${token}` },
     })
   } catch {
-    throw new Error('Could not unpair this remote.')
+    throw new Error('無法解除這支遙控器的配對。')
   }
   if (!response.ok && response.status !== 401) {
-    throw new Error('Could not unpair this remote.')
+    throw new Error('無法解除這支遙控器的配對。')
   }
 }

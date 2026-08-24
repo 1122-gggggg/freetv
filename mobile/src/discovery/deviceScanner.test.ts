@@ -36,16 +36,16 @@ describe('controller HTTP transport', () => {
     globalThis.fetch = fetchMock
 
     await expect(pairWithDevice('192.168.1.42', 8765, '12345')).resolves.toEqual({
-      error: 'Pairing code must be 6 digits.',
+      error: '配對碼必須是六位數字。',
     })
     await expect(pairWithDevice('192.168.1.42', 8765, '1234567')).resolves.toEqual({
-      error: 'Pairing code must be 6 digits.',
+      error: '配對碼必須是六位數字。',
     })
     await expect(pairWithDevice('192.168.1.42', 8765, 'abcdef')).resolves.toEqual({
-      error: 'Pairing code must be 6 digits.',
+      error: '配對碼必須是六位數字。',
     })
     await expect(pairWithDevice('192.168.1.42', 8765, '')).resolves.toEqual({
-      error: 'Pairing code must be 6 digits.',
+      error: '配對碼必須是六位數字。',
     })
     expect(fetchMock).not.toHaveBeenCalled()
   })
@@ -55,7 +55,7 @@ describe('controller HTTP transport', () => {
     globalThis.fetch = fetchMock
 
     const result = await pairWithDevice('invalid-host', 8765, '123456')
-    expect(result).toEqual({ error: 'Invalid controller host or port.' })
+    expect(result).toEqual({ error: '控制器主機或連接埠無效。' })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

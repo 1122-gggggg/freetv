@@ -124,13 +124,13 @@ export class ControllerSocket {
   private sendWithAck(requestId: string, message: ClientMessage): Promise<Acknowledgement> {
     return new Promise((resolve, reject) => {
       if (this.status !== 'authenticated' || !this.socket) {
-        reject(new Error('Socket is not connected or authenticated'))
+        reject(new Error('尚未連線或尚未通過驗證'))
         return
       }
 
       const timeout = setTimeout(() => {
         this.pendingAcks.delete(requestId)
-        reject(new Error('Command acknowledgement timed out'))
+        reject(new Error('指令確認逾時'))
       }, 5000)
 
       this.pendingAcks.set(requestId, {
@@ -165,7 +165,7 @@ export class ControllerSocket {
       origin = controllerOrigin(host, port)
     } catch (error) {
       this.updateStatus('failed')
-      this.options.onError?.(error instanceof Error ? error : new Error('Invalid controller endpoint'))
+      this.options.onError?.(error instanceof Error ? error : new Error('控制器位址無效'))
       return
     }
     const url = `${origin.replace(/^https:/, 'wss:')}/ws/remote`
@@ -203,7 +203,7 @@ export class ControllerSocket {
         } else if (event.code === 1008) {
           this.updateStatus('failed')
           this.options.onError?.(
-            new Error('The PC TV Box rejected this connection. Check its address and local CA trust.'),
+            new Error('電視盒拒絕此次連線。請確認位址與本機憑證信任設定。'),
           )
         } else {
           this.updateStatus('disconnected')
@@ -295,7 +295,7 @@ export class ControllerSocket {
     }
 
     if (this.pointerQueue.length >= MAX_POINTER_QUEUE_SIZE) {
-      this.options.onError?.(new Error('Touchpad input is temporarily busy'))
+      this.options.onError?.(new Error('觸控板輸入暫時忙碌'))
       return
     }
 
@@ -323,7 +323,7 @@ export class ControllerSocket {
       if (this.inFlightPointerRequestId === requestId) {
         this.inFlightPointerRequestId = null
         this.pointerAckTimeout = null
-        this.options.onError?.(new Error('Pointer acknowledgement timed out'))
+        this.options.onError?.(new Error('指標確認逾時'))
         this.pumpPointerQueue()
       }
     }, POINTER_ACK_TIMEOUT_MS)
@@ -336,7 +336,7 @@ export class ControllerSocket {
         this.pointerAckTimeout = null
       }
       this.inFlightPointerRequestId = null
-      this.options.onError?.(err instanceof Error ? err : new Error('Failed to send pointer message'))
+      this.options.onError?.(err instanceof Error ? err : new Error('無法送出指標訊息'))
       this.pumpPointerQueue()
     }
   }
@@ -363,7 +363,7 @@ export class ControllerSocket {
   private clearPendingAcks(): void {
     for (const [, pending] of this.pendingAcks) {
       clearTimeout(pending.timeout)
-      pending.reject(new Error('Socket disconnected before acknowledgement'))
+      pending.reject(new Error('連線已中斷，尚未收到確認'))
     }
     this.pendingAcks.clear()
   }
