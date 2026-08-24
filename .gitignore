@@ -19,6 +19,13 @@ config/channels.json
 config/remotes.json
 config/tls/
 config/edge-profile/
+config/news.json
+config/chrome-tv-profile/
+vendor/adblock/
+vendor/adblock-youtube/
+config/tunnel-origin.txt
+config/cloudflared.log
+config/cloudflared.out.log
 logs/
 
 # Appliance packages

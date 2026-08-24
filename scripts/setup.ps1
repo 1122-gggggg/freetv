@@ -43,6 +43,15 @@ Assert-NativeSuccess 'Upgrading pip'
 & $VenvPython -m pip install -r (Join-Path $Root 'backend\requirements.txt')
 Assert-NativeSuccess 'Installing backend dependencies'
 
+$AdblockDirectory = Join-Path $Root 'vendor\adblock'
+Push-Location (Join-Path $Root 'backend')
+try {
+    & $VenvPython -m app.applications.adblock --directory $AdblockDirectory
+    Assert-NativeSuccess 'Installing AdBlock extension'
+} finally {
+    Pop-Location
+}
+
 $FrontendIndex = Join-Path $Root 'frontend\dist\index.html'
 if (Test-Path $FrontendIndex) {
     Write-Host 'Frontend build found at frontend\dist; skipping npm install and build.'
@@ -62,7 +71,7 @@ if (Test-Path $FrontendIndex) {
     }
 }
 
-foreach ($Name in @('settings', 'channels')) {
+foreach ($Name in @('settings', 'channels', 'news')) {
     $Example = Join-Path $Root "config\$Name.example.json"
     $Local = Join-Path $Root "config\$Name.json"
     if (-not (Test-Path $Local)) {
@@ -95,6 +104,11 @@ if ($Transport -eq 'https') {
     Write-Host "CA SHA-256: $($Tls.ca_sha256)"
 }
 
+$ChromeCandidates = @(
+    'C:\Program Files\Google\Chrome\Application\chrome.exe',
+    'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+    (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe')
+)
 $BraveCandidates = @(
     'C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe',
     (Join-Path $env:LOCALAPPDATA 'BraveSoftware\Brave-Browser\Application\brave.exe')
@@ -103,14 +117,23 @@ $EdgeCandidates = @(
     'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
     'C:\Program Files\Microsoft\Edge\Application\msedge.exe'
 )
+$Chrome = Get-Command chrome.exe -ErrorAction SilentlyContinue
+$ChromeFound = if ($Chrome) { $Chrome.Source } else { $ChromeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1 }
 $Mpv = Get-Command mpv.exe -ErrorAction SilentlyContinue
 $BraveFound = $BraveCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 $EdgeFound = $EdgeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 Write-Host ''
 Write-Host 'External dependency check:'
-Write-Host ("  Brave: {0}" -f $(if ($BraveFound) { $BraveFound } else { 'not found; configure applications.brave_path if installed elsewhere' }))
-Write-Host ("  Edge:  {0}" -f $(if ($EdgeFound) { $EdgeFound } else { 'not found; install Microsoft Edge' }))
+Write-Host ("  Chrome: {0}" -f $(if ($ChromeFound) { $ChromeFound } else { 'not found; install Google Chrome for YouTube & News' }))
+Write-Host ("  Brave:  {0}" -f $(if ($BraveFound) { $BraveFound } else { 'not found; configure applications.brave_path if installed elsewhere' }))
+Write-Host ("  Edge:   {0}" -f $(if ($EdgeFound) { $EdgeFound } else { 'not found; install Microsoft Edge' }))
+$Cloudflared = Get-Command cloudflared -ErrorAction SilentlyContinue
+if ($Cloudflared) {
+    Write-Host "  cloudflared: $($Cloudflared.Source)"
+} else {
+    Write-Warning 'cloudflared was not found. Off-LAN Remote needs: winget install Cloudflare.cloudflared'
+}
 if ($Mpv) {
     Write-Host "  mpv:   $($Mpv.Source)"
 } else {

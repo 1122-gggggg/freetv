@@ -36,6 +36,7 @@ try {
     Copy-Item (Join-Path $Root 'scripts\integration-smoke.py') (Join-Path $Stage 'scripts\')
     Copy-Item (Join-Path $Root 'config\settings.example.json') (Join-Path $Stage 'config\')
     Copy-Item (Join-Path $Root 'config\channels.example.json') (Join-Path $Stage 'config\')
+    Copy-Item (Join-Path $Root 'config\news.example.json') (Join-Path $Stage 'config\')
     Copy-Item (Join-Path $Root 'README.md') $Stage
     Copy-Item (Join-Path $Root 'docs\*.md') (Join-Path $Stage 'docs\')
 

@@ -60,7 +60,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
     }
     const sanitizedCode = code.replace(/[^0-9]/g, '').slice(0, 6)
     if (sanitizedCode.length !== 6) {
-      Alert.alert('Invalid Code', 'Pairing code must be 6 digits.')
+      Alert.alert('代碼無效', '配對碼須為 6 位數字。')
       return
     }
 
@@ -72,7 +72,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
       if ('token' in result) {
         const device: SavedDevice = {
           id: `${host}:${port}`,
-          name: `PC TV (${host})`,
+          name: `電腦電視盒 (${host})`,
           host,
           port,
           token: result.token,
@@ -85,12 +85,12 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
         setSelectedBox(null)
         onDeviceConnected(device)
       } else {
-        Alert.alert('Pairing Failed', result.error)
+        Alert.alert('配對失敗', result.error)
       }
     } catch (error) {
       Alert.alert(
-        'Pairing Failed',
-        error instanceof Error ? error.message : 'Could not securely save this pairing.',
+        '配對失敗',
+        error instanceof Error ? error.message : '無法安全儲存此次配對。',
       )
     } finally {
       isPairingRef.current = false
@@ -107,14 +107,14 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
     const parsed = parsePairingPayload(data)
     if (!parsed) {
       isScanningLockRef.current = false
-      Alert.alert('Invalid QR Code', 'The scanned QR code is not a valid PC TV Box pairing code.')
+      Alert.alert('QR 碼無效', '掃描的 QR 碼不是有效的電視盒配對碼。')
       return
     }
 
     const target = resolvePairingTarget(parsed, manualHost, manualPort)
     if (!target) {
       isScanningLockRef.current = false
-      Alert.alert('Controller Address Required', 'Enter the TV Box IP address before scanning a code-only QR code.')
+      Alert.alert('需要控制器位址', '掃描僅含代碼的 QR 碼前，請先輸入電視盒 IP 位址。')
       return
     }
 
@@ -123,7 +123,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
       validatedTarget = validateControllerTarget(target.host, target.port)
     } catch (error) {
       isScanningLockRef.current = false
-      Alert.alert('Invalid Address', error instanceof Error ? error.message : 'Invalid controller host or port.')
+      Alert.alert('位址無效', error instanceof Error ? error.message : '控制器主機或連接埠無效。')
       return
     }
 
@@ -131,7 +131,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
       const sanitizedCode = parsed.code.replace(/[^0-9]/g, '').slice(0, 6)
       if (sanitizedCode.length !== 6) {
         isScanningLockRef.current = false
-        Alert.alert('Invalid QR Code', 'The scanned QR code does not contain a valid 6-digit code.')
+        Alert.alert('QR 碼無效', '掃描的 QR 碼未包含有效的 6 位數字代碼。')
         return
       }
       setIsScanningQR(false)
@@ -154,7 +154,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
     if (!permission?.granted) {
       const res = await requestPermission()
       if (!res.granted) {
-        Alert.alert('Camera Permission Required', 'Please enable camera permission in system settings to scan the TV pairing QR code.')
+        Alert.alert('需要相機權限', '請在系統設定中開啟相機權限，才能掃描電視配對 QR 碼。')
         return
       }
     }
@@ -177,8 +177,8 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
       setShowPairModal(true)
     } catch (error) {
       Alert.alert(
-        'Invalid Endpoint',
-        error instanceof Error ? error.message : 'Please enter a valid IPv4 address and port.',
+        '端點無效',
+        error instanceof Error ? error.message : '請輸入有效的 IPv4 位址與連接埠。',
       )
     }
   }
@@ -190,22 +190,22 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
       ]}
     >
       <View style={styles.header}>
-        <Text style={styles.eyebrow}>PC TV BOX</Text>
-        <Text style={styles.title}>Connect Your TV</Text>
-        <Text style={styles.subtitle}>Scan the QR code on your TV screen or enter its LAN IP below.</Text>
+        <Text style={styles.eyebrow}>電腦電視盒</Text>
+        <Text style={styles.title}>連接你的電視</Text>
+        <Text style={styles.subtitle}>掃描電視畫面上的 QR 碼，或在下方輸入區網 IP。</Text>
       </View>
 
       {/* Primary Action: QR Code Scan */}
       <TouchableOpacity style={styles.qrButton} onPress={handleOpenQRScanner}>
         <Text style={styles.qrIcon}>📷</Text>
         <View style={styles.qrTextCol}>
-          <Text style={styles.qrButtonTitle}>SCAN TV QR CODE</Text>
-          <Text style={styles.qrButtonDesc}>Point camera at the QR code on the TV screen</Text>
+          <Text style={styles.qrButtonTitle}>掃描電視 QR 碼</Text>
+          <Text style={styles.qrButtonDesc}>將相機對準電視畫面的 QR 碼</Text>
         </View>
       </TouchableOpacity>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>SAVED TVS</Text>
+        <Text style={styles.sectionTitle}>已儲存的電視</Text>
 
         <FlatList
           data={savedDevices}
@@ -227,7 +227,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
           )}
           ListEmptyComponent={
             <Text style={styles.emptyText}>
-              No saved TV Box. Scan the QR code or enter the IP below.
+              尚未儲存電視盒。請掃描 QR 碼或在下方輸入 IP。
             </Text>
           }
         />
@@ -235,11 +235,11 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
 
       {/* Manual Connection Option */}
       <View style={styles.manualCard}>
-        <Text style={styles.manualTitle}>MANUAL CONNECT</Text>
+        <Text style={styles.manualTitle}>手動連線</Text>
         <View style={styles.manualRow}>
           <TextInput
             style={[styles.input, { flex: 2 }]}
-            placeholder="IP Address (e.g. 172.20.10.8)"
+            placeholder="IP 位址（例如 172.20.10.8）"
             placeholderTextColor="#64748b"
             value={manualHost}
             onChangeText={setManualHost}
@@ -247,7 +247,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
           />
           <TextInput
             style={[styles.input, { flex: 1 }]}
-            placeholder="Port"
+            placeholder="連接埠"
             placeholderTextColor="#64748b"
             value={manualPort}
             onChangeText={setManualPort}
@@ -257,7 +257,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
             style={styles.manualBtn}
             onPress={handleManualPair}
           >
-            <Text style={styles.manualBtnText}>PAIR</Text>
+            <Text style={styles.manualBtnText}>配對</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -279,10 +279,10 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
               { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 20 },
             ]}
           >
-            <Text style={styles.scannerTitle}>ALIGN QR CODE WITHIN FRAME</Text>
+            <Text style={styles.scannerTitle}>將 QR 碼對準框內</Text>
             <View style={styles.scanTarget} />
             <TouchableOpacity style={styles.closeScannerBtn} onPress={handleCloseQRScanner}>
-              <Text style={styles.closeScannerText}>CLOSE SCANNER</Text>
+              <Text style={styles.closeScannerText}>關閉掃描</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -297,9 +297,9 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
           ]}
         >
           <View style={styles.pairCard}>
-            <Text style={styles.pairCardTitle}>ENTER 6-DIGIT CODE</Text>
+            <Text style={styles.pairCardTitle}>輸入 6 位數代碼</Text>
             <Text style={styles.pairCardDesc}>
-              Enter the pairing code displayed at the bottom-left of your TV screen.
+              輸入電視畫面左下角顯示的配對碼。
             </Text>
 
             <TextInput
@@ -323,7 +323,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
                 disabled={isPairing}
                 onPress={handleCancelPairModal}
               >
-                <Text style={styles.cancelPairText}>CANCEL</Text>
+                <Text style={styles.cancelPairText}>取消</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.confirmPairBtn, (pairingCode.length !== 6 || isPairing) && { opacity: 0.5 }]}
@@ -337,7 +337,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
                   }
                 }}
               >
-                <Text style={styles.confirmPairText}>{isPairing ? 'PAIRING...' : 'CONFIRM'}</Text>
+                <Text style={styles.confirmPairText}>{isPairing ? '配對中…' : '確認'}</Text>
               </TouchableOpacity>
             </View>
           </View>

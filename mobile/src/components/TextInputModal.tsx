@@ -35,7 +35,7 @@ export function TextInputModal({ visible, onClose, onSend }: TextInputModalProps
       setErrorMessage(null)
       onClose()
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to send text'
+      const message = err instanceof Error ? err.message : '無法送出文字'
       setErrorMessage(message)
     } finally {
       setIsSending(false)
@@ -49,14 +49,14 @@ export function TextInputModal({ visible, onClose, onSend }: TextInputModalProps
         style={[styles.overlay, { paddingTop: insets.top }]}
       >
         <View style={[styles.card, { paddingBottom: insets.bottom + 24 }]}>
-          <Text style={styles.title}>SEND TEXT TO TV</Text>
+          <Text style={styles.title}>傳送文字到電視</Text>
           <Text style={styles.subtitle}>
-            Type search queries, URLs, or text to send into the focused app on PC.
+            輸入搜尋關鍵字、網址或文字，傳送到電腦上目前焦點的應用程式。
           </Text>
 
           <TextInput
             style={styles.input}
-            placeholder="Type text here..."
+            placeholder="在此輸入文字…"
             placeholderTextColor="#64748b"
             value={text}
             onChangeText={(val) => {
@@ -74,7 +74,7 @@ export function TextInputModal({ visible, onClose, onSend }: TextInputModalProps
           ) : null}
           <View style={styles.actions}>
             <TouchableOpacity style={[styles.btn, styles.cancelBtn]} onPress={onClose}>
-              <Text style={styles.cancelText}>CANCEL</Text>
+              <Text style={styles.cancelText}>取消</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -82,7 +82,7 @@ export function TextInputModal({ visible, onClose, onSend }: TextInputModalProps
               onPress={handleSend}
               disabled={!text.trim() || isSending}
             >
-              <Text style={styles.sendText}>{isSending ? 'SENDING...' : 'SEND'}</Text>
+              <Text style={styles.sendText}>{isSending ? '送出中…' : '送出'}</Text>
             </TouchableOpacity>
           </View>
         </View>

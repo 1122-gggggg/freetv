@@ -8,7 +8,7 @@ export async function pairWithDevice(
 ): Promise<{ token: string } | { error: string }> {
   const sanitizedCode = typeof code === 'string' ? code.trim() : ''
   if (!/^\d{6}$/.test(sanitizedCode)) {
-    return { error: 'Pairing code must be 6 digits.' }
+    return { error: '配對碼必須是六位數字。' }
   }
   try {
     const origin = controllerOrigin(host, port)
@@ -22,11 +22,11 @@ export async function pairWithDevice(
     })
     const data = await response.json()
     if (!response.ok || !data.token) {
-      return { error: data.detail || 'Pairing failed. Please check the code.' }
+      return { error: data.detail || '配對失敗。請確認配對碼。' }
     }
     return { token: data.token }
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Network error connecting to PC TV' }
+    return { error: err instanceof Error ? err.message : '連線到電視盒時發生網路錯誤' }
   }
 }
 
@@ -42,10 +42,10 @@ export async function revokeDeviceToken(host: string, port: number, token: strin
       },
     })
   } catch {
-    throw new Error('Could not reach this PC TV Box to revoke the remote token.')
+    throw new Error('無法連上這台電視盒以撤銷遙控器權杖。')
   }
 
   if (!response.ok && response.status !== 401) {
-    throw new Error('The PC TV Box did not revoke the remote token.')
+    throw new Error('電視盒未撤銷遙控器權杖。')
   }
 }

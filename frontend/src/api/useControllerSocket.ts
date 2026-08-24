@@ -11,6 +11,7 @@ export interface ControllerConnection {
   sendCommand: (command: Command) => string | null
   sendPointer: (action: PointerAction, dx?: number, dy?: number) => string | null
   sendText: (text: string) => string | null
+  sendSearch: (query: string) => string | null
 }
 
 export function useControllerSocket(path: '/ws/remote' | '/ws/tv', token?: string): ControllerConnection {
@@ -45,6 +46,7 @@ export function useControllerSocket(path: '/ws/remote' | '/ws/tv', token?: strin
     [],
   )
   const sendText = useCallback((text: string) => socketRef.current?.sendText(text) ?? null, [])
+  const sendSearch = useCallback((query: string) => socketRef.current?.sendSearch(query) ?? null, [])
 
-  return { status, state, lastAcknowledgement, lastError, sendCommand, sendPointer, sendText }
+  return { status, state, lastAcknowledgement, lastError, sendCommand, sendPointer, sendText, sendSearch }
 }

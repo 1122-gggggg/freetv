@@ -14,11 +14,11 @@ from app.commands.bus import CommandBus
 from app.config import ServerSettings, Settings
 from app.controller import ControllerRuntime
 from app.main import RemoteAuthenticationGuard, create_app
+from app.player.channels import Channel
 from app.protocol import Command, PointerActionMessage
 from app.security.pairing import PairingService
 from app.security.tokens import TokenStore
 from app.state import ActiveApp, ControllerState, StateStore
-
 TRUSTED_REMOTE_HEADERS = {"host": "127.0.0.1:8765", "origin": "https://127.0.0.1:8765"}
 REMOTE_SOCKET_URL = "wss://127.0.0.1:8765/ws/remote"
 
@@ -29,8 +29,18 @@ def secure_remote_client(app) -> TestClient:
 
 @dataclass
 class FakeApplications:
+    opened: list[ActiveApp] = field(default_factory=list)
+    opened_news: list[str] = field(default_factory=list)
+    searches: list[str] = field(default_factory=list)
+
     async def open(self, app: ActiveApp) -> None:
-        return None
+        self.opened.append(app)
+
+    async def open_news(self, url: str) -> None:
+        self.opened_news.append(url)
+
+    async def search_youtube(self, query: str) -> None:
+        self.searches.append(query)
 
     async def return_home(self) -> None:
         return None
@@ -38,9 +48,11 @@ class FakeApplications:
     async def forward_command(self, command: Command) -> None:
         return None
 
-    async def shutdown(self) -> None:
+    def require_input_target(self, app: ActiveApp) -> None:
         return None
 
+    async def shutdown(self) -> None:
+        return None
 
 @dataclass
 class FakePlayer:
@@ -102,12 +114,36 @@ class FakePower:
         return None
 
 
-def make_app(tmp_path, transport: str = "http"):
+@dataclass
+class FakeNews:
+    channels: list[Channel] = field(
+        default_factory=lambda: [
+            Channel(
+                id="dw-news",
+                number=1,
+                name="DW News",
+                url="https://www.youtube.com/@dwnews/live",
+            ),
+        ]
+    )
+    current_index: int = 0
+
+    @property
+    def current(self) -> Channel:
+        return self.channels[self.current_index]
+
+    def move(self, direction: int) -> Channel:
+        self.current_index = (self.current_index + direction) % len(self.channels)
+        return self.current
+
+
+def make_app(tmp_path, transport: str = "http", news: FakeNews | None = None):
     token_store = TokenStore(tmp_path / "remotes.json")
     pairing = PairingService(token_store, code_factory=lambda: "482731")
     pairing.rotate_code()
     applications = FakeApplications()
     player = FakePlayer()
+    resolved_news = news or FakeNews()
     bus = CommandBus(
         StateStore(ControllerState()),
         applications=applications,
@@ -115,8 +151,15 @@ def make_app(tmp_path, transport: str = "http"):
         volume=FakeVolume(),
         input_controller=FakeInput(),
         power=FakePower(),
+        news=resolved_news,
     )
-    runtime = ControllerRuntime(bus=bus, pairing=pairing, applications=applications, player=player)
+    runtime = ControllerRuntime(
+        bus=bus,
+        pairing=pairing,
+        applications=applications,
+        player=player,
+        news=resolved_news,
+    )
     return create_app(
         settings=Settings(server=ServerSettings(transport=transport)),
         capabilities={},
@@ -153,7 +196,7 @@ def test_remote_socket_rejects_commands_before_token_authentication(tmp_path) ->
         "version": 1,
         "type": "error",
         "code": "authentication_required",
-        "message": "Authenticate before sending remote controls.",
+        "message": "請先驗證後再傳送遙控指令。",
     }
 
 
@@ -382,6 +425,8 @@ def test_pairing_code_endpoint_rejects_an_untrusted_host_from_loopback(tmp_path)
 
 def test_pairing_code_endpoint_includes_lan_remote_url(tmp_path, monkeypatch) -> None:
     app = make_app(tmp_path)
+    monkeypatch.delenv("PC_TV_PUBLIC_ORIGIN", raising=False)
+    monkeypatch.setattr(main, "_public_tunnel_origin", lambda: None)
     monkeypatch.setattr(main, "_default_route_ipv4_address", lambda: IPv4Address("192.168.1.42"))
 
     with TestClient(app, client=("127.0.0.1", 50_000)) as client:
@@ -389,6 +434,84 @@ def test_pairing_code_endpoint_includes_lan_remote_url(tmp_path, monkeypatch) ->
 
     assert response.status_code == 200
     assert response.json()["remote_url"] == "http://192.168.1.42:8765/remote"
+
+
+def test_pairing_code_endpoint_prefers_public_tunnel_origin(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+    monkeypatch.setattr(main, "_default_route_ipv4_address", lambda: IPv4Address("192.168.1.42"))
+
+    with TestClient(app, client=("127.0.0.1", 50_000)) as client:
+        response = client.get("/api/pairing", headers={"host": "127.0.0.1:8765"})
+
+    assert response.status_code == 200
+    assert response.json()["remote_url"] == "https://abc.trycloudflare.com/remote"
+
+
+def test_pairing_accepts_public_tunnel_origin_from_loopback(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+    headers = {
+        "host": "abc.trycloudflare.com",
+        "origin": "https://abc.trycloudflare.com",
+    }
+
+    with TestClient(app, base_url="http://127.0.0.1:8765", client=("127.0.0.1", 50_000)) as client:
+        response = client.post("/api/pair", json={"code": "482731"}, headers=headers)
+
+    assert response.status_code == 200
+    assert app.state.runtime.pairing.verify_token(response.json()["token"])
+
+
+def test_pairing_accepts_public_tunnel_origin_from_public_peer(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+    headers = {
+        "host": "abc.trycloudflare.com",
+        "origin": "https://abc.trycloudflare.com",
+    }
+
+    with TestClient(app, base_url="http://127.0.0.1:8765", client=("8.8.8.8", 50_000)) as client:
+        response = client.post("/api/pair", json={"code": "482731"}, headers=headers)
+
+    assert response.status_code == 200
+    assert app.state.runtime.pairing.verify_token(response.json()["token"])
+
+
+def test_remote_socket_accepts_public_tunnel_origin_from_public_peer(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+    headers = {
+        "host": "abc.trycloudflare.com",
+        "origin": "https://abc.trycloudflare.com",
+    }
+
+    with TestClient(app, base_url="http://127.0.0.1:8765", client=("8.8.8.8", 50_000)) as client:
+        token = client.post("/api/pair", json={"code": "482731"}, headers=headers).json()["token"]
+        with client.websocket_connect(
+            "wss://abc.trycloudflare.com/ws/remote", headers=headers
+        ) as socket:
+            authenticate(socket, token, "req-public-tunnel")
+
+
+def test_pairing_rejects_unrelated_public_host_when_tunnel_is_configured(
+    tmp_path, monkeypatch
+) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+    headers = {"host": "evil.example", "origin": "https://evil.example"}
+
+    with TestClient(app, client=("127.0.0.1", 50_000)) as client:
+        response = client.post("/api/pair", json={"code": "482731"}, headers=headers)
+
+    assert response.status_code == 403
+
+
+def test_parse_cloudflared_origin_from_log_line() -> None:
+    line = "2026-08-19 INF |  https://abc.trycloudflare.com  |"
+    assert main.parse_cloudflared_origin(line) == "https://abc.trycloudflare.com"
+    assert main.parse_cloudflared_origin("https://api.trycloudflare.com metrics") is None
+    assert main.parse_cloudflared_origin("no url here") is None
 
 
 
@@ -503,6 +626,8 @@ def test_remote_socket_accepts_plain_websocket_from_the_lan_in_http_mode(tmp_pat
 
 def test_pairing_code_endpoint_uses_https_remote_url_in_https_mode(tmp_path, monkeypatch) -> None:
     app = make_app(tmp_path, transport="https")
+    monkeypatch.delenv("PC_TV_PUBLIC_ORIGIN", raising=False)
+    monkeypatch.setattr(main, "_public_tunnel_origin", lambda: None)
     monkeypatch.setattr(main, "_default_route_ipv4_address", lambda: IPv4Address("192.168.1.42"))
 
     with TestClient(app, client=("127.0.0.1", 50_000)) as client:
@@ -633,7 +758,7 @@ def test_authenticated_remote_cannot_dispatch_after_its_token_is_revoked(tmp_pat
         "version": 1,
         "type": "error",
         "code": "authentication_failed",
-        "message": "Remote token is invalid.",
+        "message": "遙控器權杖無效。",
     }
 
 
@@ -914,3 +1039,29 @@ def test_private_virtual_or_cellular_adapters_are_not_controller_or_remote_lans(
     assert main._is_trusted_remote_peer("192.168.1.87")
     assert not main._is_trusted_remote_peer("172.20.0.42")
     assert not main._is_trusted_remote_peer("10.0.0.99")
+
+def test_remote_socket_dispatches_search_video_and_broadcasts_state(tmp_path) -> None:
+    app = make_app(tmp_path, transport="https")
+    token = app.state.runtime.pairing.pair("482731")
+    with secure_remote_client(app) as client:
+        with client.websocket_connect(REMOTE_SOCKET_URL, headers=TRUSTED_REMOTE_HEADERS) as socket:
+            authenticate(socket, token, "auth-1")
+            socket.send_json(
+                {
+                    "version": 1,
+                    "type": "search_video",
+                    "request_id": "search-1",
+                    "query": "lofi hip hop",
+                }
+            )
+            assert socket.receive_json() == {
+                "version": 1,
+                "type": "ack",
+                "request_id": "search-1",
+                "success": True,
+                "error_code": None,
+                "message": None,
+            }
+            state = socket.receive_json()
+            assert state["type"] == "state"
+            assert state["active_app"] == "youtube"

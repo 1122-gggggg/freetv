@@ -28,9 +28,9 @@ const MOVE_SENSITIVITY = 1.35
 const SCROLL_SENSITIVITY = 1.5
 const ACCESSIBILITY_SCROLL_DELTA = 100
 const TRACKPAD_ACCESSIBILITY_ACTIONS = [
-  { name: 'activate', label: 'Click' },
-  { name: 'increment', label: 'Scroll up' },
-  { name: 'decrement', label: 'Scroll down' },
+  { name: 'activate', label: '點擊' },
+  { name: 'increment', label: '向上捲動' },
+  { name: 'decrement', label: '向下捲動' },
 ]
 
 function areTouchIdsEqual(a: (string | number)[], b: (string | number)[]): boolean {
@@ -290,14 +290,14 @@ export function Trackpad({ onPointer, disabled }: TrackpadProps): React.ReactEle
       onResponderReject={handleTouchTerminate}
       accessible
       accessibilityRole="adjustable"
-      accessibilityLabel="Touchpad"
-      accessibilityHint="Double tap to click. Swipe up or down to scroll vertically."
+      accessibilityLabel="觸控板"
+      accessibilityHint="點兩下即可點擊。向上或向下滑動可垂直捲動。"
       accessibilityState={{ disabled: Boolean(disabled) }}
       accessibilityActions={TRACKPAD_ACCESSIBILITY_ACTIONS}
       onAccessibilityAction={handleAccessibilityAction}
     >
-      <Text style={styles.hintText}>TOUCHPAD</Text>
-      <Text style={styles.subHintText}>Slide to move · Tap to click · 2 fingers to scroll</Text>
+      <Text style={styles.hintText}>觸控板</Text>
+      <Text style={styles.subHintText}>滑動移動 · 輕點點擊 · 雙指捲動</Text>
     </View>
   )
 }

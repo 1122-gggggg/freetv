@@ -26,7 +26,7 @@ jobs:
           cp -r backend/app "$stage/backend/app"
           cp backend/requirements.txt "$stage/backend/"
           cp scripts/*.ps1 scripts/*.psm1 scripts/integration-smoke.py "$stage/scripts/"
-          cp config/settings.example.json config/channels.example.json "$stage/config/"
+          cp config/settings.example.json config/channels.example.json config/news.example.json "$stage/config/"
           cp README.md "$stage/"
           cp docs/*.md "$stage/docs/"
           find "$stage" -type d -name '__pycache__' -prune -exec rm -rf {} +

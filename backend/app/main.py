@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import socket
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
-from ipaddress import IPv4Address, IPv6Address, IPv4Network, ip_address
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, ip_address
 from pathlib import Path
 from time import monotonic
 from urllib.parse import urlsplit
@@ -25,6 +26,7 @@ from app.protocol import (
     CommandMessage,
     ErrorMessage,
     PointerActionMessage,
+    SearchVideoMessage,
     TextInputMessage,
     parse_client_message,
 )
@@ -168,6 +170,7 @@ def create_app(
             "status": "ok",
             "backend": True,
             "frontend": resolved_frontend_available,
+            "chrome_available": bool(app.state.capabilities.get("chrome_available", False)),
             "brave_available": bool(app.state.capabilities.get("brave_available", False)),
             "edge_available": bool(app.state.capabilities.get("edge_available", False)),
             "mpv_available": bool(app.state.capabilities.get("mpv_available", False)),
@@ -195,7 +198,7 @@ def create_app(
         if not attempts.may_attempt(client_host):
             log_event(logger, "pair_failure", client=client_host, reason="rate_limited")
             raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many pairing attempts."
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="配對嘗試次數過多。"
             )
         try:
             token = app.state.runtime.pairing.pair(payload.code)
@@ -203,13 +206,13 @@ def create_app(
             attempts.record_failure(client_host)
             log_event(logger, "pair_failure", client=client_host, reason="expired_code")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Pairing code expired."
+                status_code=status.HTTP_400_BAD_REQUEST, detail="配對碼已過期。"
             ) from error
         except PairingCodeInvalid as error:
             attempts.record_failure(client_host)
             log_event(logger, "pair_failure", client=client_host, reason="invalid_code")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Pairing code is invalid."
+                status_code=status.HTTP_400_BAD_REQUEST, detail="配對碼無效。"
             ) from error
         stale_sessions = await app.state.connections.remove_invalid_sessions(
             app.state.runtime.pairing.session_is_valid
@@ -227,7 +230,7 @@ def create_app(
         token = _bearer_token(request)
         if token is None or not app.state.runtime.pairing.verify_token(token):
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Remote token is invalid."
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="遙控器權杖無效。"
             )
         connections: ConnectionRegistry = app.state.connections
         async with app.state.dispatch_lock:
@@ -243,7 +246,7 @@ def create_app(
             websocket, app.state.settings.server.transport
         )
         if (
-            not _is_trusted_remote_peer(client_host)
+            not _is_trusted_remote_access(client_host, websocket.headers.get("host"))
             or expected_origin_scheme is None
             or not _has_trusted_remote_origin(
                 websocket.headers.get("origin"),
@@ -274,7 +277,7 @@ def create_app(
                 await _send_error(
                     websocket,
                     "authentication_required",
-                    "Authenticate before sending remote controls.",
+                    "請先驗證後再傳送遙控指令。",
                 )
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 return
@@ -285,7 +288,7 @@ def create_app(
                 await _send_error(
                     websocket,
                     "authentication_required",
-                    "Authenticate before sending remote controls.",
+                    "請先驗證後再傳送遙控指令。",
                 )
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 return
@@ -294,7 +297,7 @@ def create_app(
                 remote_session
             ):
                 log_event(logger, "remote_auth_failure", client=client_host)
-                await _send_error(websocket, "authentication_failed", "Remote token is invalid.")
+                await _send_error(websocket, "authentication_failed", "遙控器權杖無效。")
                 await websocket.close(code=REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE)
                 return
 
@@ -318,7 +321,7 @@ def create_app(
             except TimeoutError:
                 log_event(logger, "remote_session_expired", client=client_host)
                 await _send_error(
-                    websocket, "authentication_failed", "Remote token has expired."
+                    websocket, "authentication_failed", "遙控器權杖已過期。"
                 )
                 await websocket.close(code=REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE)
             except WebSocketDisconnect:
@@ -350,12 +353,12 @@ def create_app(
                     message = parse_client_message(await websocket.receive_json())
                 except (ValidationError, ValueError, TypeError):
                     await _send_error(
-                        websocket, "invalid_message", "Message does not match protocol version 1."
+                        websocket, "invalid_message", "訊息不符合通訊協定第 1 版。"
                     )
                     continue
                 if not isinstance(message, CommandMessage):
                     await _send_error(
-                        websocket, "invalid_message", "TV input accepts commands only."
+                        websocket, "invalid_message", "電視端只接受指令。"
                     )
                     continue
                 await _dispatch_and_broadcast(app, websocket, message)
@@ -374,7 +377,7 @@ def create_app(
         path = frontend / request.url.path.rsplit("/", maxsplit=1)[-1]
         if not path.is_file():
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Frontend asset was not built."
+                status_code=status.HTTP_404_NOT_FOUND, detail="尚未建置前端資源。"
             )
         return FileResponse(path)
 
@@ -390,7 +393,7 @@ def create_app(
         if not index.is_file():
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Frontend has not been built.",
+                detail="尚未建置前端。",
             )
         return FileResponse(index, headers=HTML_SECURITY_HEADERS)
 
@@ -405,19 +408,19 @@ async def _handle_remote_message(
         message = parse_client_message(payload)
     except (ValidationError, ValueError, TypeError):
         await _send_error(
-            websocket, "invalid_message", "Message does not match protocol version 1."
+            websocket, "invalid_message", "訊息不符合通訊協定第 1 版。"
         )
         return True
 
     if isinstance(message, AuthenticationMessage):
         await _send_error(
-            websocket, "invalid_message", "Authentication is only accepted when connecting."
+            websocket, "invalid_message", "僅能在連線時進行驗證。"
         )
         return True
     if await _dispatch_and_broadcast(app, websocket, message, session=session):
         return True
     log_event(logger, "remote_auth_failure", client=_websocket_host(websocket))
-    await _send_error(websocket, "authentication_failed", "Remote token is invalid.")
+    await _send_error(websocket, "authentication_failed", "遙控器權杖無效。")
     await websocket.close(code=REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE)
     return False
 
@@ -425,7 +428,7 @@ async def _handle_remote_message(
 async def _dispatch_and_broadcast(
     app: FastAPI,
     websocket: WebSocket,
-    message: CommandMessage | PointerActionMessage | TextInputMessage,
+    message: CommandMessage | PointerActionMessage | TextInputMessage | SearchVideoMessage,
     *,
     session: AuthenticatedRemoteSession | None = None,
 ) -> bool:
@@ -441,6 +444,9 @@ async def _dispatch_and_broadcast(
         elif isinstance(message, PointerActionMessage):
             outcome = await app.state.runtime.bus.dispatch_pointer(message)
             command_name = message.action.value
+        elif isinstance(message, SearchVideoMessage):
+            outcome = await app.state.runtime.bus.dispatch_search(message)
+            command_name = "search_video"
         else:
             outcome = await app.state.runtime.bus.dispatch_text(message)
             command_name = "text_input"
@@ -516,7 +522,7 @@ def _require_loopback_request(request: Request) -> None:
     if not _is_loopback(_client_host(request)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint is available only to the local TV launcher.",
+            detail="這個端點僅供本機電視啟動器使用。",
         )
 
 
@@ -546,7 +552,7 @@ def _require_local_tv_host(request: Request, port: int) -> None:
     if not _is_local_tv_host(request.headers.get("host"), port, default_port=default_port):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This endpoint is available only to the local TV launcher.",
+            detail="這個端點僅供本機電視啟動器使用。",
         )
 
 
@@ -556,10 +562,10 @@ def _is_local_tv_host(host: str | None, port: int, *, default_port: int) -> bool
 
 
 def _require_trusted_remote_peer(request: Request) -> None:
-    if not _is_trusted_remote_peer(_client_host(request)):
+    if not _is_trusted_remote_access(_client_host(request), request.headers.get("host")):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Remote access requires a connection from the controller LAN.",
+            detail="遠端連線必須來自控制器區網。",
         )
 
 
@@ -572,9 +578,9 @@ def _require_trusted_remote_host(request: Request, port: int, transport: str) ->
         default_port=_default_port_for_scheme(expected_scheme),
     ):
         detail = (
-            "Remote access requires HTTPS at this controller's LAN IP."
+            "遠端連線必須使用此控制器區網 IP 的 HTTPS。"
             if transport == "https"
-            else "Remote access requires this controller's LAN IP."
+            else "遠端連線必須使用此控制器的區網 IP。"
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -592,9 +598,9 @@ def _require_trusted_remote_origin(request: Request, port: int, transport: str) 
         expected_scheme=expected_scheme,
     ):
         detail = (
-            "Remote access requires HTTPS at this controller's LAN IP."
+            "遠端連線必須使用此控制器區網 IP 的 HTTPS。"
             if transport == "https"
-            else "Remote access requires this controller's LAN IP."
+            else "遠端連線必須使用此控制器的區網 IP。"
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -603,6 +609,9 @@ def _require_trusted_remote_origin(request: Request, port: int, transport: str) 
 
 
 def _remote_request_origin_scheme(request: Request, transport: str) -> str | None:
+    host = request.headers.get("host")
+    if host is not None and _is_public_tunnel_host(host):
+        return "https"
     if transport == "http":
         if request.url.scheme in {"http", "https"}:
             return request.url.scheme
@@ -615,6 +624,9 @@ def _remote_request_origin_scheme(request: Request, transport: str) -> str | Non
 
 
 def _remote_websocket_origin_scheme(websocket: WebSocket, transport: str) -> str | None:
+    host = websocket.headers.get("host")
+    if host is not None and _is_public_tunnel_host(host):
+        return "https"
     scheme = websocket.scope.get("scheme")
     if transport == "http":
         if scheme == "ws":
@@ -721,13 +733,53 @@ def _normalized_authority(
 ) -> tuple[str, int] | None:
     if host is None:
         return None
+    if _is_public_tunnel_host(host):
+        return host.casefold(), default_port if parsed_port is None else parsed_port
     effective_port = default_port if parsed_port is None else parsed_port
     if effective_port != port:
         return None
     return host.casefold(), effective_port
 
 
+def _public_tunnel_origin() -> str | None:
+    configured = os.environ.get("PC_TV_PUBLIC_ORIGIN", "").strip().lstrip("\ufeff")
+    if not configured:
+        origin_path = project_root() / "config" / "tunnel-origin.txt"
+        if origin_path.is_file():
+            configured = origin_path.read_text(encoding="utf-8-sig").strip()
+    if not configured:
+        return None
+    parsed = urlsplit(configured)
+    if parsed.scheme.casefold() != "https" or not parsed.hostname:
+        return None
+    return f"https://{parsed.hostname.casefold()}"
+
+
+def parse_cloudflared_origin(text: str) -> str | None:
+    for token in text.split():
+        parsed = urlsplit(token.strip("\"'"))
+        host = parsed.hostname
+        if (
+            parsed.scheme.casefold() == "https"
+            and host
+            and host.endswith(".trycloudflare.com")
+            and host.casefold() != "api.trycloudflare.com"
+        ):
+            return f"https://{host.casefold()}"
+    return None
+
+
+def _is_public_tunnel_host(host: str) -> bool:
+    origin = _public_tunnel_origin()
+    if origin is None:
+        return False
+    return urlsplit(origin).hostname == host.split(":", 1)[0].casefold()
+
+
 def _pairing_remote_url(port: int, scheme: str) -> str | None:
+    public_origin = _public_tunnel_origin()
+    if public_origin is not None:
+        return f"{public_origin}/remote"
     address = _default_route_ipv4_address() or _first_lan_ipv4_address()
     if address is None:
         return None
@@ -771,6 +823,12 @@ def _is_lan_ipv4_address(address: IPv4Address) -> bool:
 
 def _is_local_lan_ipv4_address(address: IPv4Address) -> bool:
     return _is_lan_ipv4_address(address) and address in _local_interface_addresses()
+
+
+def _is_trusted_remote_access(peer_host: str, request_host: str | None) -> bool:
+    if request_host is not None and _is_public_tunnel_host(request_host):
+        return True
+    return _is_trusted_remote_peer(peer_host)
 
 
 def _is_trusted_remote_peer(host: str) -> bool:
@@ -828,7 +886,7 @@ def _local_lan_ipv4_networks() -> list[IPv4Network]:
 
 
 def _is_controller_host(host: str) -> bool:
-    if host.casefold() == "localhost":
+    if host.casefold() == "localhost" or _is_public_tunnel_host(host):
         return True
     try:
         address = ip_address(host.split("%", maxsplit=1)[0])

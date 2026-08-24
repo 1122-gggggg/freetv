@@ -21,11 +21,11 @@ class ServerSettings(BaseModel):
 class ApplicationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    chrome_path: str = ""
     brave_path: str = ""
     edge_path: str = ""
     mpv_path: str = ""
     browser_path: str = ""
-
 
 class UrlSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -100,6 +100,15 @@ def resolve_application_paths(settings: Settings) -> dict[str, Path | None]:
     local_app_data = Path(os.environ.get("LOCALAPPDATA", ""))
 
     return {
+        "chrome": find_executable(
+            settings.applications.chrome_path,
+            (
+                program_files / "Google" / "Chrome" / "Application" / "chrome.exe",
+                program_files_x86 / "Google" / "Chrome" / "Application" / "chrome.exe",
+                local_app_data / "Google" / "Chrome" / "Application" / "chrome.exe",
+            ),
+            "chrome.exe",
+        ),
         "brave": find_executable(
             settings.applications.brave_path,
             (
@@ -131,6 +140,7 @@ def resolve_application_paths(settings: Settings) -> dict[str, Path | None]:
 def detect_capabilities(settings: Settings) -> dict[str, bool]:
     applications = resolve_application_paths(settings)
     return {
+        "chrome_available": applications["chrome"] is not None,
         "brave_available": applications["brave"] is not None,
         "edge_available": applications["edge"] is not None,
         "mpv_available": applications["mpv"] is not None,

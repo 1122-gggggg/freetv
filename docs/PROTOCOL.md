@@ -85,7 +85,7 @@ Allowed command values:
 - `PLAY_PAUSE`, `NEXT`, `PREVIOUS`
 - `VOLUME_UP`, `VOLUME_DOWN`, `MUTE`
 - `CHANNEL_UP`, `CHANNEL_DOWN`
-- `OPEN_YOUTUBE`, `OPEN_NETFLIX`, `OPEN_LIVE_TV`, `OPEN_BROWSER`, `POWER_SLEEP`
+- `OPEN_YOUTUBE`, `OPEN_NETFLIX`, `OPEN_NEWS`, `OPEN_LIVE_TV`, `OPEN_BROWSER`, `POWER_SLEEP`
 
 There is no raw keyboard, shell, script, URL, process, path, or arbitrary command message.
 
@@ -121,6 +121,19 @@ This intentionally cannot position the pointer absolutely or inject arbitrary mo
 ```
 
 Text is limited to 256 characters. Control characters are removed before dispatch and Unicode text is sent to the foreground application with Windows Unicode input events. Text is data, not a shell or command language.
+
+## Video search
+
+```json
+{
+  "version": 1,
+  "type": "search_video",
+  "request_id": "search-46",
+  "query": "DW News Live"
+}
+```
+
+`query` is limited to 128 sanitized characters. It opens YouTube search results in fullscreen kiosk Chrome with AdBlock.
 
 ## Acknowledgement and errors
 

@@ -23,6 +23,7 @@ vi.mock('../api/useControllerSocket', () => ({
     sendCommand: () => 'request-id',
     sendPointer: () => 'request-id',
     sendText: () => 'request-id',
+    sendSearch: () => 'request-id',
   }),
 }))
 vi.mock('qrcode.react', () => ({
@@ -56,7 +57,7 @@ describe('TVLauncher pairing code', () => {
     render(<TVLauncher />)
     await act(async () => {})
     expect(screen.getByText('111111')).toBeTruthy()
-    expect(screen.getByText('Connect this box to a private Wi-Fi/LAN to create the Remote link.')).toBeTruthy()
+    expect(screen.getByText('請把電視盒連上區網，才會產生遙控器連結。')).toBeTruthy()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(55_000)
@@ -81,5 +82,21 @@ describe('TVLauncher pairing code', () => {
     expect(screen.getByTestId('pairing-qr').textContent).toBe(
       'https://192.168.1.42:8765/remote?code=111111',
     )
+  })
+
+  it('renders all tiles including the News tile', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(pairingResponse('111111', '2026-08-13T00:01:00.000Z')))
+
+    render(<TVLauncher />)
+    await act(async () => {})
+
+    expect(document.title).toBe('我的電視')
+    expect(screen.getByRole('heading', { name: '我的電視' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '開啟 YouTube' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '開啟 Netflix' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '開啟 新聞' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '開啟 電視' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '開啟 瀏覽器' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '開啟 設定' })).toBeTruthy()
   })
 })

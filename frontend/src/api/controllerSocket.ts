@@ -108,6 +108,10 @@ export class ControllerSocket {
     return this.sendRaw({ version: PROTOCOL_VERSION, type: 'text_input', request_id: this.requestId(), text })
   }
 
+  sendSearch(query: string): string | null {
+    return this.sendRaw({ version: PROTOCOL_VERSION, type: 'search_video', request_id: this.requestId(), query })
+  }
+
   onState(listener: StateListener): () => void {
     this.stateListeners.add(listener)
     return () => this.stateListeners.delete(listener)

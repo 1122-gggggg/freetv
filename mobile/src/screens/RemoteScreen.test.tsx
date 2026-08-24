@@ -1,5 +1,5 @@
 import React from 'react'
-import { Alert, Text, TouchableOpacity } from 'react-native'
+import { Alert, Text, TouchableOpacity, View } from 'react-native'
 import ReactTestRenderer, { act } from 'react-test-renderer'
 import { RemoteScreen } from './RemoteScreen'
 import { ControllerSocket, type SocketOptions, type SocketStatus } from '../api/controllerSocket'
@@ -130,7 +130,7 @@ function findTextNodes(root: ReactTestRenderer.ReactTestInstance, text: string):
 function getForgetTextButton(root: ReactTestRenderer.ReactTestInstance): ReactTestRenderer.ReactTestInstance {
   const touchables = root.findAllByType(TouchableOpacity)
   const btn = touchables.find((t) =>
-    findTextNodes(t, 'FORGET TV').length > 0 || findTextNodes(t, 'FORGETTING...').length > 0,
+    findTextNodes(t, '解除配對').length > 0 || findTextNodes(t, '解除中…').length > 0,
   )
   if (!btn) throw new Error('Forget TV button not found')
   return btn
@@ -139,7 +139,7 @@ function getForgetTextButton(root: ReactTestRenderer.ReactTestInstance): ReactTe
 function getTypeButton(root: ReactTestRenderer.ReactTestInstance): ReactTestRenderer.ReactTestInstance {
   const touchables = root.findAllByType(TouchableOpacity)
   const btn = touchables.find((t) =>
-    findTextNodes(t, '⌨ TYPE').length > 0,
+    findTextNodes(t, '⌨ 輸入').length > 0,
   )
   if (!btn) throw new Error('Type button not found')
   return btn
@@ -148,7 +148,7 @@ function getTypeButton(root: ReactTestRenderer.ReactTestInstance): ReactTestRend
 function getTouchpadTab(root: ReactTestRenderer.ReactTestInstance): ReactTestRenderer.ReactTestInstance {
   const touchables = root.findAllByType(TouchableOpacity)
   const btn = touchables.find((t) =>
-    findTextNodes(t, '🖱 TOUCHPAD').length > 0,
+    findTextNodes(t, '🖱 觸控板').length > 0,
   )
   if (!btn) throw new Error('Touchpad tab not found')
   return btn
@@ -157,7 +157,7 @@ function getTouchpadTab(root: ReactTestRenderer.ReactTestInstance): ReactTestRen
 function getDpadTab(root: ReactTestRenderer.ReactTestInstance): ReactTestRenderer.ReactTestInstance {
   const touchables = root.findAllByType(TouchableOpacity)
   const btn = touchables.find((t) =>
-    findTextNodes(t, '🎮 D-PAD').length > 0,
+    findTextNodes(t, '🎮 方向鍵').length > 0,
   )
   if (!btn) throw new Error('Dpad tab not found')
   return btn
@@ -370,8 +370,8 @@ describe('RemoteScreen', () => {
     })
 
     expect(alertSpy).toHaveBeenCalledWith(
-      'Forget TV',
-      expect.stringContaining('Are you sure you want to unpair'),
+      '解除配對',
+      expect.stringContaining('確定要解除與此電視的配對'),
       expect.any(Array),
     )
 
@@ -380,8 +380,8 @@ describe('RemoteScreen', () => {
       style?: string
       onPress?: () => void
     }>
-    const cancelBtn = alertButtons.find((b) => b.style === 'cancel' || b.text === 'Cancel')
-    const destructiveBtn = alertButtons.find((b) => b.style === 'destructive' || b.text === 'Forget')
+    const cancelBtn = alertButtons.find((b) => b.style === 'cancel' || b.text === '取消')
+    const destructiveBtn = alertButtons.find((b) => b.style === 'destructive' || b.text === '解除配對')
 
     expect(cancelBtn).toBeDefined()
     expect(destructiveBtn).toBeDefined()
@@ -427,14 +427,14 @@ describe('RemoteScreen', () => {
       style?: string
       onPress?: () => void
     }>
-    const destructiveBtn = alertButtons.find((b) => b.style === 'destructive' || b.text === 'Forget')
+    const destructiveBtn = alertButtons.find((b) => b.style === 'destructive' || b.text === '解除配對')
 
     alertSpy.mockClear()
     await act(async () => {
       destructiveBtn?.onPress?.()
     })
 
-    expect(alertSpy).toHaveBeenCalledWith('Still Paired', expect.any(String))
+    expect(alertSpy).toHaveBeenCalledWith('仍保持配對', expect.any(String))
     expect(mockForgetCurrentDevice).not.toHaveBeenCalled()
     expect(mockOnDisconnect).not.toHaveBeenCalled()
   })
@@ -469,19 +469,20 @@ describe('RemoteScreen', () => {
       latestMockSocket!.simulateStateChange(liveState)
     })
 
-    // Assert live state rendered
-    expect(findTextNodes(root, 'NOW CONTROLLING').length).toBe(1)
-    expect(findTextNodes(root, 'YOUTUBE').length).toBe(1)
-    expect(findTextNodes(root, 'CH 07 · Documentary HD').length).toBe(1)
-    expect(findTextNodes(root, 'Playing video stream').length).toBe(1)
+    const stateBanner = root.findAllByType(View).find((node) => node.props?.style?.backgroundColor === '#162132')
+    expect(stateBanner).toBeDefined()
+    expect(findTextNodes(stateBanner!, '目前控制').length).toBe(1)
+    expect(findTextNodes(stateBanner!, 'YouTube').length).toBe(1)
+    expect(findTextNodes(stateBanner!, '頻道 07 · Documentary HD').length).toBe(1)
+    expect(findTextNodes(stateBanner!, 'Playing video stream').length).toBe(1)
 
     // When connection drops to disconnected, live state readout must be cleared immediately
     act(() => {
       latestMockSocket!.simulateStatusChange('disconnected')
     })
 
-    expect(findTextNodes(root, 'NOW CONTROLLING').length).toBe(0)
-    expect(findTextNodes(root, 'YOUTUBE').length).toBe(0)
+    expect(findTextNodes(root, '目前控制').length).toBe(0)
+    expect(root.findAllByType(View).some((node) => node.props?.style?.backgroundColor === '#162132')).toBe(false)
   })
 
   it('handles authentication failure by showing alert, clearing storage, and triggering disconnect', async () => {
@@ -496,7 +497,7 @@ describe('RemoteScreen', () => {
       latestMockSocket!.simulateAuthFailed()
     })
 
-    expect(alertSpy).toHaveBeenCalledWith('Session Expired', expect.any(String))
+    expect(alertSpy).toHaveBeenCalledWith('連線已過期', expect.any(String))
     expect(mockForgetCurrentDevice).toHaveBeenCalled()
     expect(latestMockSocket!.disconnect).toHaveBeenCalled()
     expect(mockOnDisconnect).toHaveBeenCalled()

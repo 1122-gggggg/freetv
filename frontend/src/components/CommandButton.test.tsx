@@ -14,8 +14,8 @@ describe('CommandButton', () => {
 
   it('sends one command for a normal tap', () => {
     const onCommand = vi.fn()
-    render(<CommandButton command="VOLUME_UP" label="Volume +" onCommand={onCommand} repeatOnHold />)
-    const button = screen.getByRole('button', { name: 'Volume +' })
+    render(<CommandButton command="VOLUME_UP" label="音量 +" onCommand={onCommand} repeatOnHold />)
+    const button = screen.getByRole('button', { name: '音量 +' })
 
     fireEvent.pointerDown(button, { button: 0, pointerId: 1 })
     act(() => vi.advanceTimersByTime(200))
@@ -28,8 +28,8 @@ describe('CommandButton', () => {
 
   it('repeats while held without sending an extra release click', () => {
     const onCommand = vi.fn()
-    render(<CommandButton command="VOLUME_UP" label="Volume +" onCommand={onCommand} repeatOnHold />)
-    const button = screen.getByRole('button', { name: 'Volume +' })
+    render(<CommandButton command="VOLUME_UP" label="音量 +" onCommand={onCommand} repeatOnHold />)
+    const button = screen.getByRole('button', { name: '音量 +' })
 
     fireEvent.pointerDown(button, { button: 0, pointerId: 1 })
     act(() => vi.advanceTimersByTime(580))
@@ -42,8 +42,8 @@ describe('CommandButton', () => {
 
   it('does not dispatch while disabled', () => {
     const onCommand = vi.fn()
-    render(<CommandButton command="VOLUME_UP" label="Volume +" onCommand={onCommand} disabled repeatOnHold />)
-    const button = screen.getByRole('button', { name: 'Volume +' })
+    render(<CommandButton command="VOLUME_UP" label="音量 +" onCommand={onCommand} disabled repeatOnHold />)
+    const button = screen.getByRole('button', { name: '音量 +' })
 
     fireEvent.click(button)
     act(() => vi.advanceTimersByTime(1_000))

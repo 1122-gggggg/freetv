@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-This repository builds a per-user Windows 11 TV controller. It runs locally on the HDMI-connected PC and accepts paired remotes only over the LAN. It does not implement DRM bypass, ad blocking, IPTV discovery/scraping, arbitrary shell execution, or unrestricted remote keyboard control.
+This repository builds a per-user Windows 11 TV controller. It runs locally on the HDMI-connected PC and accepts paired remotes only over the LAN. It does not implement DRM bypass, custom ad-blocking engines, IPTV discovery/scraping, daily-Chrome profile mutation, arbitrary shell execution, or unrestricted remote keyboard control. Ad blocking for YouTube and News is provided exclusively by loading the verified Chrome Web Store AdBlock extension (`gighmmpiobklfepjocnamgkkbiglidom`) in an isolated TV Chrome profile.
 
 ## Architecture invariants
 
@@ -35,4 +35,4 @@ This repository builds a per-user Windows 11 TV controller. It runs locally on t
 
 - Add a behavior test for every observable backend contract and critical navigation rule.
 - Run targeted tests after each vertical slice, then the backend suite, frontend lint/typecheck/build, and browser smoke test before completion.
-- Commit logical, tested checkpoints. Never commit `.venv`, `node_modules`, `dist`, `config/settings.json`, paired tokens, or logs.
+- Commit logical, tested checkpoints. Never commit `.venv`, `node_modules`, `dist`, `config/settings.json`, `config/news.json`, `vendor/adblock/`, `config/chrome-tv-profile/`, paired tokens, or logs.

@@ -29,6 +29,6 @@ describe('revokeRemoteToken', () => {
     const fetchMock = vi.mocked(fetch)
     fetchMock.mockResolvedValue({ ok: false, status: 500 } as Response)
 
-    await expect(revokeRemoteToken(token)).rejects.toThrow('Could not unpair this remote.')
+    await expect(revokeRemoteToken(token)).rejects.toThrow('無法解除這支遙控器的配對。')
   })
 })

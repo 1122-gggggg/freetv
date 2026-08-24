@@ -5,11 +5,12 @@ import type { Command } from '../types/protocol'
 import { tileCommand, type TileId } from './navigation'
 
 const TILES: ReadonlyArray<{ id: TileId; label: string; detail: string; badge: string }> = [
-  { id: 'youtube', label: 'YouTube', detail: 'Open Brave with your existing profile', badge: 'YT' },
-  { id: 'netflix', label: 'Netflix', detail: 'Open Microsoft Edge with your existing profile', badge: 'N' },
-  { id: 'live_tv', label: 'Live TV', detail: 'Play configured channels through mpv', badge: 'TV' },
-  { id: 'browser', label: 'Browser', detail: 'Open your configured browser start page', badge: 'WEB' },
-  { id: 'settings', label: 'Settings', detail: 'Configure this box from settings.json', badge: 'SET' },
+  { id: 'youtube', label: 'YouTube', detail: '用現有設定檔開啟', badge: 'YT' },
+  { id: 'netflix', label: 'Netflix', detail: '用現有 Edge 設定檔開啟', badge: 'N' },
+  { id: 'news', label: '新聞', detail: '觀看 YouTube 直播新聞', badge: '新聞' },
+  { id: 'live_tv', label: '電視', detail: '用 mpv 播放已設定頻道', badge: '電視' },
+  { id: 'browser', label: '瀏覽器', detail: '開啟設定的瀏覽器首頁', badge: '網頁' },
+  { id: 'settings', label: '設定', detail: '用 settings.json 設定此電視盒', badge: '設定' },
 ]
 
 const PAIRING_REFRESH_INTERVAL_MS = 30_000
@@ -61,13 +62,13 @@ export function TVLauncher(): ReactElement {
   const pairingQr = pairing ? pairingQrValue(pairing) : null
 
   useEffect(() => {
-    document.title = 'MY TV • PC TV Box'
+    document.title = '我的電視'
     let cancelled = false
     let refreshTimer: number | undefined
     const fetchPairing = () => {
       fetch('/api/pairing')
         .then(async (response) => {
-          if (!response.ok) throw new Error('Pairing code is unavailable.')
+          if (!response.ok) throw new Error('目前無法取得配對碼。')
           return (await response.json()) as PairingInfo
         })
         .then((info) => {
@@ -119,19 +120,19 @@ export function TVLauncher(): ReactElement {
   }
 
   return (
-    <main className="tv-shell" aria-label="MY TV launcher">
+    <main className="tv-shell" aria-label="電視主畫面">
       <header className="tv-header">
         <div>
-          <p className="eyebrow">PC TV BOX</p>
-          <h1>MY TV</h1>
+          <p className="eyebrow">電腦電視盒</p>
+          <h1>我的電視</h1>
         </div>
         <div className={`connection-chip connection-${status}`} aria-live="polite">
           <span className="status-dot" aria-hidden="true" />
-          {status === 'connected' ? 'Launcher connected' : `Launcher ${status}`}
+          {status === 'connected' ? '主畫面已連線' : status === 'authenticating' ? '主畫面驗證中' : status === 'connecting' ? '主畫面連線中' : status === 'disconnected' ? '主畫面已斷線' : '主畫面連線失敗'}
         </div>
       </header>
 
-      <section className="tv-content" aria-label="Applications">
+      <section className="tv-content" aria-label="應用程式">
         <div className="tv-grid">
           {TILES.map((tile) => (
             <button
@@ -141,7 +142,7 @@ export function TVLauncher(): ReactElement {
               }}
               className={`tv-tile ${focusedTile === tile.id ? 'is-focused' : ''}`}
               type="button"
-              aria-label={`Open ${tile.label}`}
+              aria-label={`開啟 ${tile.label}`}
               onClick={() => selectTile(tile.id)}
             >
               <span className="tile-badge" aria-hidden="true">{tile.badge}</span>
@@ -151,26 +152,33 @@ export function TVLauncher(): ReactElement {
           ))}
         </div>
 
-        <aside className="tv-status-panel" aria-label="Controller status">
+        <aside className="tv-status-panel" aria-label="控制器狀態">
           <div>
-            <p className="eyebrow">NOW CONTROLLING</p>
-            <strong>{renderedState.active_app.replace('_', ' ')}</strong>
+            <p className="eyebrow">目前控制</p>
+            <strong>
+              {renderedState.active_app === 'youtube' ? 'YouTube'
+                : renderedState.active_app === 'netflix' ? 'Netflix'
+                : renderedState.active_app === 'news' ? '新聞'
+                : renderedState.active_app === 'live_tv' ? '電視'
+                : renderedState.active_app === 'browser' ? '瀏覽器'
+                : '主畫面'}
+            </strong>
             {renderedState.channel_name && (
-              <p>CH {String(renderedState.channel_number).padStart(2, '0')} · {renderedState.channel_name}</p>
+              <p>頻道 {String(renderedState.channel_number).padStart(2, '0')} · {renderedState.channel_name}</p>
             )}
           </div>
-          <div className="volume-readout" aria-label={`System volume ${renderedState.volume}${renderedState.muted ? ', muted' : ''}`}>
-            <span>VOL</span>
-            <strong>{renderedState.muted ? 'MUTED' : renderedState.volume}</strong>
+          <div className="volume-readout" aria-label={`系統音量 ${renderedState.volume}${renderedState.muted ? '，已靜音' : ''}`}>
+            <span>音量</span>
+            <strong>{renderedState.muted ? '靜音' : renderedState.volume}</strong>
           </div>
         </aside>
       </section>
 
       <footer className="tv-footer">
-        <section className="pairing-card" aria-label="Pair a phone web remote">
+        <section className="pairing-card" aria-label="配對手機網頁遙控器">
           <div className="pairing-card-content">
             {pairingQr ? (
-              <div className="pairing-qr-wrapper" aria-label="Pairing QR Code">
+              <div className="pairing-qr-wrapper" aria-label="配對 QR 碼">
                 <QRCodeSVG
                   value={pairingQr}
                   size={108}
@@ -181,21 +189,21 @@ export function TVLauncher(): ReactElement {
               </div>
             ) : null}
             <div className="pairing-text-wrapper">
-              <p className="eyebrow">PHONE WEB REMOTE</p>
+              <p className="eyebrow">手機網頁遙控器</p>
               <strong className="pairing-code">{pairing?.code ?? '------'}</strong>
-              <p className="pairing-instructions">Use the same Wi-Fi. Scan the QR code or open this link, then enter the code:</p>
+              <p className="pairing-instructions">掃描 QR 碼或開啟此連結，再輸入配對碼：</p>
               {pairing?.remote_url ? (
                 <code className="pairing-url">{pairing.remote_url}</code>
               ) : (
-                <p className="pairing-url-unavailable">Connect this box to a private Wi-Fi/LAN to create the Remote link.</p>
+                <p className="pairing-url-unavailable">請把電視盒連上區網，才會產生遙控器連結。</p>
               )}
             </div>
           </div>
         </section>
-        <section className="tv-help" aria-label="Keyboard controls">
-          <span>Arrow keys navigate</span>
-          <span>Enter selects</span>
-          <span>Home returns here</span>
+        <section className="tv-help" aria-label="鍵盤操作">
+          <span>方向鍵移動</span>
+          <span>Enter 選取</span>
+          <span>Home 回到這裡</span>
         </section>
       </footer>
 

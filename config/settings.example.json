@@ -5,6 +5,7 @@
     "transport": "http"
   },
   "applications": {
+    "chrome_path": "",
     "brave_path": "",
     "edge_path": "",
     "mpv_path": "",

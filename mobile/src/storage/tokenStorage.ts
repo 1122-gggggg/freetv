@@ -55,7 +55,7 @@ export async function getCurrentDevice(): Promise<SavedDevice | null> {
 }
 
 export async function saveCurrentDevice(device: SavedDevice): Promise<void> {
-  if (!device.token) throw new Error('A paired device requires a token.')
+  if (!device.token) throw new Error('配對的裝置需要權杖。')
 
   const tokens = await readTokenRecord()
   const storedDevices = await readStoredDevices()

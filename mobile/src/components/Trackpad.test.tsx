@@ -25,7 +25,7 @@ function getTrackpadView(root: ReactTestRenderer.ReactTestInstance): ReactTestRe
   const trackpad = views.find(
     (v) =>
       v.props.accessibilityRole === 'adjustable' &&
-      (v.props.accessibilityLabel === 'Trackpad' || v.props.accessibilityLabel === 'Touchpad'),
+      v.props.accessibilityLabel === '觸控板',
   )
   if (!trackpad) throw new Error('Trackpad view not found')
   return trackpad

@@ -27,6 +27,24 @@ interface RemoteScreenProps {
 
 type ControlMode = 'dpad' | 'touchpad'
 
+function formatActiveApp(app: ControllerState['active_app']): string {
+  switch (app) {
+    case 'youtube':
+      return 'YouTube'
+    case 'netflix':
+      return 'Netflix'
+    case 'news':
+      return '新聞'
+    case 'live_tv':
+      return '電視'
+    case 'browser':
+      return '瀏覽器'
+    default:
+      return '主畫面'
+  }
+}
+
+
 export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React.ReactElement {
   const insets = useSafeAreaInsets()
   const [socket, setSocket] = useState<ControllerSocket | null>(null)
@@ -60,7 +78,7 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
       onAuthenticationFailed: async () => {
         setConnectionError(null)
         setCommandError(null)
-        Alert.alert('Session Expired', 'The pairing token has expired or was revoked. Please pair again.')
+        Alert.alert('連線已過期', '配對權杖已過期或已撤銷。請重新配對。')
         await forgetCurrentDevice()
         client.disconnect()
         onDisconnect()
@@ -80,17 +98,17 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
 
   const handleCommand = async (command: Command) => {
     if (!socket || status !== 'authenticated') {
-      setCommandError('TV is not connected')
+      setCommandError('電視未連線')
       return
     }
     try {
       setCommandError(null)
       const ack = await socket.sendCommand(command)
       if (!ack.success) {
-        setCommandError(ack.message || ack.error_code || `Command ${command} failed`)
+        setCommandError(ack.message || ack.error_code || '指令失敗')
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : `Command ${command} failed`
+      const message = err instanceof Error ? err.message : '指令失敗'
       setCommandError(message)
     }
   }
@@ -101,11 +119,11 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
 
   const handleSendText = async (text: string) => {
     if (!socket || status !== 'authenticated') {
-      throw new Error('TV is not connected')
+      throw new Error('電視未連線')
     }
     const ack = await socket.sendTextInput(text)
     if (!ack.success) {
-      throw new Error(ack.message || ack.error_code || 'Failed to send text')
+      throw new Error(ack.message || ack.error_code || '無法送出文字')
     }
   }
 
@@ -117,8 +135,8 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
         await revokeDeviceToken(device.host, device.port, device.token)
       } catch {
         Alert.alert(
-          'Still Paired',
-          'Could not securely revoke this remote. Keep it paired, reconnect to the TV Box, then try again.',
+          '仍保持配對',
+          '無法安全撤銷此遙控器。請保持配對、重新連線電視盒後再試一次。',
         )
         return
       }
@@ -133,12 +151,12 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
   const handleForgetPress = () => {
     if (isUnpairing) return
     Alert.alert(
-      'Forget TV',
-      'Are you sure you want to unpair from this TV? You will need to pair again to control it.',
+      '解除配對',
+      '確定要解除與此電視的配對嗎？之後需重新配對才能控制。',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: '取消', style: 'cancel' },
         {
-          text: 'Forget',
+          text: '解除配對',
           style: 'destructive',
           onPress: () => {
             void executeForget()
@@ -168,7 +186,7 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
               ]}
             />
             <Text style={styles.statusText}>
-              {connectionError ?? (isConnected ? 'Connected' : status === 'connecting' ? (hasEverConnected ? 'Reconnecting...' : 'Connecting...') : 'Disconnected')}
+              {connectionError ?? (isConnected ? '已連線' : status === 'connecting' ? (hasEverConnected ? '重新連線中…' : '連線中…') : '已斷線')}
             </Text>
           </View>
         </View>
@@ -178,11 +196,11 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
           onPress={handleForgetPress}
           disabled={isUnpairing}
           accessibilityRole="button"
-          accessibilityLabel={`Disconnect and unpair from ${device.name}`}
-          accessibilityHint="Revokes this controller's access and returns to TV selection."
+          accessibilityLabel={`中斷並解除與 ${device.name} 的配對`}
+          accessibilityHint="撤銷此遙控器權限並回到電視選擇畫面。"
           accessibilityState={{ disabled: isUnpairing, busy: isUnpairing }}
         >
-          <Text style={styles.forgetText}>{isUnpairing ? 'FORGETTING...' : 'FORGET TV'}</Text>
+          <Text style={styles.forgetText}>{isUnpairing ? '解除中…' : '解除配對'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -190,11 +208,11 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
       {isConnected && controllerState && (
         <View style={styles.stateBanner}>
           <View style={styles.stateLeft}>
-            <Text style={styles.stateLabel}>NOW CONTROLLING</Text>
-            <Text style={styles.stateApp}>{controllerState.active_app.toUpperCase().replace('_', ' ')}</Text>
+            <Text style={styles.stateLabel}>目前控制</Text>
+            <Text style={styles.stateApp}>{formatActiveApp(controllerState.active_app)}</Text>
             {controllerState.channel_name && (
               <Text style={styles.channelText}>
-                CH {String(controllerState.channel_number).padStart(2, '0')} · {controllerState.channel_name}
+                頻道 {String(controllerState.channel_number).padStart(2, '0')} · {controllerState.channel_name}
               </Text>
             )}
             {controllerState.status_message && (
@@ -205,9 +223,9 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
             )}
           </View>
           <View style={styles.stateRight}>
-            <Text style={styles.volLabel}>VOL</Text>
+            <Text style={styles.volLabel}>音量</Text>
             <Text style={[styles.volValue, controllerState.muted && styles.mutedValue]}>
-              {controllerState.muted ? 'MUTED' : controllerState.volume}
+              {controllerState.muted ? '靜音' : controllerState.volume}
             </Text>
           </View>
         </View>
@@ -223,7 +241,7 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
       <View
         style={styles.tabs}
         accessibilityRole="tablist"
-        accessibilityLabel="Remote control mode"
+        accessibilityLabel="遙控模式"
       >
         <TouchableOpacity
           style={[styles.tab, mode === 'dpad' && styles.activeTab]}
@@ -232,11 +250,11 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
             setMode('dpad')
           }}
           accessibilityRole="tab"
-          accessibilityLabel="D-pad mode"
-          accessibilityHint="Shows directional buttons for remote navigation."
+          accessibilityLabel="方向鍵"
+          accessibilityHint="顯示方向鍵以便遙控操作。"
           accessibilityState={{ selected: mode === 'dpad' }}
         >
-          <Text style={[styles.tabText, mode === 'dpad' && styles.activeTabText]}>🎮 D-PAD</Text>
+          <Text style={[styles.tabText, mode === 'dpad' && styles.activeTabText]}>🎮 方向鍵</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -246,11 +264,11 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
             setMode('touchpad')
           }}
           accessibilityRole="tab"
-          accessibilityLabel="Touchpad mode"
-          accessibilityHint="Shows the touchpad for pointer control."
+          accessibilityLabel="觸控板"
+          accessibilityHint="顯示觸控板以便指標操作。"
           accessibilityState={{ selected: mode === 'touchpad' }}
         >
-          <Text style={[styles.tabText, mode === 'touchpad' && styles.activeTabText]}>🖱 TOUCHPAD</Text>
+          <Text style={[styles.tabText, mode === 'touchpad' && styles.activeTabText]}>🖱 觸控板</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -261,11 +279,11 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
           }}
           disabled={!isConnected}
           accessibilityRole="button"
-          accessibilityLabel="Type text on TV"
-          accessibilityHint="Opens a text field for sending text to the focused TV app."
+          accessibilityLabel="在電視上輸入文字"
+          accessibilityHint="開啟文字欄位，將文字傳送到電視上目前焦點的應用程式。"
           accessibilityState={{ disabled: !isConnected }}
         >
-          <Text style={styles.textInputBtnText}>⌨ TYPE</Text>
+          <Text style={styles.textInputBtnText}>⌨ 輸入</Text>
         </TouchableOpacity>
       </View>
 

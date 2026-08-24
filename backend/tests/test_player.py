@@ -137,7 +137,7 @@ def test_mpv_loads_initial_channel_and_switches_with_json_ipc(tmp_path) -> None:
         assert (changed_number, changed_name) == (2, "Sports")
         assert ipc_commands == [
             ["loadfile", "https://example.test/two.m3u8", "replace"],
-            ["show-text", "CH 02\nSports", 3000],
+            ["show-text", "頻道 02\nSports", 3000],
         ]
 
     asyncio.run(scenario())
@@ -149,7 +149,7 @@ def test_mpv_missing_returns_explicit_error(tmp_path) -> None:
         write_channels(path)
         controller = MpvController(ChannelManager(load_channels(path)), mpv_path=None)
 
-        with pytest.raises(CommandExecutionError, match="mpv is not installed"):
+        with pytest.raises(CommandExecutionError, match="未安裝或尚未設定 mpv"):
             await controller.open()
 
     asyncio.run(scenario())
@@ -172,7 +172,7 @@ def test_mpv_preserves_current_channel_when_load_command_fails(tmp_path) -> None
         )
         await controller.open()
 
-        with pytest.raises(CommandExecutionError, match="mpv did not accept"):
+        with pytest.raises(CommandExecutionError, match="mpv 未接受這個控制指令"):
             await controller.change_channel(1)
 
         assert channels.current.number == 1

@@ -5,11 +5,12 @@ from datetime import timedelta
 from pathlib import Path
 
 from app.applications.manager import ApplicationManager
+from app.applications.news import NewsChannelManager, load_news_channels
 from app.commands.bus import CommandBus
 from app.commands.ports import CommandExecutionError
 from app.config import Settings, project_root, resolve_application_paths
 from app.discovery.advertiser import ServiceAdvertiser
-from app.player.channels import ChannelManager, load_channels
+from app.player.channels import Channel, ChannelManager, load_channels
 from app.player.mpv import MpvController
 from app.security.pairing import PairingService
 from app.security.tokens import TokenStore
@@ -43,12 +44,25 @@ class UnavailablePlayer:
         raise CommandExecutionError("live_tv_unavailable", self._message)
 
 
+class UnavailableNews:
+    def __init__(self, message: str) -> None:
+        self._message = message
+
+    @property
+    def current(self) -> Channel:
+        raise CommandExecutionError("news_not_configured", self._message)
+
+    def move(self, direction: int) -> Channel:
+        raise CommandExecutionError("news_not_configured", self._message)
+
+
 @dataclass(slots=True)
 class ControllerRuntime:
     bus: CommandBus
     pairing: PairingService
     applications: object
     player: object
+    news: object = None
     advertiser: ServiceAdvertiser | None = None
 
     async def startup(self) -> None:
@@ -75,6 +89,7 @@ def build_runtime(settings: Settings) -> ControllerRuntime:
         input_controller=input_controller,
     )
     player = _build_player(settings, executable_paths["mpv"])
+    news = _build_news(settings)
     tokens = TokenStore(
         project_root() / "config" / "remotes.json",
         token_bytes=settings.security.remote_token_bytes,
@@ -91,6 +106,7 @@ def build_runtime(settings: Settings) -> ControllerRuntime:
         volume=WindowsVolumeController(),
         input_controller=input_controller,
         power=WindowsPowerController(),
+        news=news,
     )
     advertiser = (
         ServiceAdvertiser(port=settings.server.port)
@@ -102,6 +118,7 @@ def build_runtime(settings: Settings) -> ControllerRuntime:
         pairing=pairing,
         applications=applications,
         player=player,
+        news=news,
         advertiser=advertiser,
     )
 
@@ -114,6 +131,19 @@ def _build_player(settings: Settings, mpv_path: Path | None) -> MpvController | 
         channels = ChannelManager(load_channels(channels_path))
     except ValueError:
         return UnavailablePlayer(
-            "No enabled Live TV channels are configured. Update config/channels.json."
+            "尚未設定可用的電視頻道。請更新 config/channels.json。"
         )
     return MpvController(channels, mpv_path=mpv_path)
+
+
+def _build_news(settings: Settings) -> NewsChannelManager | UnavailableNews:
+    news_path = project_root() / "config" / "news.json"
+    if not news_path.exists():
+        news_path = project_root() / "config" / "news.example.json"
+    try:
+        channels = load_news_channels(news_path)
+        return NewsChannelManager(channels)
+    except (ValueError, FileNotFoundError):
+        return UnavailableNews(
+            "尚未設定可用的新聞頻道。請更新 config/news.json。"
+        )

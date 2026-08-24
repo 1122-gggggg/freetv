@@ -348,7 +348,7 @@ describe('ControllerSocket', () => {
     jest.advanceTimersByTime(5000)
 
     expect(onError).toHaveBeenCalledWith(expect.any(Error))
-    expect(onError.mock.calls[0][0].message).toBe('Pointer acknowledgement timed out')
+    expect(onError.mock.calls[0][0].message).toBe('指標確認逾時')
 
     // Tap is now pumped
     const msgs = getPointerMessages(ws)
@@ -488,7 +488,7 @@ describe('ControllerSocket', () => {
 
     messages = getPointerMessages(ws)
     expect(messages[2]).toMatchObject({ action: 'tap', dx: 0, dy: 0 })
-    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'Touchpad input is temporarily busy' }))
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: '觸控板輸入暫時忙碌' }))
     socket.disconnect()
   })
 
@@ -505,7 +505,7 @@ describe('ControllerSocket', () => {
     const pending = socket.sendCommand('NAV_RIGHT')
     ws.onclose?.({ code: 1006 })
 
-    await expect(pending).rejects.toThrow('Socket disconnected before acknowledgement')
+    await expect(pending).rejects.toThrow('連線已中斷，尚未收到確認')
     socket.disconnect()
   })
 })
