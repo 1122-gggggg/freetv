@@ -41,11 +41,11 @@ class FakeProcess:
         self.killed = True
         return None
 
-
 @dataclass
 class FakeLauncher:
     calls: list[list[str]] = field(default_factory=list)
     process: FakeProcess = field(default_factory=FakeProcess)
+    processes: list[FakeProcess] = field(default_factory=list)
     fail_next_launch: bool = False
 
     def __call__(self, arguments: list[str]) -> FakeProcess:
@@ -53,10 +53,18 @@ class FakeLauncher:
         if self.fail_next_launch:
             self.fail_next_launch = False
             raise OSError("launch failed")
-        self.process.exit_code = None
-        self.process.terminated = False
-        self.process.killed = False
-        return self.process
+        process = FakeProcess(
+            pid=123 + len(self.processes),
+            terminate_failures_remaining=self.process.terminate_failures_remaining,
+            wait_timeouts_remaining=self.process.wait_timeouts_remaining,
+        )
+        self.process.terminate_failures_remaining = 0
+        self.process.wait_timeouts_remaining = 0
+        self.process = process
+        self.processes.append(process)
+        return process
+
+
 
 
 @dataclass
@@ -268,6 +276,49 @@ def test_search_youtube_replaces_an_existing_youtube_window() -> None:
     assert len(launcher.calls) == 2
     assert launcher.calls[1][-1] == "https://www.youtube.com/tv#/search?q=cat+videos"
     assert manager.active_app is ActiveApp.YOUTUBE
+
+def test_opening_youtube_twice_replaces_the_first_window() -> None:
+    manager, launcher, windows, _ = make_manager()
+    asyncio.run(manager.open(ActiveApp.YOUTUBE))
+    first = launcher.processes[0]
+    asyncio.run(manager.open(ActiveApp.YOUTUBE))
+    assert first.poll() is not None
+    assert windows.closed_windows == [900]
+    assert len(launcher.calls) == 2
+    assert manager.active_app is ActiveApp.YOUTUBE
+
+
+def test_opening_netflix_closes_playing_youtube() -> None:
+    async def scenario() -> None:
+        manager, launcher, windows, _ = make_manager()
+        await manager.open(ActiveApp.YOUTUBE)
+        youtube = launcher.processes[0]
+        await manager.open(ActiveApp.NETFLIX)
+        assert youtube.poll() is not None
+        assert windows.closed_windows == [900]
+        assert manager.active_app is ActiveApp.NETFLIX
+        assert any(part.startswith("--app=") and "netflix.com" in part for part in launcher.calls[1])
+
+    asyncio.run(scenario())
+
+
+def test_home_closes_youtube_but_keeps_netflix() -> None:
+    async def scenario() -> None:
+        manager, launcher, windows, _ = make_manager()
+        await manager.open(ActiveApp.NETFLIX)
+        netflix = launcher.processes[0]
+        await manager.open(ActiveApp.YOUTUBE)
+        youtube = launcher.processes[1]
+        await manager.return_home()
+        assert youtube.poll() is not None
+        assert netflix.poll() is None
+        assert manager.active_app is ActiveApp.LAUNCHER
+        await manager.open(ActiveApp.NETFLIX)
+        assert len(launcher.calls) == 2
+        assert manager.active_app is ActiveApp.NETFLIX
+
+    asyncio.run(scenario())
+
 
 
 

@@ -179,11 +179,12 @@ class ApplicationManager:
             )
 
         if app is ActiveApp.YOUTUBE:
-            await self._close_current_if(ActiveApp.YOUTUBE, ActiveApp.NEWS)
+            await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
             arguments = self._chrome_kiosk_args(self._settings.urls.youtube)
             await self._launch_and_track(app, arguments, "YouTube")
             return
         if app is ActiveApp.NETFLIX:
+            await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
             if self._focus_existing(ActiveApp.NETFLIX, "Netflix"):
                 return
             arguments = self._chrome_app_args(
@@ -192,6 +193,7 @@ class ApplicationManager:
             await self._launch_and_track(app, arguments, "Netflix")
             return
 
+        await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
         executable, url, app_name = self._launch_spec(app)
         if executable is None:
             raise CommandExecutionError(
@@ -203,12 +205,12 @@ class ApplicationManager:
         await self._launch_and_track(app, arguments, app_name)
 
     async def open_news(self, url: str) -> None:
-        await self._close_current_if(ActiveApp.YOUTUBE, ActiveApp.NEWS)
+        await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
         arguments = self._chrome_kiosk_args(url)
         await self._launch_and_track(ActiveApp.NEWS, arguments, "新聞")
 
     async def search_youtube(self, query: str) -> None:
-        await self._close_current_if(ActiveApp.YOUTUBE, ActiveApp.NEWS)
+        await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
         url = f"https://www.youtube.com/tv#/search?q={quote_plus(query)}"
         arguments = self._chrome_kiosk_args(url)
         await self._launch_and_track(ActiveApp.YOUTUBE, arguments, "YouTube")
@@ -259,13 +261,14 @@ class ApplicationManager:
                 log_event(logger, "youtube_adfilter_failed", port=self._debug_port)
 
     async def return_home(self) -> None:
+        await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
         self._minimize_current_window()
         self._active_app = ActiveApp.LAUNCHER
         self._windows.bring_launcher_to_foreground()
         log_event(logger, "launcher_returned")
 
     async def leave_to_desktop(self) -> None:
-        await self._close_current_if(
+        await self._close_apps(
             ActiveApp.YOUTUBE, ActiveApp.NEWS, ActiveApp.NETFLIX, ActiveApp.BROWSER
         )
         self._windows.close_launcher()
@@ -292,14 +295,25 @@ class ApplicationManager:
         self._active_app = app
         return True
 
-    async def _close_current_if(self, *apps: ActiveApp) -> None:
-        tracked = self._current
-        if tracked is None or tracked.app not in apps:
-            return
-        await self._stop_tracked(tracked)
-        if tracked in self._children:
-            self._children.remove(tracked)
-        self._current = None
+    async def _close_apps(self, *apps: ActiveApp) -> None:
+        kept: list[TrackedApplication] = []
+        current = self._current
+        for tracked in self._children:
+            if tracked.app in apps:
+                await self._stop_tracked(tracked)
+            else:
+                kept.append(tracked)
+        if (
+            current is not None
+            and current.app in apps
+            and all(tracked is not current for tracked in self._children)
+        ):
+            await self._stop_tracked(current)
+        self._children = kept
+        if current is not None and current.app in apps:
+            self._current = None
+
+
 
 
     async def forward_command(self, command: Command) -> None:
