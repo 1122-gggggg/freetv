@@ -14,6 +14,7 @@ import zipfile
 import httpx
 
 ADBLOCK_EXTENSION_ID = "gighmmpiobklfepjocnamgkkbiglidom"
+ADBLOCK_YOUTUBE_EXTENSION_ID = "cmedhionkhpnakcndndgjdbohmhepckk"
 
 
 def store_crx_url(extension_id: str, prodversion: str = "120.0") -> str:
@@ -65,6 +66,45 @@ def compute_extension_id(key_or_manifest: dict[str, Any] | str | bytes) -> str:
     return "".join(chr(ord("a") + (b >> 4)) + chr(ord("a") + (b & 0x0F)) for b in digest)
 
 
+def _read_varint(buffer: bytes, offset: int) -> tuple[int, int]:
+    value = 0
+    shift = 0
+    while offset < len(buffer):
+        byte = buffer[offset]
+        offset += 1
+        value |= (byte & 0x7F) << shift
+        if byte < 0x80:
+            return value, offset
+        shift += 7
+        if shift > 63:
+            break
+    raise ValueError("Invalid CRX header: truncated protobuf varint")
+
+
+def _read_protobuf_bytes_fields(buffer: bytes, field_number: int) -> list[bytes]:
+    values: list[bytes] = []
+    offset = 0
+    while offset < len(buffer):
+        key, offset = _read_varint(buffer, offset)
+        number = key >> 3
+        wire_type = key & 0x07
+        if wire_type == 0:
+            _, offset = _read_varint(buffer, offset)
+        elif wire_type == 1:
+            offset += 8
+        elif wire_type == 2:
+            length, offset = _read_varint(buffer, offset)
+            payload = buffer[offset : offset + length]
+            offset += length
+            if number == field_number:
+                values.append(payload)
+        elif wire_type == 5:
+            offset += 4
+        else:
+            break
+    return values
+
+
 def extract_crx3_id(header_bytes: bytes) -> str | None:
     """Extract crx_id (16 bytes) from CRX3 protobuf header if present."""
     idx = 0
@@ -79,8 +119,34 @@ def extract_crx3_id(header_bytes: bytes) -> str | None:
     return None
 
 
-def unpack_crx(crx_bytes: bytes) -> tuple[bytes, str | None]:
-    """Validate CRX3 header, extract zip payload and optional extension ID from header."""
+def extract_crx3_public_key(
+    header_bytes: bytes,
+    extension_id: str | None = None,
+) -> bytes | None:
+    """Extract a store public key from a CRX3 header, preferring the official ID."""
+    candidates: list[bytes] = []
+    for field_number in (2, 3):
+        for proof in _read_protobuf_bytes_fields(header_bytes, field_number):
+            for key in _read_protobuf_bytes_fields(proof, 1):
+                if len(key) >= 64 and key.startswith(b"\x30"):
+                    candidates.append(key)
+    if extension_id:
+        for key in candidates:
+            if compute_extension_id(key) == extension_id:
+                return key
+    header_id = extract_crx3_id(header_bytes)
+    if header_id:
+        for key in candidates:
+            if compute_extension_id(key) == header_id:
+                return key
+    return candidates[0] if candidates else None
+
+
+def unpack_crx(
+    crx_bytes: bytes,
+    extension_id: str | None = None,
+) -> tuple[bytes, str | None, bytes | None]:
+    """Validate CRX3 header, extract zip payload, ID, and optional public key."""
     if len(crx_bytes) < 12 or not crx_bytes.startswith(b"Cr24"):
         raise ValueError("Invalid CRX header: missing Cr24 magic number")
 
@@ -93,9 +159,11 @@ def unpack_crx(crx_bytes: bytes) -> tuple[bytes, str | None]:
         raise ValueError("Invalid CRX header: payload truncated")
 
     header_bytes = crx_bytes[12:header_end]
-    crx_id = extract_crx3_id(header_bytes)
-    zip_bytes = crx_bytes[header_end:]
-    return zip_bytes, crx_id
+    return (
+        crx_bytes[header_end:],
+        extract_crx3_id(header_bytes),
+        extract_crx3_public_key(header_bytes, extension_id),
+    )
 
 
 def download_store_crx(extension_id: str) -> bytes:
@@ -162,14 +230,13 @@ def ensure_store_extension(
         try:
             manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
             computed_id = compute_extension_id(manifest_data)
+            if computed_id == extension_id:
+                return directory
             if computed_id:
-                if computed_id == extension_id:
-                    return directory
                 shutil.rmtree(directory, ignore_errors=True)
                 raise ValueError(
                     f"Extension ID mismatch: expected {extension_id}, got {computed_id}"
                 )
-            return directory
         except json.JSONDecodeError:
             shutil.rmtree(directory, ignore_errors=True)
 
@@ -177,7 +244,7 @@ def ensure_store_extension(
         crx_bytes = download_store_crx(extension_id)
 
     try:
-        zip_bytes, header_crx_id = unpack_crx(crx_bytes)
+        zip_bytes, header_crx_id, public_key = unpack_crx(crx_bytes, extension_id)
     except ValueError:
         if directory.exists():
             shutil.rmtree(directory, ignore_errors=True)
@@ -197,6 +264,14 @@ def ensure_store_extension(
             raise ValueError("Missing manifest.json after unpacking extension")
 
         manifest_data = json.loads(unpacked_manifest.read_text(encoding="utf-8"))
+        if public_key and not manifest_data.get("key"):
+            key_id = compute_extension_id(public_key)
+            if key_id == extension_id:
+                manifest_data["key"] = base64.b64encode(public_key).decode("ascii")
+                unpacked_manifest.write_text(
+                    json.dumps(manifest_data, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
         computed_id = compute_extension_id(manifest_data)
         if not computed_id and header_crx_id:
             computed_id = header_crx_id
@@ -225,6 +300,24 @@ def ensure_adblock(directory: Path, crx_bytes: bytes | None = None) -> Path:
     return ensure_store_extension(directory, ADBLOCK_EXTENSION_ID, crx_bytes)
 
 
+def ensure_adblock_youtube(directory: Path, crx_bytes: bytes | None = None) -> Path:
+    """Ensure unpacked Adblock for YouTube exists at directory with verified ID."""
+    return ensure_store_extension(directory, ADBLOCK_YOUTUBE_EXTENSION_ID, crx_bytes)
+
+
+def ensure_tv_adblockers(
+    adblock_directory: Path,
+    youtube_directory: Path,
+    adblock_crx: bytes | None = None,
+    youtube_crx: bytes | None = None,
+) -> tuple[Path, Path]:
+    """Install both official store ad blockers used by the TV Chrome profile."""
+    return (
+        ensure_adblock(adblock_directory, adblock_crx),
+        ensure_adblock_youtube(youtube_directory, youtube_crx),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="下載並驗證電視 Chrome 設定檔使用的 AdBlock 擴充功能。")
     parser.add_argument(
@@ -233,9 +326,16 @@ def main() -> None:
         default=Path(__file__).resolve().parents[2] / "vendor" / "adblock",
         help="解壓後 AdBlock 擴充功能的目標目錄",
     )
+    parser.add_argument(
+        "--youtube-directory",
+        type=Path,
+        default=Path(__file__).resolve().parents[2] / "vendor" / "adblock-youtube",
+        help="解壓後 Adblock for YouTube 擴充功能的目標目錄",
+    )
     args = parser.parse_args()
-    installed = ensure_adblock(args.directory)
-    print(f"AdBlock 已就緒：{installed}")
+    adblock_dir, youtube_dir = ensure_tv_adblockers(args.directory, args.youtube_directory)
+    print(f"AdBlock 已就緒：{adblock_dir}")
+    print(f"Adblock for YouTube 已就緒：{youtube_dir}")
 
 
 if __name__ == "__main__":

@@ -12,8 +12,12 @@ import pytest
 
 from app.applications.adblock import (
     ADBLOCK_EXTENSION_ID,
+    ADBLOCK_YOUTUBE_EXTENSION_ID,
     compute_extension_id,
     ensure_adblock,
+    ensure_adblock_youtube,
+    ensure_store_extension,
+    ensure_tv_adblockers,
 )
 
 
@@ -122,4 +126,84 @@ def test_ensure_adblock_rejects_unpacked_crx_with_wrong_id(tmp_path: Path) -> No
     assert ADBLOCK_EXTENSION_ID in str(excinfo.value)
     assert not adblock_dir.exists()
 
+
+def _varint(value: int) -> bytes:
+    out = bytearray()
+    while value > 127:
+        out.append((value & 0x7F) | 0x80)
+        value >>= 7
+    out.append(value)
+    return bytes(out)
+
+
+def _proto_bytes(field: int, payload: bytes) -> bytes:
+    return _varint((field << 3) | 2) + _varint(len(payload)) + payload
+
+
+def _make_mock_crx3_with_public_key(manifest_dict: dict, public_key: bytes, extension_id: str) -> bytes:
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("manifest.json", json.dumps(manifest_dict))
+        z.writestr("rules.json", "[]")
+    zip_bytes = zip_buf.getvalue()
+    crx_id = bytes(
+        ((ord(extension_id[index]) - ord("a")) << 4) | (ord(extension_id[index + 1]) - ord("a"))
+        for index in range(0, 32, 2)
+    )
+    header = _proto_bytes(2, _proto_bytes(1, public_key)) + b"\x0a\x10" + crx_id
+    return b"Cr24" + struct.pack("<II", 3, len(header)) + header + zip_bytes
+
+
+def test_ensure_store_extension_writes_manifest_key_from_crx_public_key(tmp_path: Path) -> None:
+    public_key = b"\x30" + b"K" * 80
+    extension_id = compute_extension_id(public_key)
+    target = tmp_path / "ext"
+    crx = _make_mock_crx3_with_public_key({"name": "Store", "version": "1.0"}, public_key, extension_id)
+
+    result = ensure_store_extension(target, extension_id, crx_bytes=crx)
+
+    manifest = json.loads((result / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["key"] == base64.b64encode(public_key).decode("ascii")
+    assert compute_extension_id(manifest) == extension_id
+
+
+def test_ensure_adblock_youtube_accepts_matching_store_id(tmp_path: Path) -> None:
+    target = tmp_path / "adblock-youtube"
+    crx_id = bytes(
+        ((ord(ADBLOCK_YOUTUBE_EXTENSION_ID[index]) - ord("a")) << 4)
+        | (ord(ADBLOCK_YOUTUBE_EXTENSION_ID[index + 1]) - ord("a"))
+        for index in range(0, 32, 2)
+    )
+    crx = _make_mock_crx3({"name": "Adblock for YouTube", "version": "1.0"}, crx_id=crx_id)
+
+    result = ensure_adblock_youtube(target, crx_bytes=crx)
+
+    assert result == target
+    assert (target / "manifest.json").is_file()
+
+
+def test_ensure_tv_adblockers_installs_both_store_ids(tmp_path: Path) -> None:
+    adblock = tmp_path / "adblock"
+    youtube = tmp_path / "adblock-youtube"
+    adblock_crx = _make_mock_crx3({"name": "AdBlock", "version": "1.0"})
+    youtube_crx_id = bytes(
+        ((ord(ADBLOCK_YOUTUBE_EXTENSION_ID[index]) - ord("a")) << 4)
+        | (ord(ADBLOCK_YOUTUBE_EXTENSION_ID[index + 1]) - ord("a"))
+        for index in range(0, 32, 2)
+    )
+    youtube_crx = _make_mock_crx3(
+        {"name": "Adblock for YouTube", "version": "1.0"},
+        crx_id=youtube_crx_id,
+    )
+
+    installed = ensure_tv_adblockers(
+        adblock,
+        youtube,
+        adblock_crx=adblock_crx,
+        youtube_crx=youtube_crx,
+    )
+
+    assert installed == (adblock, youtube)
+    assert (adblock / "manifest.json").is_file()
+    assert (youtube / "manifest.json").is_file()
 

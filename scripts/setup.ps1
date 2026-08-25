@@ -159,10 +159,11 @@ Assert-NativeSuccess 'Upgrading pip'
 Assert-NativeSuccess 'Installing backend dependencies'
 
 $AdblockDirectory = Join-Path $Root 'vendor\adblock'
+$AdblockYoutubeDirectory = Join-Path $Root 'vendor\adblock-youtube'
 Push-Location (Join-Path $Root 'backend')
 try {
-    & $VenvPython -m app.applications.adblock --directory $AdblockDirectory
-    Assert-NativeSuccess 'Installing AdBlock extension'
+    & $VenvPython -m app.applications.adblock --directory $AdblockDirectory --youtube-directory $AdblockYoutubeDirectory
+    Assert-NativeSuccess 'Installing AdBlock extensions'
 } finally {
     Pop-Location
 }

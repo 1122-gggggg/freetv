@@ -62,6 +62,7 @@ class ApplicationManager:
         windows: WindowController,
         input_controller: CommandInputController,
         adblock_dir: Path | None = None,
+        adblock_youtube_dir: Path | None = None,
         profile_dir: Path | None = None,
     ) -> None:
         self._settings = settings
@@ -70,6 +71,9 @@ class ApplicationManager:
         self._windows = windows
         self._input = input_controller
         self._adblock_dir = adblock_dir or (project_root() / "vendor" / "adblock")
+        self._adblock_youtube_dir = adblock_youtube_dir or (
+            self._adblock_dir.parent / "adblock-youtube"
+        )
         self._profile_dir = profile_dir or (project_root() / "config" / "chrome-tv-profile")
         self._active_app = ActiveApp.LAUNCHER
         self._current: TrackedApplication | None = None
@@ -86,17 +90,20 @@ class ApplicationManager:
                 "chrome_not_found",
                 "未安裝或尚未設定 Chrome。請安裝 Chrome，或在 applications.chrome_path 指定路徑。",
             )
-        if not (self._adblock_dir / "manifest.json").is_file():
+        if not (self._adblock_dir / "manifest.json").is_file() or not (
+            self._adblock_youtube_dir / "manifest.json"
+        ).is_file():
             raise CommandExecutionError(
                 "adblock_not_installed",
                 "尚未安裝 AdBlock。請重新執行 setup.ps1。",
             )
-        extension_path = str(self._adblock_dir)
+        extension_paths = f"{self._adblock_dir},{self._adblock_youtube_dir}"
         return [
             chrome.as_posix(),
             f"--user-data-dir={self._profile_dir}",
-            f"--disable-extensions-except={extension_path}",
-            f"--load-extension={extension_path}",
+            f"--disable-extensions-except={extension_paths}",
+            f"--load-extension={extension_paths}",
+            "--disable-features=DisableLoadExtensionCommandLineSwitch",
             "--kiosk",
             "--no-first-run",
             "--no-default-browser-check",
