@@ -19,6 +19,7 @@ config/channels.json
 config/remotes.json
 config/tls/
 config/edge-profile/
+config/chrome-launcher-profile/
 config/news.json
 config/chrome-tv-profile/
 vendor/adblock/

@@ -53,17 +53,17 @@ function Get-StartupSettings {
     }
 
     $Applications = Get-OptionalSetting -Target $Settings -PropertyName 'applications'
-    $ConfiguredEdgePath = ''
+    $ConfiguredChromePath = ''
     if ($null -ne $Applications) {
-        $ConfiguredEdgePath = [string](Get-OptionalSetting -Target $Applications -PropertyName 'edge_path' -Default '')
+        $ConfiguredChromePath = [string](Get-OptionalSetting -Target $Applications -PropertyName 'chrome_path' -Default '')
     }
 
     return [PSCustomObject]@{
-        Port               = $Port
-        BindHost           = $BindHost
-        HealthHost         = $HealthHost
-        Transport          = $Transport
-        ConfiguredEdgePath = $ConfiguredEdgePath
+        Port                 = $Port
+        BindHost             = $BindHost
+        HealthHost           = $HealthHost
+        Transport            = $Transport
+        ConfiguredChromePath = $ConfiguredChromePath
     }
 }
 
@@ -526,7 +526,7 @@ function Select-PythonRuntimeCandidate {
     return $null
 }
 
-function Resolve-EdgeExecutable {
+function Resolve-ChromeExecutable {
     [CmdletBinding()]
     param(
         [string]$ConfiguredPath = ''
@@ -537,23 +537,23 @@ function Resolve-EdgeExecutable {
     }
 
     $Candidates = @(
-        'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
-        'C:\Program Files\Microsoft\Edge\Application\msedge.exe'
+        'C:\Program Files\Google\Chrome\Application\chrome.exe',
+        'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe'
     )
     return $Candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
 }
 
-function Get-EdgeUserDataDirectory {
+function Get-LauncherUserDataDirectory {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [string]$RootDirectory
     )
 
-    return [System.IO.Path]::GetFullPath((Join-Path $RootDirectory 'config\edge-profile'))
+    return [System.IO.Path]::GetFullPath((Join-Path $RootDirectory 'config\chrome-launcher-profile'))
 }
 
-function Get-EdgeKioskArguments {
+function Get-ChromeLauncherKioskArguments {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -566,8 +566,8 @@ function Get-EdgeKioskArguments {
     return @(
         '--kiosk',
         $Url,
-        '--edge-kiosk-type=fullscreen',
         '--no-first-run',
+        '--no-default-browser-check',
         '--disable-extensions',
         '--disable-sync',
         "--user-data-dir=`"$UserDataDir`""
@@ -767,9 +767,9 @@ Export-ModuleMember -Function @(
     'Test-PythonRuntimeVersion',
     'Test-PythonVirtualEnvironmentRuntime',
     'Select-PythonRuntimeCandidate',
-    'Resolve-EdgeExecutable',
-    'Get-EdgeUserDataDirectory',
-    'Get-EdgeKioskArguments',
+    'Resolve-ChromeExecutable',
+    'Get-LauncherUserDataDirectory',
+    'Get-ChromeLauncherKioskArguments',
     'Get-BrowserLaunchArguments',
     'Get-PairingRemoteUrl',
     'Get-AutostartTaskSpec',

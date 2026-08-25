@@ -165,10 +165,10 @@ def test_youtube_uses_isolated_chrome_kiosk_and_adblock(tmp_path: Path) -> None:
     assert "--start-maximized" not in argv
     assert argv[-1] == "https://www.youtube.com/tv"
 
-def test_netflix_stays_on_edge_without_adblock() -> None:
+def test_netflix_uses_chrome_without_adblock() -> None:
     manager, launcher, windows, _ = make_manager()
     asyncio.run(manager.open(ActiveApp.NETFLIX))
-    assert launcher.calls[0][0].endswith("msedge.exe")
+    assert launcher.calls[0][0].endswith("chrome.exe")
     assert "--start-maximized" in launcher.calls[0]
     assert "--load-extension" not in " ".join(launcher.calls[0])
     assert "chrome-tv-profile" not in " ".join(launcher.calls[0])

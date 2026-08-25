@@ -240,10 +240,10 @@ class ApplicationManager:
 
     def _launch_spec(self, app: ActiveApp) -> tuple[Path | None, str, str]:
         if app is ActiveApp.YOUTUBE:
-            return self._executables.get("brave"), self._settings.urls.youtube, "Brave 瀏覽器"
+            return self._executables.get("chrome"), self._settings.urls.youtube, "Google Chrome"
         if app is ActiveApp.NETFLIX:
-            return self._executables.get("edge"), self._settings.urls.netflix, "Microsoft Edge"
-        browser = self._executables.get("browser") or self._executables.get("edge")
+            return self._executables.get("chrome"), self._settings.urls.netflix, "Google Chrome"
+        browser = self._executables.get("browser") or self._executables.get("chrome")
         return browser, self._settings.urls.browser, "已設定的瀏覽器"
 
     def _minimize_current_window(self) -> None:

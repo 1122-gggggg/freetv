@@ -137,7 +137,7 @@ try {
     $Port = $StartupConfig.Port
     $BindHost = $StartupConfig.BindHost
     $HealthHost = $StartupConfig.HealthHost
-    $ConfiguredEdgePath = $StartupConfig.ConfiguredEdgePath
+    $ConfiguredChromePath = $StartupConfig.ConfiguredChromePath
     $Transport = $StartupConfig.Transport
     $Scheme = $Transport
 } catch {
@@ -388,13 +388,13 @@ if ($Transport -eq 'https') {
 }
 
 if (-not $NoBrowser) {
-    $Edge = Resolve-EdgeExecutable -ConfiguredPath $ConfiguredEdgePath
-    if ($Edge) {
-        $KioskUserDataDir = Get-EdgeUserDataDirectory -RootDirectory $Root
-        $KioskArguments = Get-EdgeKioskArguments -Url $LocalUrl -UserDataDir $KioskUserDataDir
-        Start-Process -FilePath $Edge -ArgumentList $KioskArguments
+    $Chrome = Resolve-ChromeExecutable -ConfiguredPath $ConfiguredChromePath
+    if ($Chrome) {
+        $KioskUserDataDir = Get-LauncherUserDataDirectory -RootDirectory $Root
+        $KioskArguments = Get-ChromeLauncherKioskArguments -Url $LocalUrl -UserDataDir $KioskUserDataDir
+        Start-Process -FilePath $Chrome -ArgumentList $KioskArguments
     } else {
-        Write-Warning 'Microsoft Edge was not found; opening the TV Launcher with the default browser instead of kiosk mode.'
+        Write-Warning 'Google Chrome was not found; opening the TV Launcher with the default browser instead of kiosk mode.'
         Start-Process $LocalUrl
     }
 }

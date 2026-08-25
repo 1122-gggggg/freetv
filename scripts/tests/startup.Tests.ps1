@@ -8,24 +8,24 @@ Describe 'TVBox.Startup Module Tests' {
     Context 'Settings extraction' {
         It 'handles optional application settings under StrictMode' {
             $MissingApplications = '{"server":{"host":"0.0.0.0","port":8765}}' | ConvertFrom-Json
-            $MissingEdge = '{"server":{"host":"0.0.0.0","port":9000},"applications":{"brave_path":"C:\\brave.exe"}}' | ConvertFrom-Json
+            $MissingChrome = '{"server":{"host":"0.0.0.0","port":9000},"applications":{"brave_path":"C:\\brave.exe"}}' | ConvertFrom-Json
 
             $First = Get-StartupSettings -Settings $MissingApplications
-            $Second = Get-StartupSettings -Settings $MissingEdge
+            $Second = Get-StartupSettings -Settings $MissingChrome
             $First.Port | Should -Be 8765
             $First.BindHost | Should -Be '0.0.0.0'
             $First.HealthHost | Should -Be '127.0.0.1'
             $First.Transport | Should -Be 'http'
-            $First.ConfiguredEdgePath | Should -Be ''
-            $Second.ConfiguredEdgePath | Should -Be ''
+            $First.ConfiguredChromePath | Should -Be ''
+            $Second.ConfiguredChromePath | Should -Be ''
         }
 
-        It 'extracts edge_path and explicit HTTPS transport' {
-            $Settings = '{"server":{"host":"0.0.0.0","port":8765,"transport":"https"},"applications":{"edge_path":"C:\\Custom\\msedge.exe"}}' | ConvertFrom-Json
+        It 'extracts chrome_path and explicit HTTPS transport' {
+            $Settings = '{"server":{"host":"0.0.0.0","port":8765,"transport":"https"},"applications":{"chrome_path":"C:\\Custom\\chrome.exe"}}' | ConvertFrom-Json
             $Config = Get-StartupSettings -Settings $Settings
 
             $Config.Transport | Should -Be 'https'
-            $Config.ConfiguredEdgePath | Should -Be 'C:\Custom\msedge.exe'
+            $Config.ConfiguredChromePath | Should -Be 'C:\Custom\chrome.exe'
         }
 
         It 'rejects invalid ports, hosts, transports, and missing server settings' {
@@ -279,23 +279,24 @@ Describe 'TVBox.Startup Module Tests' {
     }
 
     Context 'Browser and pairing argument construction' {
-        It 'constructs isolated Edge kiosk arguments' {
+        It 'constructs isolated Chrome kiosk arguments' {
             $Url = 'https://127.0.0.1:8765/tv'
-            $Arguments = Get-EdgeKioskArguments -Url $Url -UserDataDir 'C:\TV Box\config\edge-profile'
+            $Arguments = Get-ChromeLauncherKioskArguments -Url $Url -UserDataDir 'C:\TV Box\config\chrome-launcher-profile'
 
             $Arguments | Should -Contain '--kiosk'
             $Arguments | Should -Contain $Url
-            $Arguments | Should -Contain '--edge-kiosk-type=fullscreen'
             $Arguments | Should -Contain '--no-first-run'
-            $Arguments | Should -Contain '--user-data-dir="C:\TV Box\config\edge-profile"'
+            $Arguments | Should -Contain '--no-default-browser-check'
+            $Arguments | Should -Contain '--user-data-dir="C:\TV Box\config\chrome-launcher-profile"'
             $Arguments | Should -Contain '--disable-extensions'
             $Arguments | Should -Contain '--disable-sync'
+            $Arguments | Should -Not -Contain '--edge-kiosk-type=fullscreen'
         }
 
         It 'keeps normal browser arguments separate and resolves the kiosk path' {
             $Arguments = Get-BrowserLaunchArguments -Url 'https://127.0.0.1:8765/tv'
 
-            Get-EdgeUserDataDirectory -RootDirectory 'C:\freetv' | Should -Be 'C:\freetv\config\edge-profile'
+            Get-LauncherUserDataDirectory -RootDirectory 'C:\freetv' | Should -Be 'C:\freetv\config\chrome-launcher-profile'
             $Arguments | Should -Contain 'https://127.0.0.1:8765/tv'
             (-not ($Arguments -match '--user-data-dir')) | Should -Be $true
             (-not ($Arguments -match '--kiosk')) | Should -Be $true
