@@ -163,7 +163,7 @@ def test_youtube_uses_isolated_chrome_kiosk_and_adblock(tmp_path: Path) -> None:
         for part in argv
     )
     assert "--start-maximized" not in argv
-    assert argv[-1] == "https://www.youtube.com/"
+    assert argv[-1] == "https://www.youtube.com/tv"
 
 def test_netflix_stays_on_edge_without_adblock() -> None:
     manager, launcher, windows, _ = make_manager()
@@ -225,7 +225,7 @@ def test_search_youtube_opens_results_url(tmp_path: Path) -> None:
     argv = launcher.calls[0]
     assert argv[0].endswith("chrome.exe")
     assert "--kiosk" in argv
-    assert argv[-1] == "https://www.youtube.com/results?search_query=cat+videos"
+    assert argv[-1] == "https://www.youtube.com/tv#/search?q=cat+videos"
     assert manager.active_app is ActiveApp.YOUTUBE
 
 

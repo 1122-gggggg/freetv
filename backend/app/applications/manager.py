@@ -137,7 +137,7 @@ class ApplicationManager:
         await self._launch_and_track(ActiveApp.NEWS, arguments, "新聞")
 
     async def search_youtube(self, query: str) -> None:
-        url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
+        url = f"https://www.youtube.com/tv#/search?q={quote_plus(query)}"
         arguments = self._chrome_kiosk_args(url)
         await self._launch_and_track(ActiveApp.YOUTUBE, arguments, "YouTube")
 

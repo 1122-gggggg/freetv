@@ -12,7 +12,7 @@
     "browser_path": ""
   },
   "urls": {
-    "youtube": "https://www.youtube.com/",
+    "youtube": "https://www.youtube.com/tv",
     "netflix": "https://www.netflix.com/",
     "browser": "https://www.google.com/"
   },
