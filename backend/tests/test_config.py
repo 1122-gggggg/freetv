@@ -4,16 +4,17 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from pydantic import ValidationError
-
 from app.config import (
     ApplicationSettings,
     Settings,
+    UrlSettings,
     detect_capabilities,
     load_settings,
     resolve_application_paths,
 )
 from app.controller import build_runtime
+from pydantic import ValidationError
+
 
 def test_load_settings_merges_defaults_with_local_overrides(tmp_path) -> None:
     settings_path = tmp_path / "settings.json"
@@ -46,6 +47,32 @@ def test_load_settings_rejects_non_web_browser_urls(tmp_path) -> None:
 
     with pytest.raises(ValidationError, match="http or https"):
         load_settings(settings_path)
+
+
+@pytest.mark.parametrize(
+    "netflix_url",
+    [
+        "http://www.netflix.com/",
+        "https://netflix.com.evil.test/",
+        "https://evilnetflix.com/",
+        "https://example.test/",
+    ],
+)
+def test_netflix_url_requires_https_netflix_host(netflix_url: str) -> None:
+    with pytest.raises(ValidationError, match="Netflix"):
+        UrlSettings(netflix=netflix_url)
+
+
+@pytest.mark.parametrize(
+    "netflix_url",
+    [
+        "https://netflix.com/",
+        "https://www.netflix.com/login",
+        "https://help.netflix.com/",
+    ],
+)
+def test_netflix_url_accepts_exact_host_and_subdomains(netflix_url: str) -> None:
+    assert UrlSettings(netflix=netflix_url).netflix == netflix_url
 
 
 def test_runtime_uses_configured_pairing_code_expiry() -> None:

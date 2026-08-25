@@ -3,11 +3,10 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from pydantic import ValidationError
-
 from app.protocol import Command, CommandMessage, PointerActionMessage, TextInputMessage
 from app.security.pairing import PairingCodeExpired, PairingCodeInvalid, PairingService
 from app.security.tokens import TokenStore
+from pydantic import ValidationError
 
 
 def test_command_message_accepts_only_whitelisted_command() -> None:
@@ -50,6 +49,54 @@ def test_text_input_removes_control_characters_without_executing_them() -> None:
     )
 
     assert message.text == "helloworld"
+
+
+def test_text_input_accepts_256_characters_and_rejects_257() -> None:
+    accepted = TextInputMessage.model_validate(
+        {
+            "version": 1,
+            "type": "text_input",
+            "request_id": "text-256",
+            "text": "x" * 256,
+        }
+    )
+    assert accepted.text == "x" * 256
+
+    with pytest.raises(ValidationError):
+        TextInputMessage.model_validate(
+            {
+                "version": 1,
+                "type": "text_input",
+                "request_id": "text-257",
+                "text": "x" * 257,
+            }
+        )
+
+
+@pytest.mark.parametrize("extra_field", ["javascript", "selector", "url", "raw_key"])
+def test_command_and_text_messages_reject_browser_control_extra_fields(
+    extra_field: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        CommandMessage.model_validate(
+            {
+                "version": 1,
+                "type": "command",
+                "request_id": "command-extra",
+                "command": "OK",
+                extra_field: "forbidden",
+            }
+        )
+    with pytest.raises(ValidationError):
+        TextInputMessage.model_validate(
+            {
+                "version": 1,
+                "type": "text_input",
+                "request_id": "text-extra",
+                "text": "safe",
+                extra_field: "forbidden",
+            }
+        )
 
 
 def test_pairing_code_issues_a_token_once(tmp_path) -> None:

@@ -10,13 +10,13 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote_plus
 
+from app.applications.netflix_page import NetflixAction, NetflixPageController
+from app.applications.youtube_adfilter import YoutubeAdFilter, reserve_localhost_port
 from app.commands.ports import CommandExecutionError
 from app.config import Settings, project_root
 from app.logging import log_event
 from app.protocol import Command
 from app.state import ActiveApp
-from app.applications.chrome_page import ChromePageInput
-from app.applications.youtube_adfilter import YoutubeAdFilter, reserve_localhost_port
 
 YOUTUBE_TV_USER_AGENT = (
     "Mozilla/5.0 (SMART-TV; Linux; Tizen 7.0) "
@@ -28,6 +28,17 @@ CHROME_RESTORE_SUPPRESS_ARGS = (
     "--disable-session-crashed-bubble",
     "--noerrdialogs",
 )
+
+NETFLIX_ACTIONS: dict[Command, NetflixAction] = {
+    Command.NAV_UP: NetflixAction.NAV_UP,
+    Command.NAV_DOWN: NetflixAction.NAV_DOWN,
+    Command.NAV_LEFT: NetflixAction.NAV_LEFT,
+    Command.NAV_RIGHT: NetflixAction.NAV_RIGHT,
+    Command.OK: NetflixAction.OK,
+    Command.BACK: NetflixAction.BACK,
+    Command.PLAY_PAUSE: NetflixAction.PLAY_PAUSE,
+    Command.TAB: NetflixAction.FOCUS_NEXT,
+}
 
 
 def mark_chrome_profile_clean_exit(profile_dir: Path) -> None:
@@ -108,7 +119,7 @@ class ApplicationManager:
         profile_dir: Path | None = None,
         netflix_profile_dir: Path | None = None,
         adfilter: YoutubeAdFilter | None = None,
-        page_input: ChromePageInput | None = None,
+        netflix_page: NetflixPageController | None = None,
         debug_port: int | None = None,
         netflix_debug_port: int | None = None,
     ) -> None:
@@ -126,7 +137,7 @@ class ApplicationManager:
             project_root() / "config" / "chrome-netflix-profile"
         )
         self._adfilter = adfilter or YoutubeAdFilter()
-        self._page_input = page_input or ChromePageInput()
+        self._netflix_page = netflix_page or NetflixPageController()
         self._debug_port = debug_port if debug_port is not None else reserve_localhost_port()
         self._netflix_debug_port = (
             netflix_debug_port if netflix_debug_port is not None else reserve_localhost_port()
@@ -196,16 +207,14 @@ class ApplicationManager:
             return
         if app is ActiveApp.NETFLIX:
             await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
-            if self._focus_existing(ActiveApp.NETFLIX, "Netflix"):
-                if await self._page_input.ready(self._netflix_debug_port):
-                    await self._anchor_netflix_login()
-                    return
-                await self._close_apps(ActiveApp.NETFLIX)
+            if self._focus_existing(ActiveApp.NETFLIX):
+                await self._initialize_netflix(reused=True)
+                return
             arguments = self._chrome_desktop_args(
                 self._settings.urls.netflix, self._netflix_profile_dir
             )
             await self._launch_and_track(app, arguments, "Netflix")
-            await self._anchor_netflix_login()
+            await self._initialize_netflix(reused=False)
             return
 
 
@@ -291,7 +300,7 @@ class ApplicationManager:
         self._active_app = ActiveApp.LAUNCHER
         log_event(logger, "returned_to_desktop")
 
-    def _focus_existing(self, app: ActiveApp, title_fragment: str) -> bool:
+    def _focus_existing(self, app: ActiveApp) -> bool:
         candidates = []
         if self._current is not None:
             candidates.append(self._current)
@@ -305,11 +314,7 @@ class ApplicationManager:
             self._current = tracked
             self._active_app = app
             return True
-        focused = self._windows.focus_window_with_title(title_fragment)
-        if focused is None:
-            return False
-        self._active_app = app
-        return True
+        return False
 
     async def _close_apps(self, *apps: ActiveApp) -> None:
         kept: list[TrackedApplication] = []
@@ -335,29 +340,50 @@ class ApplicationManager:
     async def type_text(self, text: str) -> None:
         self.require_input_target(self._active_app)
         if self._active_app is ActiveApp.NETFLIX:
-            await self._page_input.type_text(self._netflix_debug_port, text)
+            await self._netflix_page.type_text(self._netflix_debug_port, text)
             return
         raise CommandExecutionError(
             "input_target_not_active",
             "請先開啟 Netflix 再從遙控器輸入。",
         )
 
-    async def _anchor_netflix_login(self) -> None:
+    async def _initialize_netflix(self, *, reused: bool) -> None:
         try:
-            await self._page_input.focus_login_field(self._netflix_debug_port)
+            await self._netflix_page.execute(
+                self._netflix_debug_port,
+                NetflixAction.FOCUS_PRIMARY,
+            )
+        except CommandExecutionError:
+            await self._rollback_netflix_initialization(reused=reused)
+            raise
         except Exception:
-            log_event(logger, "netflix_login_focus_failed", port=self._netflix_debug_port)
+            await self._rollback_netflix_initialization(reused=reused)
+            raise CommandExecutionError(
+                "netflix_controller_unavailable",
+                "無法載入 Netflix 遙控控制，請稍後再試。",
+            ) from None
+
+    async def _rollback_netflix_initialization(self, *, reused: bool) -> None:
+        if reused:
+            self._minimize_current_window()
+        else:
+            await self._close_apps(ActiveApp.NETFLIX)
+        self._active_app = ActiveApp.LAUNCHER
+        self._windows.bring_launcher_to_foreground()
 
     async def forward_command(self, command: Command) -> None:
         self.require_input_target(self._active_app)
-        if command is Command.BACK and self._active_app in {
-            ActiveApp.NETFLIX,
-            ActiveApp.BROWSER,
-        }:
-            self._input.send_browser_back()
+        if self._active_app is ActiveApp.NETFLIX:
+            action = NETFLIX_ACTIONS.get(command)
+            if action is None:
+                raise CommandExecutionError(
+                    "command_not_supported",
+                    "Netflix 不支援這個遙控指令。",
+                )
+            await self._netflix_page.execute(self._netflix_debug_port, action)
             return
-        if command is Command.TAB and self._active_app is ActiveApp.NETFLIX:
-            await self._page_input.focus_next_field(self._netflix_debug_port)
+        if command is Command.BACK and self._active_app is ActiveApp.BROWSER:
+            self._input.send_browser_back()
             return
         self._input.send_command(command)
 

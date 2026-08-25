@@ -508,4 +508,42 @@ describe('ControllerSocket', () => {
     await expect(pending).rejects.toThrow('連線已中斷，尚未收到確認')
     socket.disconnect()
   })
+
+  it('keeps Netflix command and text input on the existing version 1 wire messages', async () => {
+    const socket = new ControllerSocket({
+      host: '192.168.1.42',
+      port: 8765,
+      token: 'token',
+    })
+    socket.connect()
+    const ws = FakeWebSocket.instances[0]
+    authenticate(ws)
+
+    const commandAck = socket.sendCommand('PLAY_PAUSE')
+    const textAck = socket.sendTextInput('x'.repeat(256))
+    const messages = ws.sent
+      .map((raw) => JSON.parse(raw) as Record<string, unknown>)
+      .filter((message) => message.type !== 'authenticate')
+
+    expect(messages.map(({ type }) => type)).toEqual(['command', 'text_input'])
+    expect(messages[0]).toMatchObject({ version: 1, command: 'PLAY_PAUSE' })
+    expect(messages[1]).toMatchObject({ version: 1, text: 'x'.repeat(256) })
+    expect(Object.keys(messages[0]).sort()).toEqual([
+      'command',
+      'request_id',
+      'type',
+      'version',
+    ])
+    expect(Object.keys(messages[1]).sort()).toEqual([
+      'request_id',
+      'text',
+      'type',
+      'version',
+    ])
+    sendAck(ws, messages[0].request_id as string)
+    sendAck(ws, messages[1].request_id as string)
+    await expect(commandAck).resolves.toMatchObject({ success: true })
+    await expect(textAck).resolves.toMatchObject({ success: true })
+    socket.disconnect()
+  })
 })

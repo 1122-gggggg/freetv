@@ -34,12 +34,26 @@ class UrlSettings(BaseModel):
     netflix: str = "https://www.netflix.com/"
     browser: str = "https://www.google.com/"
 
-    @field_validator("youtube", "netflix", "browser")
+    @field_validator("youtube", "browser")
     @classmethod
     def validate_web_url(cls, value: str) -> str:
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("Configured URLs must use http or https and include a host.")
+        return value
+
+    @field_validator("netflix")
+    @classmethod
+    def validate_netflix_url(cls, value: str) -> str:
+        parsed = urlparse(value)
+        host = (parsed.hostname or "").lower()
+        if (
+            parsed.scheme != "https"
+            or (host != "netflix.com" and not host.endswith(".netflix.com"))
+        ):
+            raise ValueError(
+                "Netflix URL must use https and host netflix.com or a subdomain."
+            )
         return value
 
 

@@ -5,9 +5,9 @@ import { RemotePage } from './RemotePage'
 
 const socketMock = vi.hoisted(() => ({
   status: 'connected' as 'connecting' | 'authenticating' | 'connected' | 'disconnected' | 'error',
-  sendCommand: vi.fn(() => 'request-id'),
+  sendCommand: vi.fn<(command: string) => string>(() => 'request-id'),
   sendPointer: vi.fn(() => 'request-id'),
-  sendText: vi.fn(() => 'request-id'),
+  sendText: vi.fn<(text: string) => string>(() => 'request-id'),
   sendSearch: vi.fn(() => 'request-id'),
 }))
 
@@ -86,6 +86,35 @@ describe('RemotePage', () => {
     expect(screen.queryByRole('button', { name: '休眠電腦' })).toBeNull()
     expect(screen.queryByLabelText(/Touchpad/i)).toBeNull()
     expect(screen.queryByLabelText(/觸控板/)).toBeNull()
+  })
+
+  it('sends the existing Netflix navigation and 256-character text contracts', () => {
+    render(
+      <RemotePage
+        token="paired-token-value-that-is-long-enough"
+        onPaired={vi.fn()}
+        onForget={vi.fn()}
+        onAuthenticationFailed={vi.fn()}
+      />,
+    )
+
+    for (const label of ['上', '下', '左', '右', '確定', '返回', '播放／暫停']) {
+      fireEvent.click(screen.getByRole('button', { name: label }))
+    }
+    const text = 'x'.repeat(256)
+    fireEvent.change(screen.getByLabelText('遙控輸入'), { target: { value: text } })
+    fireEvent.click(screen.getByRole('button', { name: '送出' }))
+
+    expect(socketMock.sendCommand.mock.calls.map(([command]) => command)).toEqual([
+      'NAV_UP',
+      'NAV_DOWN',
+      'NAV_LEFT',
+      'NAV_RIGHT',
+      'OK',
+      'BACK',
+      'PLAY_PAUSE',
+    ])
+    expect(socketMock.sendText).toHaveBeenCalledWith(text)
   })
 
   it('sends search_video for 搜片', () => {

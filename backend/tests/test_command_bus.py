@@ -26,6 +26,7 @@ class FakeApplications:
     forwarded: list[Command] = field(default_factory=list)
     input_targets: list[ActiveApp] = field(default_factory=list)
     typed: list[str] = field(default_factory=list)
+    failure: CommandExecutionError | None = None
 
     async def open(self, app: ActiveApp) -> None:
         self.opened.append(app)
@@ -42,9 +43,13 @@ class FakeApplications:
         self.desktop_calls += 1
 
     async def forward_command(self, command: Command) -> None:
+        if self.failure is not None:
+            raise self.failure
         self.forwarded.append(command)
 
     async def type_text(self, text: str) -> None:
+        if self.failure is not None:
+            raise self.failure
         self.typed.append(text)
 
     def require_input_target(self, app: ActiveApp) -> None:
@@ -167,7 +172,9 @@ class FakeNews:
 
 
 
-def make_bus(news: FakeNews | None = None) -> tuple[CommandBus, FakeApplications, FakePlayer, FakeInput]:
+def make_bus(
+    news: FakeNews | None = None,
+) -> tuple[CommandBus, FakeApplications, FakePlayer, FakeInput]:
     applications = FakeApplications()
     player = FakePlayer()
     input_controller = FakeInput()
@@ -362,6 +369,70 @@ def test_netflix_text_is_typed_into_the_netflix_page() -> None:
         )
         assert result.success
         assert applications.typed == ["user@example.com"]
+        assert input_controller.texts == []
+
+    asyncio.run(scenario())
+
+
+def test_netflix_commands_and_text_use_only_application_port() -> None:
+    async def scenario() -> None:
+        bus, applications, _, input_controller = make_bus()
+        await bus.dispatch_command(Command.OPEN_NETFLIX)
+        commands = [
+            Command.NAV_UP,
+            Command.NAV_DOWN,
+            Command.NAV_LEFT,
+            Command.NAV_RIGHT,
+            Command.OK,
+            Command.BACK,
+            Command.PLAY_PAUSE,
+            Command.TAB,
+        ]
+        outcomes = [await bus.dispatch_command(command) for command in commands]
+        text = await bus.dispatch_text(
+            TextInputMessage(
+                version=1,
+                type="text_input",
+                request_id="netflix-text-256",
+                text="x" * 256,
+            )
+        )
+
+        assert all(outcome.success and not outcome.state_changed for outcome in outcomes)
+        assert text.success and not text.state_changed
+        assert applications.forwarded == commands
+        assert applications.typed == ["x" * 256]
+        assert input_controller.texts == []
+
+    asyncio.run(scenario())
+
+
+def test_netflix_error_becomes_failed_ack_without_active_app_change() -> None:
+    async def scenario() -> None:
+        bus, applications, _, input_controller = make_bus()
+        opened = await bus.dispatch_command(Command.OPEN_NETFLIX)
+        assert opened.success
+        applications.failure = CommandExecutionError(
+            "netflix_controller_unavailable",
+            "無法載入 Netflix 遙控控制，請稍後再試。",
+        )
+
+        command = await bus.dispatch_command(Command.OK)
+        text = await bus.dispatch_text(
+            TextInputMessage(
+                version=1,
+                type="text_input",
+                request_id="netflix-error-text",
+                text="secret",
+            )
+        )
+
+        for outcome in (command, text):
+            assert not outcome.success
+            assert outcome.error_code == "netflix_controller_unavailable"
+            assert outcome.message == "無法載入 Netflix 遙控控制，請稍後再試。"
+            assert outcome.state.active_app is ActiveApp.NETFLIX
+            assert outcome.state.error_message == "無法載入 Netflix 遙控控制，請稍後再試。"
         assert input_controller.texts == []
 
     asyncio.run(scenario())

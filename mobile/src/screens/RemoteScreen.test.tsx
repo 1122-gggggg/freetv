@@ -251,6 +251,47 @@ describe('RemoteScreen', () => {
     expect(getTypeButton(root).props.disabled).toBe(false)
   })
 
+  it('sends existing Netflix D-pad media and 256-character text commands', async () => {
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+      )
+    })
+    const root = renderer!.root
+    act(() => {
+      latestMockSocket!.simulateStatusChange('authenticated')
+    })
+
+    const dpad = root.findByType(Dpad)
+    for (const command of ['NAV_UP', 'NAV_DOWN', 'NAV_LEFT', 'NAV_RIGHT', 'OK'] as const) {
+      await act(async () => {
+        await dpad.props.onCommand(command)
+      })
+    }
+    const media = root.findByType(MediaControls)
+    for (const command of ['BACK', 'PLAY_PAUSE'] as const) {
+      await act(async () => {
+        await media.props.onCommand(command)
+      })
+    }
+    act(() => {
+      getTypeButton(root).props.onPress()
+    })
+    const text = 'x'.repeat(256)
+    await expect(root.findByType(TextInputModal).props.onSend(text)).resolves.toBeUndefined()
+
+    expect(latestMockSocket!.sendCommand.mock.calls.map(([command]) => command)).toEqual([
+      'NAV_UP',
+      'NAV_DOWN',
+      'NAV_LEFT',
+      'NAV_RIGHT',
+      'OK',
+      'BACK',
+      'PLAY_PAUSE',
+    ])
+    expect(latestMockSocket!.sendTextInput).toHaveBeenCalledWith(text)
+  })
+
   it('surfaces failed command ACK in error banner and clears on success', async () => {
 
     await act(async () => {

@@ -149,4 +149,34 @@ describe('ControllerSocket request IDs', () => {
     expect(sockets).toHaveLength(1)
     controller.close()
   })
+
+  it('keeps Netflix command and text input on the existing version 1 wire messages', () => {
+    const controller = new ControllerSocket('/ws/remote', 'paired-token')
+    controller.connect()
+    const socket = sockets[0]
+    socket.open()
+
+    controller.sendCommand('PLAY_PAUSE')
+    controller.sendText('x'.repeat(256))
+    const messages = socket.sent
+      .map((raw) => JSON.parse(raw) as Record<string, unknown>)
+      .filter((message) => message.type !== 'authenticate')
+
+    expect(messages.map(({ type }) => type)).toEqual(['command', 'text_input'])
+    expect(messages[0]).toMatchObject({ version: 1, command: 'PLAY_PAUSE' })
+    expect(messages[1]).toMatchObject({ version: 1, text: 'x'.repeat(256) })
+    expect(Object.keys(messages[0]).sort()).toEqual([
+      'command',
+      'request_id',
+      'type',
+      'version',
+    ])
+    expect(Object.keys(messages[1]).sort()).toEqual([
+      'request_id',
+      'text',
+      'type',
+      'version',
+    ])
+    controller.close()
+  })
 })

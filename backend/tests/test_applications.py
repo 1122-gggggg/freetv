@@ -7,12 +7,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-
+from app.applications import manager as manager_module
 from app.applications.manager import ApplicationManager
+from app.applications.netflix_page import NetflixAction
 from app.commands.ports import CommandExecutionError
 from app.config import ApplicationSettings, Settings, UrlSettings
 from app.protocol import Command
 from app.state import ActiveApp
+
+
 @dataclass
 class FakeProcess:
     pid: int = 123
@@ -133,24 +136,20 @@ class FakeInput:
 
 
 @dataclass
-class FakePageInput:
-    ready_result: bool = True
-    focused: list[int] = field(default_factory=list)
+class FakeNetflixPageController:
+    actions: list[tuple[int, NetflixAction]] = field(default_factory=list)
     typed: list[tuple[int, str]] = field(default_factory=list)
-    tabs: list[int] = field(default_factory=list)
+    failure: CommandExecutionError | None = None
 
-    async def ready(self, port: int) -> bool:
-        return self.ready_result
-
-    async def focus_login_field(self, port: int) -> str | None:
-        self.focused.append(port)
-        return "email"
+    async def execute(self, port: int, action: NetflixAction) -> None:
+        if self.failure is not None:
+            raise self.failure
+        self.actions.append((port, action))
 
     async def type_text(self, port: int, text: str) -> None:
+        if self.failure is not None:
+            raise self.failure
         self.typed.append((port, text))
-
-    async def focus_next_field(self, port: int) -> None:
-        self.tabs.append(port)
 
 
 
@@ -177,6 +176,7 @@ def make_manager(
     chrome: Path | None = Path("C:/Apps/chrome.exe"),
     adblock_dir: Path | None = None,
     adblock_youtube_dir: Path | None = None,
+    netflix_page: FakeNetflixPageController | None = None,
 ) -> tuple[ApplicationManager, FakeLauncher, FakeWindows, FakeInput]:
     launcher = FakeLauncher()
     windows = FakeWindows()
@@ -199,7 +199,7 @@ def make_manager(
         adblock_dir=adblock_dir,
         adblock_youtube_dir=adblock_youtube_dir,
         adfilter=FakeAdFilter(),
-        page_input=FakePageInput(),
+        netflix_page=netflix_page or FakeNetflixPageController(),
         debug_port=9333,
         netflix_debug_port=9444,
     )
@@ -235,24 +235,34 @@ def test_netflix_opens_desktop_chrome_fullscreen() -> None:
     assert "--app=" not in " ".join(argv)
     assert "--new-window" not in argv
     assert "--start-maximized" not in argv
-    assert any(part.startswith("--user-data-dir=") and "chrome-netflix-profile" in part for part in argv)
+    assert any(
+        part.startswith("--user-data-dir=") and "chrome-netflix-profile" in part
+        for part in argv
+    )
     assert "--remote-debugging-address=127.0.0.1" in argv
     assert "--remote-debugging-port=9444" in argv
     assert "--load-extension" not in " ".join(argv)
     assert "--hide-crash-restore-bubble" in argv
     assert manager._adfilter.ports == []
-    assert manager._page_input.focused == [9444]
+    assert manager._netflix_page.actions == [(9444, NetflixAction.FOCUS_PRIMARY)]
 
 
-def test_netflix_remote_text_types_into_anchored_login_field() -> None:
+def test_netflix_text_and_tab_use_page_controller_without_windows_input(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     async def scenario() -> None:
         manager, _, _, input_controller = make_manager()
         await manager.open(ActiveApp.NETFLIX)
         await manager.type_text("user@example.com")
         await manager.forward_command(Command.TAB)
-        assert manager._page_input.typed == [(9444, "user@example.com")]
-        assert manager._page_input.tabs == [9444]
+        assert manager._netflix_page.typed == [(9444, "user@example.com")]
+        assert manager._netflix_page.actions == [
+            (9444, NetflixAction.FOCUS_PRIMARY),
+            (9444, NetflixAction.FOCUS_NEXT),
+        ]
         assert input_controller.commands == []
+        assert input_controller.browser_backs == 0
+        assert "user@example.com" not in caplog.text
 
     asyncio.run(scenario())
 
@@ -282,6 +292,10 @@ def test_opening_netflix_twice_reuses_the_same_window() -> None:
     assert windows.activated == [900]
     assert windows.maximized[-1] == 900
     assert manager.active_app is ActiveApp.NETFLIX
+    assert manager._netflix_page.actions == [
+        (9444, NetflixAction.FOCUS_PRIMARY),
+        (9444, NetflixAction.FOCUS_PRIMARY),
+    ]
 
 
 def test_home_then_netflix_restores_existing_app() -> None:
@@ -411,28 +425,147 @@ def test_home_minimizes_only_the_tracked_window_and_restores_launcher() -> None:
         assert manager.active_app is ActiveApp.LAUNCHER
 
     asyncio.run(scenario())
-def test_forwarding_only_uses_fixed_command_mapping() -> None:
+@pytest.mark.parametrize(
+    ("command", "action"),
+    [
+        (Command.NAV_UP, NetflixAction.NAV_UP),
+        (Command.NAV_DOWN, NetflixAction.NAV_DOWN),
+        (Command.NAV_LEFT, NetflixAction.NAV_LEFT),
+        (Command.NAV_RIGHT, NetflixAction.NAV_RIGHT),
+        (Command.OK, NetflixAction.OK),
+        (Command.BACK, NetflixAction.BACK),
+        (Command.PLAY_PAUSE, NetflixAction.PLAY_PAUSE),
+        (Command.TAB, NetflixAction.FOCUS_NEXT),
+    ],
+)
+def test_netflix_page_commands_use_controller_without_windows_input(
+    command: Command,
+    action: NetflixAction,
+) -> None:
     async def scenario() -> None:
         manager, _, windows, input_controller = make_manager()
         await manager.open(ActiveApp.NETFLIX)
+        manager._netflix_page.actions.clear()
 
-        await manager.forward_command(Command.NAV_LEFT)
+        await manager.forward_command(command)
 
-        assert input_controller.commands == [Command.NAV_LEFT]
+        assert manager._netflix_page.actions == [(9444, action)]
+        assert input_controller.commands == []
+        assert input_controller.browser_backs == 0
         assert windows.activated == [900]
-
-    import asyncio
 
     asyncio.run(scenario())
 
-def test_netflix_back_sends_browser_history_back() -> None:
+
+def test_netflix_action_mapping_is_fixed_and_complete() -> None:
+    assert manager_module.NETFLIX_ACTIONS == {
+        Command.NAV_UP: NetflixAction.NAV_UP,
+        Command.NAV_DOWN: NetflixAction.NAV_DOWN,
+        Command.NAV_LEFT: NetflixAction.NAV_LEFT,
+        Command.NAV_RIGHT: NetflixAction.NAV_RIGHT,
+        Command.OK: NetflixAction.OK,
+        Command.BACK: NetflixAction.BACK,
+        Command.PLAY_PAUSE: NetflixAction.PLAY_PAUSE,
+        Command.TAB: NetflixAction.FOCUS_NEXT,
+    }
+
+
+def test_netflix_controller_failure_never_falls_back_to_windows_input() -> None:
     async def scenario() -> None:
-        manager, _, windows, input_controller = make_manager()
+        page = FakeNetflixPageController()
+        manager, _, _, input_controller = make_manager(netflix_page=page)
         await manager.open(ActiveApp.NETFLIX)
+        page.actions.clear()
+        page.failure = CommandExecutionError(
+            "netflix_controller_unavailable",
+            "無法載入 Netflix 遙控控制，請稍後再試。",
+        )
+
+        with pytest.raises(CommandExecutionError) as caught:
+            await manager.forward_command(Command.OK)
+
+        assert caught.value is page.failure
+        assert page.actions == []
+        assert input_controller.commands == []
+        assert input_controller.browser_backs == 0
+        assert manager.active_app is ActiveApp.NETFLIX
+
+    asyncio.run(scenario())
+
+
+def test_browser_back_still_uses_alt_left_path() -> None:
+    async def scenario() -> None:
+        manager, _, _, input_controller = make_manager()
+        await manager.open(ActiveApp.BROWSER)
+
         await manager.forward_command(Command.BACK)
+
         assert input_controller.browser_backs == 1
         assert input_controller.commands == []
-        assert windows.activated == [900]
+        assert manager._netflix_page.actions == []
+
+    asyncio.run(scenario())
+
+
+def test_youtube_and_news_commands_still_use_windows_input() -> None:
+    async def scenario() -> None:
+        manager, _, _, input_controller = make_manager()
+        await manager.open(ActiveApp.YOUTUBE)
+        await manager.forward_command(Command.BACK)
+        await manager.open_news("https://www.youtube.com/@dwnews/live")
+        await manager.forward_command(Command.PLAY_PAUSE)
+
+        assert input_controller.commands == [Command.BACK, Command.PLAY_PAUSE]
+        assert input_controller.browser_backs == 0
+        assert manager._netflix_page.actions == []
+
+    asyncio.run(scenario())
+
+
+def test_netflix_initial_focus_failure_rolls_back_only_new_owned_window() -> None:
+    async def scenario() -> None:
+        failure = CommandExecutionError(
+            "netflix_controller_unavailable",
+            "無法載入 Netflix 遙控控制，請稍後再試。",
+        )
+        page = FakeNetflixPageController(failure=failure)
+        manager, launcher, windows, input_controller = make_manager(netflix_page=page)
+
+        with pytest.raises(CommandExecutionError) as caught:
+            await manager.open(ActiveApp.NETFLIX)
+
+        assert caught.value is failure
+        assert launcher.process.poll() is not None
+        assert windows.closed_windows == [900]
+        assert windows.brought_launcher_forward == 1
+        assert manager.active_app is ActiveApp.LAUNCHER
+        assert input_controller.commands == []
+        assert input_controller.browser_backs == 0
+
+    asyncio.run(scenario())
+
+
+def test_reused_netflix_initial_focus_failure_reminimizes_without_closing() -> None:
+    async def scenario() -> None:
+        page = FakeNetflixPageController()
+        manager, launcher, windows, input_controller = make_manager(netflix_page=page)
+        await manager.open(ActiveApp.NETFLIX)
+        await manager.return_home()
+        page.failure = CommandExecutionError(
+            "netflix_controller_unavailable",
+            "無法載入 Netflix 遙控控制，請稍後再試。",
+        )
+
+        with pytest.raises(CommandExecutionError) as caught:
+            await manager.open(ActiveApp.NETFLIX)
+
+        assert caught.value is page.failure
+        assert launcher.process.poll() is None
+        assert windows.closed_windows == []
+        assert windows.minimized == [900, 900]
+        assert windows.brought_launcher_forward == 2
+        assert manager.active_app is ActiveApp.LAUNCHER
+        assert input_controller.commands == []
 
     asyncio.run(scenario())
 
