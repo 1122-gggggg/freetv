@@ -65,6 +65,7 @@ class FakeWindows:
     activated: list[int] = field(default_factory=list)
     brought_launcher_forward: int = 0
     closed_launcher: int = 0
+    titled_window: int | None = None
     window_for_pid: int | None = 900
     foreground_window: int | None = 900
     allow_activation: bool = True
@@ -98,6 +99,12 @@ class FakeWindows:
 
     def close_launcher(self) -> None:
         self.closed_launcher += 1
+
+    def focus_window_with_title(self, title_fragment: str) -> int | None:
+        if self.titled_window is None:
+            return None
+        self.activate(self.titled_window)
+        return self.titled_window
 @dataclass
 class FakeInput:
     commands: list[Command] = field(default_factory=list)
@@ -188,6 +195,29 @@ def test_netflix_opens_chrome_app_fullscreen() -> None:
     assert any(part.startswith("--user-data-dir=") and "chrome-netflix-profile" in part for part in argv)
     assert "--load-extension" not in " ".join(argv)
     assert manager._adfilter.ports == []
+
+def test_opening_netflix_twice_reuses_the_same_window() -> None:
+    manager, launcher, windows, _ = make_manager()
+    asyncio.run(manager.open(ActiveApp.NETFLIX))
+    asyncio.run(manager.open(ActiveApp.NETFLIX))
+    assert len(launcher.calls) == 1
+    assert windows.activated == [900]
+    assert windows.maximized[-1] == 900
+    assert manager.active_app is ActiveApp.NETFLIX
+
+
+def test_home_then_netflix_restores_existing_app() -> None:
+    async def scenario() -> None:
+        manager, launcher, windows, _ = make_manager()
+        await manager.open(ActiveApp.NETFLIX)
+        await manager.return_home()
+        await manager.open(ActiveApp.NETFLIX)
+        assert len(launcher.calls) == 1
+        assert manager.active_app is ActiveApp.NETFLIX
+        assert 900 in windows.activated
+
+    asyncio.run(scenario())
+
 
 def test_missing_chrome_returns_chrome_not_found() -> None:
     with pytest.raises(CommandExecutionError) as error:

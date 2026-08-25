@@ -45,6 +45,7 @@ class WindowController(Protocol):
     def is_foreground(self, handle: int) -> bool: ...
     def bring_launcher_to_foreground(self) -> None: ...
     def close_launcher(self) -> None: ...
+    def focus_window_with_title(self, title_fragment: str) -> int | None: ...
 
 
 class CommandInputController(Protocol):
@@ -148,9 +149,9 @@ class ApplicationManager:
             arguments = self._chrome_kiosk_args(self._settings.urls.youtube)
             await self._launch_and_track(app, arguments, "YouTube")
             return
-
         if app is ActiveApp.NETFLIX:
-            await self._close_current_if(ActiveApp.NETFLIX)
+            if self._focus_existing(ActiveApp.NETFLIX, "Netflix"):
+                return
             arguments = self._chrome_app_args(
                 self._settings.urls.netflix, self._netflix_profile_dir
             )
@@ -233,9 +234,28 @@ class ApplicationManager:
         await self._close_current_if(
             ActiveApp.YOUTUBE, ActiveApp.NEWS, ActiveApp.NETFLIX, ActiveApp.BROWSER
         )
-        self._active_app = ActiveApp.LAUNCHER
         self._windows.close_launcher()
+        self._active_app = ActiveApp.LAUNCHER
         log_event(logger, "returned_to_desktop")
+    def _focus_existing(self, app: ActiveApp, title_fragment: str) -> bool:
+        candidates = []
+        if self._current is not None:
+            candidates.append(self._current)
+        candidates.extend(child for child in self._children if child is not self._current)
+        for tracked in candidates:
+            if tracked.app is not app or not self._tracked_window_is_owned(tracked):
+                continue
+            assert tracked.window_handle is not None
+            self._windows.activate(tracked.window_handle)
+            self._windows.maximize(tracked.window_handle)
+            self._current = tracked
+            self._active_app = app
+            return True
+        focused = self._windows.focus_window_with_title(title_fragment)
+        if focused is None:
+            return False
+        self._active_app = app
+        return True
 
     async def _close_current_if(self, *apps: ActiveApp) -> None:
         tracked = self._current

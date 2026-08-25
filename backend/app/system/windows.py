@@ -84,6 +84,14 @@ class WindowsWindowController:
             return
         ctypes.windll.user32.PostMessageW(wintypes.HWND(handle), 0x0010, 0, 0)
 
+    def focus_window_with_title(self, title_fragment: str) -> int | None:
+        self._require_windows()
+        handle = self._window_handle_with_title(title_fragment)
+        if handle is None:
+            return None
+        self.activate(handle)
+        return handle
+
     def _window_handles_for_pid(self, pid: int) -> list[int]:
         handles: list[int] = []
 
