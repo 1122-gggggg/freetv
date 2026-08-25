@@ -4,18 +4,21 @@
 
 ```mermaid
 flowchart LR
-  Phone[Paired phone Remote] -->|LAN HTTP(S) / WS(S)| API[FastAPI controller]
+  PWA["/remote PWA"] -->|LAN HTTP(S) / WS(S)| API[FastAPI controller]
+  Expo[Expo native Remote] -->|LAN HTTPS / WSS| API
   TV[Local TV Launcher] -->|loopback HTTP(S) / WS(S)| API
   API --> Bus[CommandBus]
   Bus --> Apps[ApplicationManager]
   Bus --> Player[MpvController]
   Bus --> Input[Windows input adapter]
   Bus --> Volume[Windows volume adapter]
-  Apps --> Windows[Windows apps]
+  Apps --> Owned[Controller-owned browser windows]
+  Apps -->|typed Netflix action| Page[NetflixPageController]
+  Page -->|short-lived CDP on 127.0.0.1| NetflixDOM[Netflix DOM in owned Chrome]
   Player --> MPV[mpv JSON IPC]
 ```
 
-FastAPI is the sole transport server. The React TV Launcher and React Remote consume server state; neither calls Windows APIs or launches applications. Every control source becomes one protocol message and flows through `CommandBus`.
+FastAPI is the sole transport server. The React TV Launcher, `/remote` PWA, and Expo Remote consume server state; none calls Windows APIs, launches applications, or receives a general CDP capability. Every control source becomes one strict version 1 protocol message and flows through `CommandBus`.
 
 ## Native Remote
 
@@ -28,10 +31,12 @@ QR pairing is the primary endpoint-discovery path. A code-only QR is never assig
 | Module | Responsibility |
 |---|---|
 | `app/protocol.py` | Versioned, strict Pydantic WebSocket models and command whitelist. |
-| `app/websocket/` | Authenticated connection registry and state fan-out. |
+| `app/websocket/` | Authenticated connection registry, acknowledgements, and state fan-out. |
 | `app/security/` | Pairing codes, salted token store, and the per-user local CA/IP-SAN TLS materials. |
 | `app/commands/bus.py` | Central command routing, state/error outcome, and launcher focus transitions. |
-| `app/applications/manager.py` | Tracks only child processes/windows created by this project. |
+| `app/applications/manager.py` | Tracks owned child processes/windows, maps Netflix commands to typed page actions, and retains HOME ownership. |
+| `app/applications/netflix_page.py` | Discovers the unique Netflix target and performs bounded, short-lived localhost CDP transactions. |
+| `app/applications/netflix_control.js` | Versioned fixed DOM runtime for visible candidates, semantic focus, navigation, BACK, and playback. |
 | `app/player/channels.py` | Validates and selects enabled, ordered channels. |
 | `app/player/mpv.py` | Starts mpv and controls it over named-pipe JSON IPC. |
 | `app/system/` | Narrow Windows adapters for mouse, Unicode text, windows, sleep, and Core Audio volume. |
@@ -42,16 +47,33 @@ QR pairing is the primary endpoint-discovery path. A code-only QR is never assig
 
 1. A Remote loads `<scheme>://<controller-literal-IP>:<port>/remote` using the configured `server.transport`; the server rejects arbitrary Host names and mismatched browser Origins. Plaintext LAN access is rejected only in HTTPS mode.
 2. The Remote connects with `ws://` or `wss://` matching that transport, has bounded pre-authentication admission, and must authenticate with a valid token before any command, pointer, or text-input message.
-3. `CommandBus` selects an owned application, mpv, input, power, or volume action.
-4. The bus updates `StateStore` only after the action outcome is known.
-5. `ConnectionRegistry` broadcasts a new `state` message only when an observable state value changed, filtering invalid Remote sessions first.
-6. The source Remote receives an `ack` for each request ID.
+3. `CommandBus` routes through the unchanged `ApplicationPort.forward_command()` and `type_text()` boundary. HOME remains a separate `return_home()` branch.
+4. `ApplicationManager` sends Netflix navigation and text only to `NetflixPageController`. Browser BACK still uses Alt+Left, while YouTube and News retain their Windows input path.
+5. The bus updates `StateStore` after the action outcome is known. A stable controller error becomes a failed acknowledgement without changing the active application.
+6. `ConnectionRegistry` broadcasts a new `state` message only when an observable state value changed, filtering invalid Remote sessions first.
+7. The source Remote receives an `ack` for each request ID.
 
 The TV socket accepts only `CommandMessage`, requires both a loopback client address and the exact local TV Origin, and cannot pair, send text, or move the pointer. Production startup uses the configured transport; loopback plaintext remains available for the development proxy.
 
+## Netflix page adapter
+
+Netflix starts in Google Chrome with `config/chrome-netflix-profile`, `--start-fullscreen`, `--remote-debugging-address=127.0.0.1`, and a reserved local port. It does not load the YouTube/News AdBlock extension. New and reused owned windows run `FOCUS_PRIMARY`; an initialization failure closes only a newly launched owned Netflix window or re-minimizes a reused one before returning to the launcher.
+
+Every command attempt performs a fresh `GET http://127.0.0.1:<port>/json/list`, requires exactly one top-level page with no opener whose URL host is `netflix.com` or a subdomain, and accepts only a `ws://127.0.0.1:<valid-port>` debugger URL. It then opens one WebSocket context, verifies runtime version `1`, injects the local fixed runtime only when missing, executes one typed action against a newly enumerated DOM, and closes the socket. Element references and rectangles never cross commands.
+
+Connection, version-check, and runtime-injection failures occur before an action and may retry once. `FOCUS_PRIMARY` and `FOCUS_EDITABLE` are idempotent and may also retry once. For NAV, FOCUS_NEXT, OK, BACK, PLAY_PAUSE, or `Input.insertText`, a successful WebSocket send followed by a lost, malformed, or invalid response is an outcome-unknown failure: the controller returns `netflix_controller_unavailable` without replaying the side effect.
+
+This is a clean cutover. Netflix navigation never falls back to SendInput, Alt+Left, coordinates, another tab, or another Chrome process.
+Phones cannot provide JavaScript, selectors, URLs, raw keys, CDP methods, or debugger addresses.
+Text is sent only to the focused editable field and is excluded from logs, state, and acknowledgements.
+The adapter does not inspect credentials, cookies, requests, MediaKeys, Widevine exchanges, or DRM licensing traffic, and it does not bypass DRM.
+Netflix DOM changes can require a tested runtime update; permanent compatibility is not guaranteed.
+
 ## Ownership and Home
 
-`ApplicationManager` creates and records each browser child process. `HOME` calls `ApplicationManager.home()`: it minimizes the specific tracked window, closes the controller-owned mpv process through its adapter, and restores the window titled `我的電視`. It never searches for or terminates arbitrary Brave, Edge, or mpv processes.
+`ApplicationManager` creates and records each browser child process. `HOME` calls `ApplicationManager.return_home()`: it closes controller-owned YouTube/News children, minimizes the specific still-owned Netflix or Browser window when applicable, and restores the window titled `我的電視`.
+HOME never enters Netflix history or the DOM runtime.
+The manager never searches for or terminates arbitrary Chrome, Brave, Edge, or mpv processes.
 
 ## State model
 
@@ -67,7 +89,7 @@ Each connected, still-valid paired Remote receives snapshots after state changes
 
 ## Failure containment
 
-Browser lookup, process launch, mpv IPC, volume access, named-pipe input, and Windows UI automation are behind small protocols. The production composition root uses Windows implementations; tests inject fakes. Dependency failure becomes a typed `CommandExecutionError` and a displayed state error instead of crashing the controller.
+Browser lookup, process launch, Netflix target selection/runtime validation, mpv IPC, volume access, named-pipe input, and Windows UI automation are behind small adapters. The production composition root uses concrete implementations; tests inject fakes. Dependency failure becomes a typed `CommandExecutionError` and a displayed state error instead of crashing the controller. Deterministic Netflix target/DOM errors do not retry, and outcome-unknown side effects are never replayed.
 
 ## Remote transport security
 

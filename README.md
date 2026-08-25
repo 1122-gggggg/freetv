@@ -6,8 +6,7 @@ A local Windows 11 controller that turns an HDMI-connected PC into a TV-style la
 
 - Windows 11, signed in as the user who will run the TV controller.
 - Python 3.11+ for appliance deployment, available as `python` on `PATH` or through the Windows `py` launcher; Node.js LTS only for frontend development.
-- Google Chrome for YouTube and News (launched in fullscreen kiosk mode with store AdBlock in an isolated TV profile).
-- Microsoft Edge for Netflix. Windows 11 normally installs it.
+- Google Chrome for YouTube and News (fullscreen with store AdBlock in an isolated TV profile) and Netflix (fullscreen with Widevine in its own profile).
 - [mpv](https://mpv.io/installation/) for Live TV.
 - Laptop/PC on a private LAN. Phone may be on another network if `cloudflared` is installed.
 - Native Android builds additionally require Android Studio, its Android SDK, and a JDK. Native iOS builds require macOS/Xcode or an authenticated Expo EAS build account.
@@ -126,8 +125,14 @@ The Remote never offers raw key sequences, shell commands, PowerShell commands, 
 
 - **YouTube** opens Google Chrome in fullscreen kiosk mode (`--kiosk`) with store AdBlock (`gighmmpiobklfepjocnamgkkbiglidom`) in an isolated TV profile (`config/chrome-tv-profile`).
 - **News** opens official YouTube Live news streams in fullscreen kiosk Chrome with AdBlock. Switch streams using Channel Up / Channel Down on the Remote or TV interface.
-- **Netflix** opens Edge in a new maximized window at Netflix. Login and DRM remain entirely inside Edge/Widevine; this project does not bypass or automate DRM or credentials.
+- **Netflix** opens Google Chrome with the dedicated `config/chrome-netflix-profile`, `--start-fullscreen`, and a debugging endpoint bound only to `127.0.0.1` on a reserved local port. It does not load AdBlock.
 - **Browser** opens the configured browser start URL. By default it uses Edge when no `browser_path` is specified.
+
+Both the `/remote` PWA and the `mobile/` Expo app use the existing version 1 command and text-input messages for mouse-free Netflix navigation. The D-pad, OK, BACK, PLAY_PAUSE, and up to 256 characters of sanitized text are routed through `NetflixPageController`; they are not converted to Windows mouse coordinates or arbitrary browser commands.
+
+Each Netflix page action discovers the one controller-owned, top-level `netflix.com` page and uses a short-lived localhost CDP connection that closes after the result is known. Chrome and Netflix remain responsible for sign-in, cookies, protected-content authorization, Widevine, and playback. This project does not read credentials, intercept licensing traffic, or bypass DRM.
+
+HOME never becomes a Netflix DOM command. It only minimizes the still-owned Netflix window and restores 我的電視; it does not close or steer another Chrome window. Netflix can change its DOM and accessibility metadata without notice, so `backend/app/applications/netflix_control.js` and its fixtures may need maintenance after a site redesign. The page adapter is a constrained integration, not a promise of permanent compatibility.
 
 Only a concrete window/process launched by this controller is minimized or terminated. The controller never kills every Chrome, Edge, or mpv process on the machine.
 
