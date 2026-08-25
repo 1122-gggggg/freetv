@@ -233,6 +233,7 @@ def main() -> None:
         default=Path(__file__).resolve().parents[2] / "vendor" / "adblock",
         help="解壓後 AdBlock 擴充功能的目標目錄",
     )
+    args = parser.parse_args()
     installed = ensure_adblock(args.directory)
     print(f"AdBlock 已就緒：{installed}")
 
