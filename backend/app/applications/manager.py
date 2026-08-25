@@ -16,6 +16,12 @@ from app.protocol import Command
 from app.state import ActiveApp
 from app.applications.youtube_adfilter import YoutubeAdFilter, reserve_localhost_port
 
+YOUTUBE_TV_USER_AGENT = (
+    "Mozilla/5.0 (SMART-TV; Linux; Tizen 7.0) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "SamsungBrowser/5.0 Chrome/120.0.6099.0 TV Safari/537.36"
+)
+
 
 
 class ChildProcess(Protocol):
@@ -68,6 +74,7 @@ class ApplicationManager:
         adblock_dir: Path | None = None,
         adblock_youtube_dir: Path | None = None,
         profile_dir: Path | None = None,
+        netflix_profile_dir: Path | None = None,
         adfilter: YoutubeAdFilter | None = None,
         debug_port: int | None = None,
     ) -> None:
@@ -81,6 +88,9 @@ class ApplicationManager:
             self._adblock_dir.parent / "adblock-youtube"
         )
         self._profile_dir = profile_dir or (project_root() / "config" / "chrome-tv-profile")
+        self._netflix_profile_dir = netflix_profile_dir or (
+            project_root() / "config" / "chrome-netflix-profile"
+        )
         self._adfilter = adfilter or YoutubeAdFilter()
         self._debug_port = debug_port if debug_port is not None else reserve_localhost_port()
         self._active_app = ActiveApp.LAUNCHER
@@ -102,12 +112,28 @@ class ApplicationManager:
             chrome.as_posix(),
             f"--user-data-dir={self._profile_dir}",
             "--start-fullscreen",
+            f"--user-agent={YOUTUBE_TV_USER_AGENT}",
             "--remote-debugging-address=127.0.0.1",
             f"--remote-debugging-port={self._debug_port}",
             "--no-first-run",
             "--no-default-browser-check",
             "--autoplay-policy=no-user-gesture-required",
             url,
+        ]
+    def _chrome_app_args(self, url: str, profile_dir: Path) -> list[str]:
+        chrome = self._executables.get("chrome")
+        if chrome is None:
+            raise CommandExecutionError(
+                "chrome_not_found",
+                "未安裝或尚未設定 Chrome。請安裝 Chrome，或在 applications.chrome_path 指定路徑。",
+            )
+        return [
+            chrome.as_posix(),
+            f"--user-data-dir={profile_dir}",
+            f"--app={url}",
+            "--start-fullscreen",
+            "--no-first-run",
+            "--no-default-browser-check",
         ]
 
     async def open(self, app: ActiveApp) -> None:
@@ -120,6 +146,14 @@ class ApplicationManager:
             await self._close_current_if(ActiveApp.YOUTUBE, ActiveApp.NEWS)
             arguments = self._chrome_kiosk_args(self._settings.urls.youtube)
             await self._launch_and_track(app, arguments, "YouTube")
+            return
+
+        if app is ActiveApp.NETFLIX:
+            await self._close_current_if(ActiveApp.NETFLIX)
+            arguments = self._chrome_app_args(
+                self._settings.urls.netflix, self._netflix_profile_dir
+            )
+            await self._launch_and_track(app, arguments, "Netflix")
             return
 
         executable, url, app_name = self._launch_spec(app)
@@ -139,7 +173,7 @@ class ApplicationManager:
 
     async def search_youtube(self, query: str) -> None:
         await self._close_current_if(ActiveApp.YOUTUBE, ActiveApp.NEWS)
-        url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
+        url = f"https://www.youtube.com/tv#/search?q={quote_plus(query)}"
         arguments = self._chrome_kiosk_args(url)
         await self._launch_and_track(ActiveApp.YOUTUBE, arguments, "YouTube")
 

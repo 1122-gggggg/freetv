@@ -167,15 +167,23 @@ def test_youtube_uses_isolated_chrome_fullscreen_and_ad_filter(tmp_path: Path) -
     assert any(part.startswith("--user-data-dir=") and "chrome-tv-profile" in part for part in argv)
     assert "--remote-debugging-address=127.0.0.1" in argv
     assert "--remote-debugging-port=9333" in argv
-    assert argv[-1] == "https://www.youtube.com/"
+    assert argv[-1] == "https://www.youtube.com/tv"
+    assert any(part.startswith("--user-agent=") and "SMART-TV" in part for part in argv)
     assert manager._adfilter.ports == [9333]
-def test_netflix_uses_chrome_without_adblock() -> None:
+
+
+def test_netflix_opens_chrome_app_fullscreen() -> None:
     manager, launcher, windows, _ = make_manager()
     asyncio.run(manager.open(ActiveApp.NETFLIX))
-    assert launcher.calls[0][0].endswith("chrome.exe")
-    assert "--start-maximized" in launcher.calls[0]
-    assert "--load-extension" not in " ".join(launcher.calls[0])
-    assert "chrome-tv-profile" not in " ".join(launcher.calls[0])
+    argv = launcher.calls[0]
+    assert argv[0].endswith("chrome.exe")
+    assert any(part.startswith("--app=") and "netflix.com" in part for part in argv)
+    assert "--start-fullscreen" in argv
+    assert "--new-window" not in argv
+    assert "--start-maximized" not in argv
+    assert any(part.startswith("--user-data-dir=") and "chrome-netflix-profile" in part for part in argv)
+    assert "--load-extension" not in " ".join(argv)
+    assert manager._adfilter.ports == []
 
 def test_missing_chrome_returns_chrome_not_found() -> None:
     with pytest.raises(CommandExecutionError) as error:
@@ -189,15 +197,16 @@ def test_search_youtube_opens_results_url() -> None:
     argv = launcher.calls[0]
     assert argv[0].endswith("chrome.exe")
     assert "--start-fullscreen" in argv
-    assert argv[-1] == "https://www.youtube.com/results?search_query=cat+videos"
+    assert argv[-1] == "https://www.youtube.com/tv#/search?q=cat+videos"
     assert manager.active_app is ActiveApp.YOUTUBE
+
 
 def test_search_youtube_replaces_an_existing_youtube_window() -> None:
     manager, launcher, _, _ = make_manager()
     asyncio.run(manager.open(ActiveApp.YOUTUBE))
     asyncio.run(manager.search_youtube("cat videos"))
     assert len(launcher.calls) == 2
-    assert launcher.calls[1][-1] == "https://www.youtube.com/results?search_query=cat+videos"
+    assert launcher.calls[1][-1] == "https://www.youtube.com/tv#/search?q=cat+videos"
     assert manager.active_app is ActiveApp.YOUTUBE
 
 

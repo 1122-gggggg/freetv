@@ -33,7 +33,7 @@ def test_load_settings_merges_defaults_with_local_overrides(tmp_path) -> None:
     assert settings.server.host == "0.0.0.0"
     assert settings.server.port == 9999
     assert settings.applications.brave_path == "C:/Tools/Brave/brave.exe"
-    assert settings.urls.youtube == "https://www.youtube.com/"
+    assert settings.urls.youtube == "https://www.youtube.com/tv"
     assert settings.urls.browser == "https://example.test/"
 
 

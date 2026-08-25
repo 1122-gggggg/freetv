@@ -30,7 +30,7 @@ class ApplicationSettings(BaseModel):
 class UrlSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    youtube: str = "https://www.youtube.com/"
+    youtube: str = "https://www.youtube.com/tv"
     netflix: str = "https://www.netflix.com/"
     browser: str = "https://www.google.com/"
 

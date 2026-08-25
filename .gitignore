@@ -22,6 +22,7 @@ config/edge-profile/
 config/chrome-launcher-profile/
 config/news.json
 config/chrome-tv-profile/
+config/chrome-netflix-profile/
 vendor/adblock/
 vendor/adblock-youtube/
 config/tunnel-origin.txt
