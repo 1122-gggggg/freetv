@@ -1,30 +1,65 @@
 [
   {
-    "id": "dw-news",
+    "id": "ftv-news",
     "number": 1,
-    "name": "DW News",
-    "url": "https://www.youtube.com/@dwnews/live",
+    "name": "民視新聞",
+    "url": "https://www.youtube.com/@FTV_News/live",
     "enabled": true
   },
   {
-    "id": "aljazeera-english",
+    "id": "ttv-news",
     "number": 2,
-    "name": "Al Jazeera English",
-    "url": "https://www.youtube.com/@aljazeeraenglish/live",
+    "name": "台視新聞",
+    "url": "https://www.youtube.com/@TTV_NEWS/live",
     "enabled": true
   },
   {
-    "id": "pbs-newshour",
+    "id": "ctv-news",
     "number": 3,
-    "name": "PBS NewsHour",
-    "url": "https://www.youtube.com/@pbsnewshour/live",
+    "name": "中視新聞",
+    "url": "https://www.youtube.com/@CTVNEWS/live",
     "enabled": true
   },
   {
-    "id": "france24-english",
+    "id": "cts-news",
     "number": 4,
-    "name": "France 24 English",
-    "url": "https://www.youtube.com/@FRANCE24English/live",
+    "name": "華視新聞",
+    "url": "https://www.youtube.com/@CtsTw/live",
+    "enabled": true
+  },
+  {
+    "id": "ebc-news",
+    "number": 5,
+    "name": "東森新聞",
+    "url": "https://www.youtube.com/@newsebc/live",
+    "enabled": true
+  },
+  {
+    "id": "set-news",
+    "number": 6,
+    "name": "三立新聞",
+    "url": "https://www.youtube.com/@setnews-ch54/live",
+    "enabled": true
+  },
+  {
+    "id": "tvbs-news",
+    "number": 7,
+    "name": "TVBS新聞",
+    "url": "https://www.youtube.com/@TVBSNEWS02/live",
+    "enabled": true
+  },
+  {
+    "id": "mnews",
+    "number": 8,
+    "name": "鏡新聞",
+    "url": "https://www.youtube.com/@mnews-tw/live",
+    "enabled": true
+  },
+  {
+    "id": "pts-news",
+    "number": 9,
+    "name": "公視新聞網",
+    "url": "https://www.youtube.com/@ptslivenews/live",
     "enabled": true
   }
 ]

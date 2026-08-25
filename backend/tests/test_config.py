@@ -88,3 +88,18 @@ def test_detect_capabilities_reports_chrome_availability(tmp_path) -> None:
 
     capabilities = detect_capabilities(settings)
     assert capabilities["chrome_available"] is True
+
+
+def test_resolve_application_paths_finds_winget_mpv(tmp_path, monkeypatch) -> None:
+    mpv_exe = tmp_path / "Microsoft" / "WinGet" / "Links" / "mpv.exe"
+    mpv_exe.parent.mkdir(parents=True)
+    mpv_exe.write_text("", encoding="utf-8")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
+    monkeypatch.setenv("ProgramFiles(x86)", str(tmp_path / "Program Files (x86)"))
+    monkeypatch.delenv("PATH", raising=False)
+
+    paths = resolve_application_paths(Settings())
+    assert paths["mpv"] == mpv_exe
+
+

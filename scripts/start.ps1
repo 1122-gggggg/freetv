@@ -144,6 +144,11 @@ try {
     throw "Could not read server settings from $SettingsSource. $_"
 }
 
+if (-not (Test-Path -LiteralPath $Python -PathType Leaf) -or -not (Test-VirtualEnvironmentPip -PythonPath $Python)) {
+    Write-Host 'This computer is missing a usable TV Box environment. Running setup...'
+    & (Join-Path $PSScriptRoot 'setup.ps1')
+    Assert-NativeSuccess 'Automatic appliance setup'
+}
 if (-not (Test-Path $Python)) { throw 'Python virtual environment was not found. Run .\scripts\setup.ps1 first.' }
 $BasePython = Resolve-PythonBaseExecutable -PythonPath $Python
 if (-not (Test-Path $FrontendIndex)) {

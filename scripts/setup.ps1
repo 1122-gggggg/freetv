@@ -70,29 +70,34 @@ $Transport = (Get-StartupSettings -Settings $RawSettings).Transport
 $MinimumPythonVersion = [version]'3.11'
 $VenvDirectory = Join-Path $Root '.venv'
 $VenvPython = Join-Path $Root '.venv\Scripts\python.exe'
+$NeedNewVenv = $false
 if (Test-Path -LiteralPath $VenvDirectory) {
-    if (-not (Test-Path -LiteralPath $VenvPython -PathType Leaf)) {
-        throw 'Existing .venv is incomplete and was not changed. Remove or rename .venv manually, then re-run setup.ps1.'
+    $ExistingVenvRuntime = $null
+    if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
+        $ExistingVenvRuntime = Get-PythonRuntimeProbe `
+            -Executable $VenvPython `
+            -DisplayName 'existing .venv Python'
     }
-    $ExistingVenvRuntime = Get-PythonRuntimeProbe `
-        -Executable $VenvPython `
-        -DisplayName 'existing .venv Python'
-    if ($null -eq $ExistingVenvRuntime) {
-        throw 'Existing .venv Python could not run and was not changed. Remove or rename .venv manually, then re-run setup.ps1.'
+    $VenvUsable = (
+        $null -ne $ExistingVenvRuntime -and
+        (Test-PythonVirtualEnvironmentRuntime `
+            -Runtime $ExistingVenvRuntime `
+            -ExpectedDirectory $VenvDirectory `
+            -MinimumVersion $MinimumPythonVersion) -and
+        (Test-VirtualEnvironmentPip -PythonPath $VenvPython)
+    )
+    if ($VenvUsable) {
+        Write-Host "Using existing .venv Python $($ExistingVenvRuntime.Version)."
+    } else {
+        $Moved = Move-UnusableProjectVenv -VenvDirectory $VenvDirectory
+        Write-Warning "Existing .venv is unusable. Moved it to $Moved and creating a new one."
+        $NeedNewVenv = $true
     }
-    if (-not (Test-PythonRuntimeVersion `
-        -VersionValue $ExistingVenvRuntime.Version `
-        -MinimumVersion $MinimumPythonVersion)) {
-        throw "Existing .venv uses Python $($ExistingVenvRuntime.Version), but Python 3.11 or newer is required. The environment was not changed; remove or rename .venv manually, then re-run setup.ps1."
-    }
-    if (-not (Test-PythonVirtualEnvironmentRuntime `
-        -Runtime $ExistingVenvRuntime `
-        -ExpectedDirectory $VenvDirectory `
-        -MinimumVersion $MinimumPythonVersion)) {
-        throw 'Existing .venv Python is not isolated to this project and was not changed. Remove or rename .venv manually, then re-run setup.ps1.'
-    }
-    Write-Host "Using existing .venv Python $($ExistingVenvRuntime.Version)."
 } else {
+    $NeedNewVenv = $true
+}
+
+if ($NeedNewVenv) {
     $RuntimeCandidates = @()
     $PathPython = Get-Command python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -ne $PathPython) {
@@ -107,6 +112,7 @@ if (Test-Path -LiteralPath $VenvDirectory) {
     $PyLauncher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -ne $PyLauncher) {
         $LauncherProbes = @(
+            [PSCustomObject]@{ DisplayName = 'py -3.12'; PrefixArguments = @('-3.12') },
             [PSCustomObject]@{ DisplayName = 'py -3.11'; PrefixArguments = @('-3.11') },
             [PSCustomObject]@{ DisplayName = 'py -3'; PrefixArguments = @('-3') }
         )
@@ -125,13 +131,30 @@ if (Test-Path -LiteralPath $VenvDirectory) {
         -Candidates $RuntimeCandidates `
         -MinimumVersion $MinimumPythonVersion
     if ($null -eq $SelectedRuntime) {
-        $DetectedRuntimes = @(
-            $RuntimeCandidates | ForEach-Object { "$($_.DisplayName): Python $($_.Version)" }
-        ) -join ', '
-        if ([string]::IsNullOrWhiteSpace($DetectedRuntimes)) {
-            $DetectedRuntimes = 'none'
+        Write-Host 'Python 3.11+ was not found. Installing Python 3.12...'
+        [void](Install-WingetPackage -PackageId 'Python.Python.3.12' -DisplayName 'Python 3.12')
+        Update-SessionPath
+        $PathPython = Get-Command python -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        $PyLauncher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        $RuntimeCandidates = @()
+        if ($null -ne $PathPython) {
+            $Candidate = Get-PythonRuntimeProbe -Executable $PathPython.Source -DisplayName 'python on PATH'
+            if ($null -ne $Candidate) {
+                $RuntimeCandidates += $Candidate
+            }
         }
-        throw "Python 3.11 or newer is required through 'python' on PATH or the Windows 'py' launcher; detected: $DetectedRuntimes. Install it from https://www.python.org/downloads/windows/."
+        if ($null -ne $PyLauncher) {
+            $Candidate = Get-PythonRuntimeProbe -Executable $PyLauncher.Source -PrefixArguments @('-3') -DisplayName 'py -3'
+            if ($null -ne $Candidate) {
+                $RuntimeCandidates += $Candidate
+            }
+        }
+        $SelectedRuntime = Select-PythonRuntimeCandidate `
+            -Candidates $RuntimeCandidates `
+            -MinimumVersion $MinimumPythonVersion
+    }
+    if ($null -eq $SelectedRuntime) {
+        throw "Python 3.11 or newer is required. Install it from https://www.python.org/downloads/windows/ or with: winget install Python.Python.3.12"
     }
 
     Write-Host "Creating Python virtual environment with $($SelectedRuntime.DisplayName) (Python $($SelectedRuntime.Version))..."
@@ -237,7 +260,21 @@ $EdgeCandidates = @(
 )
 $Chrome = Get-Command chrome.exe -ErrorAction SilentlyContinue
 $ChromeFound = if ($Chrome) { $Chrome.Source } else { $ChromeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+if (-not $ChromeFound) {
+    [void](Install-WingetPackage -PackageId 'Google.Chrome' -DisplayName 'Google Chrome')
+    $Chrome = Get-Command chrome.exe -ErrorAction SilentlyContinue
+    $ChromeFound = if ($Chrome) { $Chrome.Source } else { $ChromeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+}
 $Mpv = Get-Command mpv.exe -ErrorAction SilentlyContinue
+if (-not $Mpv) {
+    [void](Install-WingetPackage -PackageId 'shinchiro.mpv' -DisplayName 'mpv')
+    $Mpv = Get-Command mpv.exe -ErrorAction SilentlyContinue
+}
+$Cloudflared = Get-Command cloudflared -ErrorAction SilentlyContinue
+if (-not $Cloudflared) {
+    [void](Install-WingetPackage -PackageId 'Cloudflare.cloudflared' -DisplayName 'cloudflared')
+    $Cloudflared = Get-Command cloudflared -ErrorAction SilentlyContinue
+}
 $BraveFound = $BraveCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 $EdgeFound = $EdgeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
@@ -246,7 +283,6 @@ Write-Host 'External dependency check:'
 Write-Host ("  Chrome: {0}" -f $(if ($ChromeFound) { $ChromeFound } else { 'not found; install Google Chrome for YouTube & News' }))
 Write-Host ("  Brave:  {0}" -f $(if ($BraveFound) { $BraveFound } else { 'not found; configure applications.brave_path if installed elsewhere' }))
 Write-Host ("  Edge:   {0}" -f $(if ($EdgeFound) { $EdgeFound } else { 'not found; install Microsoft Edge' }))
-$Cloudflared = Get-Command cloudflared -ErrorAction SilentlyContinue
 if ($Cloudflared) {
     Write-Host "  cloudflared: $($Cloudflared.Source)"
 } else {
@@ -260,4 +296,4 @@ if ($Mpv) {
 }
 
 Write-Host ''
-Write-Host $(if ($Transport -eq 'https') { 'Setup complete. Trust the local CA on this Windows user and each phone, then start the TV controller with .\scripts\start.ps1' } else { 'Setup complete. Start the TV controller with .\scripts\start.ps1' })
+Write-Host $(if ($Transport -eq 'https') { 'Setup complete. Trust the local CA on this Windows user and each phone, then start with .\run.ps1' } else { 'Setup complete. Start the TV controller with .\run.ps1 or .\scripts\start.ps1' })

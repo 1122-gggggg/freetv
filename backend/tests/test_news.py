@@ -81,9 +81,19 @@ def test_news_loader_rejects_non_array_or_missing_or_malformed(tmp_path: Path) -
 def test_news_loader_loads_config_example_file() -> None:
     example_path = Path(__file__).resolve().parents[2] / "config" / "news.example.json"
     channels = load_news_channels(example_path)
-    assert len(channels) == 4
-    assert [c.id for c in channels] == ["dw-news", "aljazeera-english", "pbs-newshour", "france24-english"]
+    assert [c.id for c in channels] == [
+        "ftv-news",
+        "ttv-news",
+        "ctv-news",
+        "cts-news",
+        "ebc-news",
+        "set-news",
+        "tvbs-news",
+        "mnews",
+        "pts-news",
+    ]
     assert all(c.enabled for c in channels)
+    assert all(c.url.startswith("https://www.youtube.com/") and c.url.endswith("/live") for c in channels)
 
 def test_news_manager_wraps_channels(tmp_path: Path) -> None:
     path = tmp_path / "news.json"

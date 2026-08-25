@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,6 +66,7 @@ class FakeWindows:
     activated: list[int] = field(default_factory=list)
     brought_launcher_forward: int = 0
     closed_launcher: int = 0
+    closed_windows: list[int] = field(default_factory=list)
     titled_window: int | None = None
     window_for_pid: int | None = 900
     foreground_window: int | None = 900
@@ -105,6 +107,11 @@ class FakeWindows:
             return None
         self.activate(self.titled_window)
         return self.titled_window
+
+    def close_window(self, handle: int) -> None:
+        self.closed_windows.append(handle)
+
+
 @dataclass
 class FakeInput:
     commands: list[Command] = field(default_factory=list)
@@ -180,6 +187,8 @@ def test_youtube_uses_isolated_chrome_fullscreen_and_ad_filter(tmp_path: Path) -
     assert "--remote-debugging-port=9333" in argv
     assert argv[-1] == "https://www.youtube.com/tv"
     assert any(part.startswith("--user-agent=") and "SMART-TV" in part for part in argv)
+    assert "--hide-crash-restore-bubble" in argv
+    assert "--noerrdialogs" in argv
     assert manager._adfilter.ports == [9333]
 
 
@@ -194,7 +203,24 @@ def test_netflix_opens_chrome_app_fullscreen() -> None:
     assert "--start-maximized" not in argv
     assert any(part.startswith("--user-data-dir=") and "chrome-netflix-profile" in part for part in argv)
     assert "--load-extension" not in " ".join(argv)
+    assert "--hide-crash-restore-bubble" in argv
     assert manager._adfilter.ports == []
+
+def test_mark_chrome_profile_clean_exit_clears_crash_state(tmp_path: Path) -> None:
+    from app.applications.manager import mark_chrome_profile_clean_exit
+
+    prefs = tmp_path / "Default" / "Preferences"
+    prefs.parent.mkdir(parents=True)
+    prefs.write_text(
+        json.dumps({"profile": {"exit_type": "Crashed", "exited_cleanly": False}}),
+        encoding="utf-8",
+    )
+    mark_chrome_profile_clean_exit(tmp_path)
+    data = json.loads(prefs.read_text(encoding="utf-8"))
+    assert data["profile"]["exit_type"] == "Normal"
+    assert data["profile"]["exited_cleanly"] is True
+
+
 
 def test_opening_netflix_twice_reuses_the_same_window() -> None:
     manager, launcher, windows, _ = make_manager()
@@ -251,11 +277,13 @@ def test_leave_to_desktop_closes_youtube_and_launcher(tmp_path: Path) -> None:
         manager, launcher, windows, _ = make_manager(adblock_dir=_ready_adblock(tmp_path))
         await manager.open(ActiveApp.YOUTUBE)
         await manager.leave_to_desktop()
-        assert launcher.process.terminated
+        assert launcher.process.poll() is not None
+        assert windows.closed_windows == [900]
         assert windows.closed_launcher == 1
         assert manager.active_app is ActiveApp.LAUNCHER
 
     asyncio.run(scenario())
+
 
 
 
@@ -320,7 +348,7 @@ def test_shutdown_terminates_only_the_child_started_by_controller() -> None:
 
         await manager.shutdown()
 
-        assert launcher.process.terminated
+        assert launcher.process.poll() is not None
 
     import asyncio
 

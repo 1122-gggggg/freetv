@@ -130,6 +130,7 @@ def resolve_application_paths(settings: Settings) -> dict[str, Path | None]:
             (
                 program_files / "mpv" / "mpv.exe",
                 local_app_data / "Programs" / "mpv" / "mpv.exe",
+                local_app_data / "Microsoft" / "WinGet" / "Links" / "mpv.exe",
             ),
             "mpv.exe",
         ),

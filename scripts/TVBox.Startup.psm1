@@ -538,9 +538,10 @@ function Resolve-ChromeExecutable {
 
     $Candidates = @(
         'C:\Program Files\Google\Chrome\Application\chrome.exe',
-        'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe'
+        'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+        (Join-Path $env:LOCALAPPDATA 'Google\Chrome\Application\chrome.exe')
     )
-    return $Candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+    return $Candidates | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
 }
 
 function Get-LauncherUserDataDirectory {
@@ -568,6 +569,9 @@ function Get-ChromeLauncherKioskArguments {
         $Url,
         '--no-first-run',
         '--no-default-browser-check',
+        '--hide-crash-restore-bubble',
+        '--disable-session-crashed-bubble',
+        '--noerrdialogs',
         '--disable-extensions',
         '--disable-sync',
         "--user-data-dir=`"$UserDataDir`""
@@ -755,6 +759,85 @@ function Remove-AutostartTask {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
 }
 
+function Update-SessionPath {
+    [CmdletBinding()]
+    param()
+
+    $Parts = @(
+        [Environment]::GetEnvironmentVariable('Path', 'Machine'),
+        [Environment]::GetEnvironmentVariable('Path', 'User')
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    if ($Parts.Count -gt 0) {
+        $env:Path = [string]::Join(';', $Parts)
+    }
+}
+
+function Test-VirtualEnvironmentPip {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PythonPath
+    )
+
+    if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
+        return $false
+    }
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $PythonPath -m pip --version *> $null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
+}
+
+function Move-UnusableProjectVenv {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$VenvDirectory
+    )
+
+    if (-not (Test-Path -LiteralPath $VenvDirectory)) {
+        return $null
+    }
+    $DestinationName = "$(Split-Path -Leaf $VenvDirectory).broken-$(Get-Date -Format 'yyyyMMddHHmmss')"
+    Rename-Item -LiteralPath $VenvDirectory -NewName $DestinationName
+    return (Join-Path (Split-Path -Parent $VenvDirectory) $DestinationName)
+}
+
+function Install-WingetPackage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PackageId,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DisplayName
+    )
+
+    $Winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($null -eq $Winget) {
+        Write-Warning "$DisplayName is missing and winget was not found."
+        return $false
+    }
+    Write-Host "Installing $DisplayName..."
+    $PreviousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        & $Winget.Source install --id $PackageId --accept-package-agreements --accept-source-agreements --disable-interactivity
+        $Code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
+    Update-SessionPath
+    return ($Code -eq 0 -or $Code -eq -1978335189 -or $Code -eq -1978335212)
+}
+
+
 Export-ModuleMember -Function @(
     'Get-OptionalSetting',
     'Get-StartupSettings',
@@ -778,5 +861,9 @@ Export-ModuleMember -Function @(
     'New-AutostartTaskSettings',
     'Test-AutostartTaskOwnership',
     'Install-AutostartTask',
-    'Remove-AutostartTask'
+    'Remove-AutostartTask',
+    'Update-SessionPath',
+    'Test-VirtualEnvironmentPip',
+    'Move-UnusableProjectVenv',
+    'Install-WingetPackage'
 )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import subprocess
 from collections.abc import Callable, Mapping
@@ -21,6 +22,33 @@ YOUTUBE_TV_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "SamsungBrowser/5.0 Chrome/120.0.6099.0 TV Safari/537.36"
 )
+CHROME_RESTORE_SUPPRESS_ARGS = (
+    "--hide-crash-restore-bubble",
+    "--disable-session-crashed-bubble",
+    "--noerrdialogs",
+)
+
+
+def mark_chrome_profile_clean_exit(profile_dir: Path) -> None:
+    prefs_path = profile_dir / "Default" / "Preferences"
+    if not prefs_path.is_file():
+        return
+    try:
+        data = json.loads(prefs_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return
+    if not isinstance(data, dict):
+        return
+    profile = data.get("profile")
+    if not isinstance(profile, dict):
+        profile = {}
+        data["profile"] = profile
+    profile["exit_type"] = "Normal"
+    profile["exited_cleanly"] = True
+    prefs_path.write_text(
+        json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
 
 
 
@@ -46,6 +74,7 @@ class WindowController(Protocol):
     def bring_launcher_to_foreground(self) -> None: ...
     def close_launcher(self) -> None: ...
     def focus_window_with_title(self, title_fragment: str) -> int | None: ...
+    def close_window(self, handle: int) -> None: ...
 
 
 class CommandInputController(Protocol):
@@ -110,6 +139,7 @@ class ApplicationManager:
                 "chrome_not_found",
                 "未安裝或尚未設定 Chrome。請安裝 Chrome，或在 applications.chrome_path 指定路徑。",
             )
+        mark_chrome_profile_clean_exit(self._profile_dir)
         return [
             chrome.as_posix(),
             f"--user-data-dir={self._profile_dir}",
@@ -120,8 +150,10 @@ class ApplicationManager:
             "--no-first-run",
             "--no-default-browser-check",
             "--autoplay-policy=no-user-gesture-required",
+            *CHROME_RESTORE_SUPPRESS_ARGS,
             url,
         ]
+
     def _chrome_app_args(self, url: str, profile_dir: Path) -> list[str]:
         chrome = self._executables.get("chrome")
         if chrome is None:
@@ -129,6 +161,7 @@ class ApplicationManager:
                 "chrome_not_found",
                 "未安裝或尚未設定 Chrome。請安裝 Chrome，或在 applications.chrome_path 指定路徑。",
             )
+        mark_chrome_profile_clean_exit(profile_dir)
         return [
             chrome.as_posix(),
             f"--user-data-dir={profile_dir}",
@@ -136,6 +169,7 @@ class ApplicationManager:
             "--start-fullscreen",
             "--no-first-run",
             "--no-default-browser-check",
+            *CHROME_RESTORE_SUPPRESS_ARGS,
         ]
 
     async def open(self, app: ActiveApp) -> None:
@@ -237,6 +271,7 @@ class ApplicationManager:
         self._windows.close_launcher()
         self._active_app = ActiveApp.LAUNCHER
         log_event(logger, "returned_to_desktop")
+
     def _focus_existing(self, app: ActiveApp, title_fragment: str) -> bool:
         candidates = []
         if self._current is not None:
@@ -261,10 +296,11 @@ class ApplicationManager:
         tracked = self._current
         if tracked is None or tracked.app not in apps:
             return
-        await self._terminate_process(tracked.process)
+        await self._stop_tracked(tracked)
         if tracked in self._children:
             self._children.remove(tracked)
         self._current = None
+
 
     async def forward_command(self, command: Command) -> None:
         self.require_input_target(self._active_app)
@@ -317,7 +353,7 @@ class ApplicationManager:
     async def shutdown(self) -> None:
         remaining: list[TrackedApplication] = []
         for tracked in self._children:
-            if not await self._terminate_process(tracked.process):
+            if not await self._stop_tracked(tracked):
                 remaining.append(tracked)
         self._children = remaining
         self._current = None
@@ -346,6 +382,16 @@ class ApplicationManager:
         except OSError:
             return False
         return self._windows.window_belongs_to_process(tracked.window_handle, tracked.process.pid)
+
+    async def _stop_tracked(self, tracked: TrackedApplication) -> bool:
+        if tracked.window_handle is not None:
+            try:
+                self._windows.close_window(tracked.window_handle)
+                await asyncio.to_thread(tracked.process.wait, 2.0)
+                return True
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        return await self._terminate_process(tracked.process)
 
     @staticmethod
     async def _terminate_process(process: ChildProcess) -> bool:

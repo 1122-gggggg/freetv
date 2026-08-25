@@ -92,6 +92,10 @@ class WindowsWindowController:
         self.activate(handle)
         return handle
 
+    def close_window(self, handle: int) -> None:
+        self._require_windows()
+        ctypes.windll.user32.PostMessageW(wintypes.HWND(handle), 0x0010, 0, 0)
+
     def _window_handles_for_pid(self, pid: int) -> list[int]:
         handles: list[int] = []
 

@@ -276,6 +276,19 @@ Describe 'TVBox.Startup Module Tests' {
             (Select-PythonRuntimeCandidate -Candidates $Candidates).DisplayName | Should -Be 'python on PATH'
             Select-PythonRuntimeCandidate -Candidates $Invalid | Should -BeNullOrEmpty
         }
+
+        It 'moves an unusable project venv aside' {
+            $Venv = Join-Path $TestDrive 'venv-source'
+            New-Item -ItemType Directory -Path $Venv | Out-Null
+            New-Item -ItemType File -Path (Join-Path $Venv 'marker.txt') | Out-Null
+
+            $Moved = Move-UnusableProjectVenv -VenvDirectory $Venv
+
+            Test-Path -LiteralPath $Venv | Should -Be $false
+            Test-Path -LiteralPath $Moved | Should -Be $true
+            Test-Path -LiteralPath (Join-Path $Moved 'marker.txt') | Should -Be $true
+        }
+
     }
 
     Context 'Browser and pairing argument construction' {
@@ -287,6 +300,8 @@ Describe 'TVBox.Startup Module Tests' {
             $Arguments | Should -Contain $Url
             $Arguments | Should -Contain '--no-first-run'
             $Arguments | Should -Contain '--no-default-browser-check'
+            $Arguments | Should -Contain '--hide-crash-restore-bubble'
+            $Arguments | Should -Contain '--noerrdialogs'
             $Arguments | Should -Contain '--user-data-dir="C:\TV Box\config\chrome-launcher-profile"'
             $Arguments | Should -Contain '--disable-extensions'
             $Arguments | Should -Contain '--disable-sync'

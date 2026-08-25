@@ -38,6 +38,7 @@ try {
     Copy-Item (Join-Path $Root 'config\channels.example.json') (Join-Path $Stage 'config\')
     Copy-Item (Join-Path $Root 'config\news.example.json') (Join-Path $Stage 'config\')
     Copy-Item (Join-Path $Root 'README.md') $Stage
+    Copy-Item (Join-Path $Root 'run.ps1') $Stage
     Copy-Item (Join-Path $Root 'docs\*.md') (Join-Path $Stage 'docs\')
 
     Get-ChildItem -Path $Stage -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
