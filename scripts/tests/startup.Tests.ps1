@@ -419,4 +419,26 @@ Describe 'TVBox.Startup Module Tests' {
             Should -Invoke Unregister-ScheduledTask -ModuleName TVBox.Startup -Times 0 -Exactly
         }
     }
+
+    Context 'Optional winget installs' {
+        It 'normalizes an accepted winget result before returning to setup callers' {
+            $FakeWinget = Join-Path $TestDrive 'winget.cmd'
+            Set-Content -LiteralPath $FakeWinget -Encoding Ascii -Value @(
+                '@echo off'
+                'exit /b -1978335189'
+            )
+            Mock Get-Command -ModuleName TVBox.Startup {
+                [PSCustomObject]@{ Source = $FakeWinget }
+            } -ParameterFilter { $Name -eq 'winget' }
+
+            $global:LASTEXITCODE = 0
+            try {
+                Install-WingetPackage -PackageId 'fixture.package' -DisplayName 'fixture' |
+                    Should -Be $true
+                $global:LASTEXITCODE | Should -Be 0
+            } finally {
+                $global:LASTEXITCODE = 0
+            }
+        }
+    }
 }

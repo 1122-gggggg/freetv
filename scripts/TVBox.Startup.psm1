@@ -834,7 +834,9 @@ function Install-WingetPackage {
         $ErrorActionPreference = $PreviousErrorActionPreference
     }
     Update-SessionPath
-    return ($Code -eq 0 -or $Code -eq -1978335189 -or $Code -eq -1978335212)
+    $Succeeded = ($Code -eq 0 -or $Code -eq -1978335189 -or $Code -eq -1978335212)
+    $global:LASTEXITCODE = 0
+    return $Succeeded
 }
 
 
