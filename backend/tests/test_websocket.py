@@ -45,6 +45,9 @@ class FakeApplications:
     async def return_home(self) -> None:
         return None
 
+    async def leave_to_desktop(self) -> None:
+        return None
+
     async def forward_command(self, command: Command) -> None:
         return None
 

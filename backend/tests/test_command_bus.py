@@ -22,6 +22,7 @@ class FakeApplications:
     opened_news: list[str] = field(default_factory=list)
     searches: list[str] = field(default_factory=list)
     home_calls: int = 0
+    desktop_calls: int = 0
     forwarded: list[Command] = field(default_factory=list)
     input_targets: list[ActiveApp] = field(default_factory=list)
 
@@ -33,9 +34,11 @@ class FakeApplications:
     async def search_youtube(self, query: str) -> None:
         self.searches.append(query)
 
-
     async def return_home(self) -> None:
         self.home_calls += 1
+
+    async def leave_to_desktop(self) -> None:
+        self.desktop_calls += 1
 
     async def forward_command(self, command: Command) -> None:
         self.forwarded.append(command)
@@ -201,6 +204,20 @@ def test_home_returns_from_tracked_application_to_launcher() -> None:
         assert result.state.active_app is ActiveApp.LAUNCHER
 
     asyncio.run(scenario())
+
+def test_back_on_launcher_returns_to_desktop() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus()
+
+        result = await bus.dispatch_command(Command.BACK)
+
+        assert result.success
+        assert applications.desktop_calls == 1
+        assert result.state.status_message == "已回到桌面。"
+        assert result.state.active_app is ActiveApp.LAUNCHER
+
+    asyncio.run(scenario())
+
 
 
 def test_live_tv_channel_commands_publish_selected_channel() -> None:

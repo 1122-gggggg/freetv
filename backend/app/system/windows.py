@@ -50,6 +50,8 @@ class WindowsWindowController:
         window_handle = wintypes.HWND(handle)
         if user32.IsIconic(window_handle):
             user32.ShowWindow(window_handle, SW_RESTORE)
+        if hasattr(user32, "BringWindowToTop"):
+            user32.BringWindowToTop(window_handle)
         user32.SetForegroundWindow(window_handle)
 
     def is_foreground(self, handle: int) -> bool:
@@ -57,17 +59,30 @@ class WindowsWindowController:
         get_foreground_window = ctypes.windll.user32.GetForegroundWindow
         get_foreground_window.argtypes = ()
         get_foreground_window.restype = wintypes.HWND
-        current = get_foreground_window()
-        return int(current or 0) == handle
+        current = int(get_foreground_window() or 0)
+        if current == handle:
+            return True
+        if current == 0:
+            return False
+        target_pid = wintypes.DWORD()
+        current_pid = wintypes.DWORD()
+        ctypes.windll.user32.GetWindowThreadProcessId(handle, ctypes.byref(target_pid))
+        ctypes.windll.user32.GetWindowThreadProcessId(current, ctypes.byref(current_pid))
+        return bool(target_pid.value and target_pid.value == current_pid.value)
 
     def bring_launcher_to_foreground(self) -> None:
         self._require_windows()
         handle = self._window_handle_with_title("我的電視")
         if handle is None:
             return
-        user32 = ctypes.windll.user32
-        user32.ShowWindow(wintypes.HWND(handle), SW_RESTORE)
-        user32.SetForegroundWindow(wintypes.HWND(handle))
+        self.activate(handle)
+
+    def minimize_launcher(self) -> None:
+        self._require_windows()
+        handle = self._window_handle_with_title("我的電視")
+        if handle is None:
+            return
+        self.minimize(handle)
 
     def _window_handles_for_pid(self, pid: int) -> list[int]:
         handles: list[int] = []

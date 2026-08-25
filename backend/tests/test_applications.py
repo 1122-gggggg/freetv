@@ -52,6 +52,9 @@ class FakeLauncher:
         if self.fail_next_launch:
             self.fail_next_launch = False
             raise OSError("launch failed")
+        self.process.exit_code = None
+        self.process.terminated = False
+        self.process.killed = False
         return self.process
 
 
@@ -61,6 +64,7 @@ class FakeWindows:
     maximized: list[int] = field(default_factory=list)
     activated: list[int] = field(default_factory=list)
     brought_launcher_forward: int = 0
+    minimized_launcher: int = 0
     window_for_pid: int | None = 900
     foreground_window: int | None = 900
     allow_activation: bool = True
@@ -92,6 +96,9 @@ class FakeWindows:
 
     def bring_launcher_to_foreground(self) -> None:
         self.brought_launcher_forward += 1
+
+    def minimize_launcher(self) -> None:
+        self.minimized_launcher += 1
 
 
 @dataclass
@@ -163,6 +170,7 @@ def test_youtube_uses_isolated_chrome_kiosk_and_adblock(tmp_path: Path) -> None:
         for part in argv
     )
     assert "--start-maximized" not in argv
+    assert any(part.startswith("--user-agent=") and "SMART-TV" in part for part in argv)
     assert argv[-1] == "https://www.youtube.com/tv"
 
 def test_netflix_uses_chrome_without_adblock() -> None:
@@ -227,6 +235,28 @@ def test_search_youtube_opens_results_url(tmp_path: Path) -> None:
     assert "--kiosk" in argv
     assert argv[-1] == "https://www.youtube.com/tv#/search?q=cat+videos"
     assert manager.active_app is ActiveApp.YOUTUBE
+
+def test_search_youtube_replaces_an_existing_youtube_window(tmp_path: Path) -> None:
+    adblock = _ready_adblock(tmp_path)
+    manager, launcher, _, _ = make_manager(adblock_dir=adblock)
+    asyncio.run(manager.open(ActiveApp.YOUTUBE))
+    asyncio.run(manager.search_youtube("cat videos"))
+    assert len(launcher.calls) == 2
+    assert launcher.calls[1][-1] == "https://www.youtube.com/tv#/search?q=cat+videos"
+    assert manager.active_app is ActiveApp.YOUTUBE
+
+
+def test_leave_to_desktop_minimizes_launcher(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        manager, _, windows, _ = make_manager(adblock_dir=_ready_adblock(tmp_path))
+        await manager.open(ActiveApp.YOUTUBE)
+        await manager.leave_to_desktop()
+        assert windows.minimized == [900]
+        assert windows.minimized_launcher == 1
+        assert manager.active_app is ActiveApp.LAUNCHER
+
+    asyncio.run(scenario())
+
 
 
 def test_open_news_opens_kiosk_chrome_with_live_url(tmp_path: Path) -> None:

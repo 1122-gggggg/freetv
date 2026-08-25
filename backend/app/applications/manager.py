@@ -15,6 +15,12 @@ from app.logging import log_event
 from app.protocol import Command
 from app.state import ActiveApp
 
+YOUTUBE_TV_USER_AGENT = (
+    "Mozilla/5.0 (SMART-TV; Linux; Tizen 7.0) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "SamsungBrowser/5.0 Chrome/120.0.6099.0 TV Safari/537.36"
+)
+
 class ChildProcess(Protocol):
     pid: int
 
@@ -35,6 +41,7 @@ class WindowController(Protocol):
     def activate(self, handle: int) -> None: ...
     def is_foreground(self, handle: int) -> bool: ...
     def bring_launcher_to_foreground(self) -> None: ...
+    def minimize_launcher(self) -> None: ...
 
 
 class CommandInputController(Protocol):
@@ -104,6 +111,7 @@ class ApplicationManager:
             f"--disable-extensions-except={extension_paths}",
             f"--load-extension={extension_paths}",
             "--disable-features=DisableLoadExtensionCommandLineSwitch",
+            f"--user-agent={YOUTUBE_TV_USER_AGENT}",
             "--kiosk",
             "--no-first-run",
             "--no-default-browser-check",
@@ -118,6 +126,7 @@ class ApplicationManager:
             )
 
         if app is ActiveApp.YOUTUBE:
+            await self._close_current_if(ActiveApp.YOUTUBE, ActiveApp.NEWS)
             arguments = self._chrome_kiosk_args(self._settings.urls.youtube)
             await self._launch_and_track(app, arguments, "YouTube")
             return
@@ -133,10 +142,12 @@ class ApplicationManager:
         await self._launch_and_track(app, arguments, app_name)
 
     async def open_news(self, url: str) -> None:
+        await self._close_current_if(ActiveApp.YOUTUBE, ActiveApp.NEWS)
         arguments = self._chrome_kiosk_args(url)
         await self._launch_and_track(ActiveApp.NEWS, arguments, "新聞")
 
     async def search_youtube(self, query: str) -> None:
+        await self._close_current_if(ActiveApp.YOUTUBE, ActiveApp.NEWS)
         url = f"https://www.youtube.com/tv#/search?q={quote_plus(query)}"
         arguments = self._chrome_kiosk_args(url)
         await self._launch_and_track(ActiveApp.YOUTUBE, arguments, "YouTube")
@@ -186,6 +197,21 @@ class ApplicationManager:
         self._active_app = ActiveApp.LAUNCHER
         self._windows.bring_launcher_to_foreground()
         log_event(logger, "launcher_returned")
+
+    async def leave_to_desktop(self) -> None:
+        self._minimize_current_window()
+        self._active_app = ActiveApp.LAUNCHER
+        self._windows.minimize_launcher()
+        log_event(logger, "returned_to_desktop")
+
+    async def _close_current_if(self, *apps: ActiveApp) -> None:
+        tracked = self._current
+        if tracked is None or tracked.app not in apps:
+            return
+        await self._terminate_process(tracked.process)
+        if tracked in self._children:
+            self._children.remove(tracked)
+        self._current = None
 
     async def forward_command(self, command: Command) -> None:
         self.require_input_target(self._active_app)
