@@ -15,6 +15,7 @@ from app.config import Settings, project_root
 from app.logging import log_event
 from app.protocol import Command
 from app.state import ActiveApp
+from app.applications.chrome_page import ChromePageInput
 from app.applications.youtube_adfilter import YoutubeAdFilter, reserve_localhost_port
 
 YOUTUBE_TV_USER_AGENT = (
@@ -107,7 +108,9 @@ class ApplicationManager:
         profile_dir: Path | None = None,
         netflix_profile_dir: Path | None = None,
         adfilter: YoutubeAdFilter | None = None,
+        page_input: ChromePageInput | None = None,
         debug_port: int | None = None,
+        netflix_debug_port: int | None = None,
     ) -> None:
         self._settings = settings
         self._executables = dict(executable_paths)
@@ -123,10 +126,15 @@ class ApplicationManager:
             project_root() / "config" / "chrome-netflix-profile"
         )
         self._adfilter = adfilter or YoutubeAdFilter()
+        self._page_input = page_input or ChromePageInput()
         self._debug_port = debug_port if debug_port is not None else reserve_localhost_port()
+        self._netflix_debug_port = (
+            netflix_debug_port if netflix_debug_port is not None else reserve_localhost_port()
+        )
         self._active_app = ActiveApp.LAUNCHER
         self._current: TrackedApplication | None = None
         self._children: list[TrackedApplication] = []
+
 
     @property
     def active_app(self) -> ActiveApp:
@@ -166,11 +174,14 @@ class ApplicationManager:
             chrome.as_posix(),
             f"--user-data-dir={profile_dir}",
             "--start-fullscreen",
+            "--remote-debugging-address=127.0.0.1",
+            f"--remote-debugging-port={self._netflix_debug_port}",
             "--no-first-run",
             "--no-default-browser-check",
             *CHROME_RESTORE_SUPPRESS_ARGS,
             url,
         ]
+
 
     async def open(self, app: ActiveApp) -> None:
         if app not in {ActiveApp.YOUTUBE, ActiveApp.NETFLIX, ActiveApp.BROWSER}:
@@ -186,12 +197,17 @@ class ApplicationManager:
         if app is ActiveApp.NETFLIX:
             await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
             if self._focus_existing(ActiveApp.NETFLIX, "Netflix"):
-                return
+                if await self._page_input.ready(self._netflix_debug_port):
+                    await self._anchor_netflix_login()
+                    return
+                await self._close_apps(ActiveApp.NETFLIX)
             arguments = self._chrome_desktop_args(
                 self._settings.urls.netflix, self._netflix_profile_dir
             )
             await self._launch_and_track(app, arguments, "Netflix")
+            await self._anchor_netflix_login()
             return
+
 
         await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
         executable, url, app_name = self._launch_spec(app)
@@ -316,6 +332,22 @@ class ApplicationManager:
 
 
 
+    async def type_text(self, text: str) -> None:
+        self.require_input_target(self._active_app)
+        if self._active_app is ActiveApp.NETFLIX:
+            await self._page_input.type_text(self._netflix_debug_port, text)
+            return
+        raise CommandExecutionError(
+            "input_target_not_active",
+            "請先開啟 Netflix 再從遙控器輸入。",
+        )
+
+    async def _anchor_netflix_login(self) -> None:
+        try:
+            await self._page_input.focus_login_field(self._netflix_debug_port)
+        except Exception:
+            log_event(logger, "netflix_login_focus_failed", port=self._netflix_debug_port)
+
     async def forward_command(self, command: Command) -> None:
         self.require_input_target(self._active_app)
         if command is Command.BACK and self._active_app in {
@@ -324,7 +356,11 @@ class ApplicationManager:
         }:
             self._input.send_browser_back()
             return
+        if command is Command.TAB and self._active_app is ActiveApp.NETFLIX:
+            await self._page_input.focus_next_field(self._netflix_debug_port)
+            return
         self._input.send_command(command)
+
 
     def require_input_target(self, app: ActiveApp) -> None:
         if app not in {

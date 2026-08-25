@@ -133,6 +133,28 @@ class FakeInput:
 
 
 @dataclass
+class FakePageInput:
+    ready_result: bool = True
+    focused: list[int] = field(default_factory=list)
+    typed: list[tuple[int, str]] = field(default_factory=list)
+    tabs: list[int] = field(default_factory=list)
+
+    async def ready(self, port: int) -> bool:
+        return self.ready_result
+
+    async def focus_login_field(self, port: int) -> str | None:
+        self.focused.append(port)
+        return "email"
+
+    async def type_text(self, port: int, text: str) -> None:
+        self.typed.append((port, text))
+
+    async def focus_next_field(self, port: int) -> None:
+        self.tabs.append(port)
+
+
+
+@dataclass
 class FakeAdFilter:
     ports: list[int] = field(default_factory=list)
 
@@ -177,9 +199,12 @@ def make_manager(
         adblock_dir=adblock_dir,
         adblock_youtube_dir=adblock_youtube_dir,
         adfilter=FakeAdFilter(),
+        page_input=FakePageInput(),
         debug_port=9333,
+        netflix_debug_port=9444,
     )
     return manager, launcher, windows, input_controller
+
 
 def test_youtube_uses_isolated_chrome_fullscreen_and_ad_filter(tmp_path: Path) -> None:
     manager, launcher, windows, _ = make_manager()
@@ -211,9 +236,26 @@ def test_netflix_opens_desktop_chrome_fullscreen() -> None:
     assert "--new-window" not in argv
     assert "--start-maximized" not in argv
     assert any(part.startswith("--user-data-dir=") and "chrome-netflix-profile" in part for part in argv)
+    assert "--remote-debugging-address=127.0.0.1" in argv
+    assert "--remote-debugging-port=9444" in argv
     assert "--load-extension" not in " ".join(argv)
     assert "--hide-crash-restore-bubble" in argv
     assert manager._adfilter.ports == []
+    assert manager._page_input.focused == [9444]
+
+
+def test_netflix_remote_text_types_into_anchored_login_field() -> None:
+    async def scenario() -> None:
+        manager, _, _, input_controller = make_manager()
+        await manager.open(ActiveApp.NETFLIX)
+        await manager.type_text("user@example.com")
+        await manager.forward_command(Command.TAB)
+        assert manager._page_input.typed == [(9444, "user@example.com")]
+        assert manager._page_input.tabs == [9444]
+        assert input_controller.commands == []
+
+    asyncio.run(scenario())
+
 
 
 def test_mark_chrome_profile_clean_exit_clears_crash_state(tmp_path: Path) -> None:

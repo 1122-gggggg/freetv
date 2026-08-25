@@ -107,13 +107,18 @@ class CommandBus:
     async def dispatch_text(self, message: TextInputMessage) -> CommandOutcome:
         async with self._command_lock:
             try:
-                self._require_external_input_target(await self._state.snapshot())
-                await self._input.text(message.text)
+                current = await self._state.snapshot()
+                self._require_external_input_target(current)
+                if current.active_app is ActiveApp.NETFLIX:
+                    await self._applications.type_text(message.text)
+                else:
+                    await self._input.text(message.text)
                 return await self._passive_success()
             except CommandExecutionError as error:
                 return await self._failure(error)
             except Exception:
                 return await self._unknown_failure()
+
 
     async def dispatch_search(self, message: SearchVideoMessage) -> CommandOutcome:
         async with self._command_lock:

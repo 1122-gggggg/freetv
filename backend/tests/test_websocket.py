@@ -51,8 +51,12 @@ class FakeApplications:
     async def forward_command(self, command: Command) -> None:
         return None
 
+    async def type_text(self, text: str) -> None:
+        return None
+
     def require_input_target(self, app: ActiveApp) -> None:
         return None
+
 
     async def shutdown(self) -> None:
         return None

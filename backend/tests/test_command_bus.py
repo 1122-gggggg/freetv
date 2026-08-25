@@ -25,6 +25,7 @@ class FakeApplications:
     desktop_calls: int = 0
     forwarded: list[Command] = field(default_factory=list)
     input_targets: list[ActiveApp] = field(default_factory=list)
+    typed: list[str] = field(default_factory=list)
 
     async def open(self, app: ActiveApp) -> None:
         self.opened.append(app)
@@ -43,8 +44,12 @@ class FakeApplications:
     async def forward_command(self, command: Command) -> None:
         self.forwarded.append(command)
 
+    async def type_text(self, text: str) -> None:
+        self.typed.append(text)
+
     def require_input_target(self, app: ActiveApp) -> None:
         self.input_targets.append(app)
+
 
 
 @dataclass
@@ -341,6 +346,26 @@ def test_pointer_and_text_actions_use_bounded_protocol_messages() -> None:
         assert applications.input_targets == [ActiveApp.BROWSER, ActiveApp.BROWSER]
 
     asyncio.run(scenario())
+
+
+def test_netflix_text_is_typed_into_the_netflix_page() -> None:
+    async def scenario() -> None:
+        bus, applications, _, input_controller = make_bus()
+        await bus.dispatch_command(Command.OPEN_NETFLIX)
+        result = await bus.dispatch_text(
+            TextInputMessage(
+                version=1,
+                type="text_input",
+                request_id="text-netflix-1",
+                text="user@example.com",
+            )
+        )
+        assert result.success
+        assert applications.typed == ["user@example.com"]
+        assert input_controller.texts == []
+
+    asyncio.run(scenario())
+
 
 
 def test_external_navigation_is_forwarded_without_changing_active_application() -> None:
