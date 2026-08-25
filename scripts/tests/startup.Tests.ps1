@@ -279,18 +279,18 @@ Describe 'TVBox.Startup Module Tests' {
     }
 
     Context 'Browser and pairing argument construction' {
-        It 'constructs isolated Chrome kiosk arguments' {
+        It 'constructs isolated Chrome fullscreen arguments' {
             $Url = 'https://127.0.0.1:8765/tv'
             $Arguments = Get-ChromeLauncherKioskArguments -Url $Url -UserDataDir 'C:\TV Box\config\chrome-launcher-profile'
 
-            $Arguments | Should -Contain '--kiosk'
+            $Arguments | Should -Contain '--start-fullscreen'
             $Arguments | Should -Contain $Url
             $Arguments | Should -Contain '--no-first-run'
             $Arguments | Should -Contain '--no-default-browser-check'
             $Arguments | Should -Contain '--user-data-dir="C:\TV Box\config\chrome-launcher-profile"'
             $Arguments | Should -Contain '--disable-extensions'
             $Arguments | Should -Contain '--disable-sync'
-            $Arguments | Should -Not -Contain '--edge-kiosk-type=fullscreen'
+            $Arguments | Should -Not -Contain '--kiosk'
         }
 
         It 'keeps normal browser arguments separate and resolves the kiosk path' {
@@ -300,6 +300,7 @@ Describe 'TVBox.Startup Module Tests' {
             $Arguments | Should -Contain 'https://127.0.0.1:8765/tv'
             (-not ($Arguments -match '--user-data-dir')) | Should -Be $true
             (-not ($Arguments -match '--kiosk')) | Should -Be $true
+            (-not ($Arguments -match '--start-fullscreen')) | Should -Be $true
         }
 
         It 'uses the backend pairing URL and preserves fallback scheme' {

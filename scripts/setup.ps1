@@ -164,6 +164,8 @@ Push-Location (Join-Path $Root 'backend')
 try {
     & $VenvPython -m app.applications.adblock --directory $AdblockDirectory --youtube-directory $AdblockYoutubeDirectory
     Assert-NativeSuccess 'Installing AdBlock extensions'
+    & $VenvPython -m app.applications.chrome_policy
+    Assert-NativeSuccess 'Applying Chrome AdBlock policy'
 } finally {
     Pop-Location
 }

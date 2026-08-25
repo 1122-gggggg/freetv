@@ -245,9 +245,15 @@ class CommandBus:
                 return CommandOutcome(True, state)
             return await self._dispatch_command(target)
 
-        if command is Command.BACK and current.active_app is ActiveApp.LAUNCHER:
+        if command is Command.BACK:
             await self._applications.leave_to_desktop()
-            return CommandOutcome(True, await self._success_state(status_message="已回到桌面。"))
+            return CommandOutcome(
+                True,
+                await self._success_state(
+                    active_app=ActiveApp.LAUNCHER,
+                    status_message="已回到桌面。",
+                ),
+            )
 
         if command is Command.PLAY_PAUSE and current.active_app is ActiveApp.LIVE_TV:
             await self._player.toggle_pause()

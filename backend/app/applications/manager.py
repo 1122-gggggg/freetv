@@ -15,11 +15,7 @@ from app.logging import log_event
 from app.protocol import Command
 from app.state import ActiveApp
 
-YOUTUBE_TV_USER_AGENT = (
-    "Mozilla/5.0 (SMART-TV; Linux; Tizen 7.0) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "SamsungBrowser/5.0 Chrome/120.0.6099.0 TV Safari/537.36"
-)
+
 
 class ChildProcess(Protocol):
     pid: int
@@ -41,7 +37,7 @@ class WindowController(Protocol):
     def activate(self, handle: int) -> None: ...
     def is_foreground(self, handle: int) -> bool: ...
     def bring_launcher_to_foreground(self) -> None: ...
-    def minimize_launcher(self) -> None: ...
+    def close_launcher(self) -> None: ...
 
 
 class CommandInputController(Protocol):
@@ -111,8 +107,7 @@ class ApplicationManager:
             f"--disable-extensions-except={extension_paths}",
             f"--load-extension={extension_paths}",
             "--disable-features=DisableLoadExtensionCommandLineSwitch",
-            f"--user-agent={YOUTUBE_TV_USER_AGENT}",
-            "--kiosk",
+            "--start-fullscreen",
             "--no-first-run",
             "--no-default-browser-check",
             "--autoplay-policy=no-user-gesture-required",
@@ -148,7 +143,7 @@ class ApplicationManager:
 
     async def search_youtube(self, query: str) -> None:
         await self._close_current_if(ActiveApp.YOUTUBE, ActiveApp.NEWS)
-        url = f"https://www.youtube.com/tv#/search?q={quote_plus(query)}"
+        url = f"https://www.youtube.com/results?search_query={quote_plus(query)}"
         arguments = self._chrome_kiosk_args(url)
         await self._launch_and_track(ActiveApp.YOUTUBE, arguments, "YouTube")
 
@@ -199,9 +194,11 @@ class ApplicationManager:
         log_event(logger, "launcher_returned")
 
     async def leave_to_desktop(self) -> None:
-        self._minimize_current_window()
+        await self._close_current_if(
+            ActiveApp.YOUTUBE, ActiveApp.NEWS, ActiveApp.NETFLIX, ActiveApp.BROWSER
+        )
         self._active_app = ActiveApp.LAUNCHER
-        self._windows.minimize_launcher()
+        self._windows.close_launcher()
         log_event(logger, "returned_to_desktop")
 
     async def _close_current_if(self, *apps: ActiveApp) -> None:

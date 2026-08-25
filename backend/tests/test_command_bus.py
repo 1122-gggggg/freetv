@@ -219,6 +219,20 @@ def test_back_on_launcher_returns_to_desktop() -> None:
     asyncio.run(scenario())
 
 
+def test_back_from_youtube_returns_to_desktop() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus()
+        await bus.dispatch_command(Command.OPEN_YOUTUBE)
+
+        result = await bus.dispatch_command(Command.BACK)
+
+        assert result.success
+        assert applications.desktop_calls == 1
+        assert result.state.status_message == "已回到桌面。"
+        assert result.state.active_app is ActiveApp.LAUNCHER
+
+    asyncio.run(scenario())
+
 
 def test_live_tv_channel_commands_publish_selected_channel() -> None:
     async def scenario() -> None:

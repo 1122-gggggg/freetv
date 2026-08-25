@@ -77,12 +77,12 @@ class WindowsWindowController:
             return
         self.activate(handle)
 
-    def minimize_launcher(self) -> None:
+    def close_launcher(self) -> None:
         self._require_windows()
         handle = self._window_handle_with_title("我的電視")
         if handle is None:
             return
-        self.minimize(handle)
+        ctypes.windll.user32.PostMessageW(wintypes.HWND(handle), 0x0010, 0, 0)
 
     def _window_handles_for_pid(self, pid: int) -> list[int]:
         handles: list[int] = []

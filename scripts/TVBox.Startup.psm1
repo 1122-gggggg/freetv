@@ -564,7 +564,7 @@ function Get-ChromeLauncherKioskArguments {
     )
 
     return @(
-        '--kiosk',
+        '--start-fullscreen',
         $Url,
         '--no-first-run',
         '--no-default-browser-check',
