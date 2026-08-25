@@ -23,6 +23,7 @@ VK_LEFT = 0x25
 VK_RIGHT = 0x27
 VK_RETURN = 0x0D
 VK_ESCAPE = 0x1B
+VK_TAB = 0x09
 VK_MENU = 0x12
 VK_SPACE = 0x20
 VK_MEDIA_NEXT_TRACK = 0xB0
@@ -35,6 +36,7 @@ _COMMAND_KEYS: dict[Command, int] = {
     Command.NAV_RIGHT: VK_RIGHT,
     Command.OK: VK_RETURN,
     Command.BACK: VK_ESCAPE,
+    Command.TAB: VK_TAB,
     Command.PLAY_PAUSE: VK_SPACE,
     Command.NEXT: VK_MEDIA_NEXT_TRACK,
     Command.PREVIOUS: VK_MEDIA_PREV_TRACK,

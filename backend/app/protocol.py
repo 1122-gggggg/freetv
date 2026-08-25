@@ -21,6 +21,7 @@ class Command(StrEnum):
     NAV_RIGHT = "NAV_RIGHT"
     OK = "OK"
     BACK = "BACK"
+    TAB = "TAB"
     HOME = "HOME"
     PLAY_PAUSE = "PLAY_PAUSE"
     NEXT = "NEXT"

@@ -103,6 +103,25 @@ describe('RemotePage', () => {
     expect(socketMock.sendSearch).toHaveBeenCalledWith('cat videos')
   })
 
+  it('types into Netflix from the remote keyboard', () => {
+    render(
+      <RemotePage
+        token="paired-token-value-that-is-long-enough"
+        onPaired={vi.fn()}
+        onForget={vi.fn()}
+        onAuthenticationFailed={vi.fn()}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('遙控輸入'), { target: { value: 'user@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '送出' }))
+    expect(socketMock.sendText).toHaveBeenCalledWith('user@example.com')
+
+    fireEvent.click(screen.getByRole('button', { name: '下一欄' }))
+    expect(socketMock.sendCommand).toHaveBeenCalledWith('TAB')
+  })
+
+
   it('uses speech recognition when 語音 is clicked', async () => {
     interface FakeSpeechRecognitionEvent {
       results: { [index: number]: { [index: number]: { transcript: string } } }

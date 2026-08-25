@@ -7,6 +7,7 @@ export type Command =
   | 'NAV_RIGHT'
   | 'OK'
   | 'BACK'
+  | 'TAB'
   | 'HOME'
   | 'PLAY_PAUSE'
   | 'NEXT'

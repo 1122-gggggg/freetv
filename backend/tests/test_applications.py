@@ -200,19 +200,21 @@ def test_youtube_uses_isolated_chrome_fullscreen_and_ad_filter(tmp_path: Path) -
     assert manager._adfilter.ports == [9333]
 
 
-def test_netflix_opens_chrome_app_fullscreen() -> None:
+def test_netflix_opens_desktop_chrome_fullscreen() -> None:
     manager, launcher, windows, _ = make_manager()
     asyncio.run(manager.open(ActiveApp.NETFLIX))
     argv = launcher.calls[0]
     assert argv[0].endswith("chrome.exe")
-    assert any(part.startswith("--app=") and "netflix.com" in part for part in argv)
+    assert argv[-1] == "https://www.netflix.com/"
     assert "--start-fullscreen" in argv
+    assert "--app=" not in " ".join(argv)
     assert "--new-window" not in argv
     assert "--start-maximized" not in argv
     assert any(part.startswith("--user-data-dir=") and "chrome-netflix-profile" in part for part in argv)
     assert "--load-extension" not in " ".join(argv)
     assert "--hide-crash-restore-bubble" in argv
     assert manager._adfilter.ports == []
+
 
 def test_mark_chrome_profile_clean_exit_clears_crash_state(tmp_path: Path) -> None:
     from app.applications.manager import mark_chrome_profile_clean_exit
@@ -297,9 +299,11 @@ def test_opening_netflix_closes_playing_youtube() -> None:
         assert youtube.poll() is not None
         assert windows.closed_windows == [900]
         assert manager.active_app is ActiveApp.NETFLIX
-        assert any(part.startswith("--app=") and "netflix.com" in part for part in launcher.calls[1])
+        assert launcher.calls[1][-1] == "https://www.netflix.com/"
+        assert "--app=" not in " ".join(launcher.calls[1])
 
     asyncio.run(scenario())
+
 
 
 def test_home_closes_youtube_but_keeps_netflix() -> None:

@@ -154,7 +154,7 @@ class ApplicationManager:
             url,
         ]
 
-    def _chrome_app_args(self, url: str, profile_dir: Path) -> list[str]:
+    def _chrome_desktop_args(self, url: str, profile_dir: Path) -> list[str]:
         chrome = self._executables.get("chrome")
         if chrome is None:
             raise CommandExecutionError(
@@ -165,11 +165,11 @@ class ApplicationManager:
         return [
             chrome.as_posix(),
             f"--user-data-dir={profile_dir}",
-            f"--app={url}",
             "--start-fullscreen",
             "--no-first-run",
             "--no-default-browser-check",
             *CHROME_RESTORE_SUPPRESS_ARGS,
+            url,
         ]
 
     async def open(self, app: ActiveApp) -> None:
@@ -187,7 +187,7 @@ class ApplicationManager:
             await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
             if self._focus_existing(ActiveApp.NETFLIX, "Netflix"):
                 return
-            arguments = self._chrome_app_args(
+            arguments = self._chrome_desktop_args(
                 self._settings.urls.netflix, self._netflix_profile_dir
             )
             await self._launch_and_track(app, arguments, "Netflix")

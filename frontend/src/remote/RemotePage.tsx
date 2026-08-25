@@ -156,13 +156,22 @@ function PairingScreen({ onPaired }: Pick<RemotePageProps, 'onPaired'>): ReactEl
 }
 
 function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteControlProps): ReactElement {
-  const { status, state, lastAcknowledgement, lastError, sendCommand, sendSearch } = useControllerSocket('/ws/remote', token)
+  const { status, state, lastAcknowledgement, lastError, sendCommand, sendSearch, sendText } = useControllerSocket('/ws/remote', token)
   const [query, setQuery] = useState('')
+  const [typed, setTyped] = useState('')
+  const [hideSecret, setHideSecret] = useState(false)
   const [forgetError, setForgetError] = useState<string | null>(null)
   const [forgetting, setForgetting] = useState(false)
   const [listening, setListening] = useState(false)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const controlsDisabled = status !== 'connected'
+  const canTypeIntoApp =
+    state?.active_app === 'youtube' ||
+    state?.active_app === 'netflix' ||
+    state?.active_app === 'browser' ||
+    state?.active_app === 'news'
+
+
 
   const SpeechRecognitionAPI = getSpeechRecognition()
   const speechSupported = SpeechRecognitionAPI !== null
@@ -222,6 +231,13 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     if (controlsDisabled || trimmed.length === 0) return
     sendSearch(trimmed)
   }
+
+  const submitTyped = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (controlsDisabled || typed.length === 0) return
+    if (sendText(typed)) setTyped('')
+  }
+
 
   const forget = async () => {
     setForgetting(true)
@@ -290,6 +306,45 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         >
           {listening ? '聆聽中…' : '語音'}
         </button>
+      </section>
+
+      <section className="search-card" aria-labelledby="keyboard-title">
+        <p className="eyebrow">鍵盤</p>
+        <h2 id="keyboard-title">輸入帳號或密碼</h2>
+        <p className="remote-connection-note">
+          {canTypeIntoApp
+            ? '先點電視上的輸入欄，再從這裡打字送出。密碼不會被記住。'
+            : '先開啟 Netflix 或 YouTube，點選輸入欄，再從這裡輸入。'}
+        </p>
+        <form onSubmit={submitTyped}>
+          <input
+            aria-label="遙控輸入"
+            placeholder="電子郵件、密碼或驗證碼…"
+            disabled={controlsDisabled}
+            maxLength={256}
+            type={hideSecret ? 'password' : 'text'}
+            autoCapitalize="none"
+            autoCorrect="off"
+            autoComplete="off"
+            spellCheck={false}
+            value={typed}
+            onChange={(event) => setTyped(event.target.value.slice(0, 256))}
+          />
+          <button className="remote-button search-submit" disabled={controlsDisabled || typed.length === 0} type="submit">
+            送出
+          </button>
+        </form>
+        <div className="keyboard-actions">
+          <button
+            className="remote-button"
+            disabled={controlsDisabled}
+            type="button"
+            onClick={() => setHideSecret((current) => !current)}
+          >
+            {hideSecret ? '顯示文字' : '隱藏文字'}
+          </button>
+          <CommandButton command="TAB" label="下一欄" onCommand={command} disabled={controlsDisabled} />
+        </div>
       </section>
 
       <section className="search-card" aria-labelledby="search-title">

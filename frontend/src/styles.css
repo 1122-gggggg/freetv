@@ -251,12 +251,14 @@ button:focus-visible, input:focus-visible {
 }
 .search-submit {
   min-height: 3.5rem;
-  padding-inline: 1.25rem;
-  font-weight: 700;
-  border-color: #f7d488;
-  color: #1a1b20;
-  background: #f7d488;
 }
+.keyboard-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+  margin-top: 0.65rem;
+}
+
 .search-submit:disabled { opacity: 0.6; }
 .remote-feedback { min-height: 2.2rem; padding: 1.25rem 0; color: #cbd6e4; text-align: center; }
 
