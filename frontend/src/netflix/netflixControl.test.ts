@@ -348,6 +348,33 @@ describe('Netflix DOM control runtime', () => {
     expect(click).toHaveBeenCalledOnce()
   })
 
+  it('skips language selects when focusing the Netflix login text field', () => {
+    document.body.innerHTML = `
+      <select id="language" data-uia="language-picker-header"><option>中文</option></select>
+      <input id="email" type="email" aria-label="Email" data-uia="field-email">
+      <button data-uia="nmhp-card-cta+hero_card">Start</button>
+    `
+    const language = document.querySelector('#language') as HTMLSelectElement
+    const email = document.querySelector('#email') as HTMLInputElement
+    setRect(language, 20, 20)
+    setRect(email, 180, 20)
+    setRect(document.querySelector('button')!, 340, 20)
+
+    expect(runtime().run('FOCUS_PRIMARY', null)).toMatchObject({
+      ok: true,
+      status: 'focused',
+      focus: { role: 'textbox', uia: 'field-email' },
+    })
+    expect(document.activeElement).toBe(email)
+
+    document.body.focus()
+    expect(runtime().run('FOCUS_EDITABLE', null).focus).toMatchObject({
+      role: 'textbox',
+      uia: 'field-email',
+    })
+    expect(document.activeElement).toBe(email)
+  })
+
   it('focuses editable fields without reading value', () => {
     document.body.innerHTML = '<input id="secret" aria-label="Password" data-uia="password-field" type="password">'
     const input = document.querySelector('#secret') as HTMLInputElement

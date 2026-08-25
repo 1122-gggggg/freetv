@@ -103,6 +103,14 @@ class TrackedApplication:
 
 logger = logging.getLogger(__name__)
 _WINDOW_DISCOVERY_TIMEOUT_SECONDS = 10.0
+_NETFLIX_INITIALIZATION_ATTEMPTS = 20
+_NETFLIX_INITIALIZATION_TIMEOUT_SECONDS = 10.0
+_NETFLIX_INITIALIZATION_DELAY_SECONDS = 0.25
+_NETFLIX_INITIALIZATION_RETRY_CODES = {
+    "netflix_page_unavailable",
+    "netflix_controller_unavailable",
+    "netflix_focus_unavailable",
+}
 
 
 class ApplicationManager:
@@ -189,6 +197,7 @@ class ApplicationManager:
             f"--remote-debugging-port={self._netflix_debug_port}",
             "--no-first-run",
             "--no-default-browser-check",
+            "--disable-extensions",
             *CHROME_RESTORE_SUPPRESS_ARGS,
             url,
         ]
@@ -349,13 +358,30 @@ class ApplicationManager:
 
     async def _initialize_netflix(self, *, reused: bool) -> None:
         try:
-            await self._netflix_page.execute(
-                self._netflix_debug_port,
-                NetflixAction.FOCUS_PRIMARY,
-            )
+            async with asyncio.timeout(_NETFLIX_INITIALIZATION_TIMEOUT_SECONDS):
+                for attempt in range(_NETFLIX_INITIALIZATION_ATTEMPTS):
+                    try:
+                        await self._netflix_page.execute(
+                            self._netflix_debug_port,
+                            NetflixAction.FOCUS_PRIMARY,
+                        )
+                        return
+                    except CommandExecutionError as error:
+                        if (
+                            error.code not in _NETFLIX_INITIALIZATION_RETRY_CODES
+                            or attempt == _NETFLIX_INITIALIZATION_ATTEMPTS - 1
+                        ):
+                            raise
+                        await asyncio.sleep(_NETFLIX_INITIALIZATION_DELAY_SECONDS)
         except CommandExecutionError:
             await self._rollback_netflix_initialization(reused=reused)
             raise
+        except TimeoutError:
+            await self._rollback_netflix_initialization(reused=reused)
+            raise CommandExecutionError(
+                "netflix_controller_unavailable",
+                "無法載入 Netflix 遙控控制，請稍後再試。",
+            ) from None
         except Exception:
             await self._rollback_netflix_initialization(reused=reused)
             raise CommandExecutionError(
@@ -417,6 +443,8 @@ class ApplicationManager:
                 "input_target_unavailable",
                 "控制器管理的應用程式視窗目前無法接受遙控輸入。",
             )
+        if app is ActiveApp.NETFLIX:
+            return
         if not self._windows.is_foreground(tracked.window_handle):
             raise CommandExecutionError(
                 "input_target_not_foreground",
@@ -450,14 +478,26 @@ class ApplicationManager:
         self._windows.minimize(self._current.window_handle)
 
     def _tracked_window_is_owned(self, tracked: TrackedApplication) -> bool:
-        if tracked.window_handle is None:
-            return False
         try:
             if tracked.process.poll() is not None:
                 return False
         except OSError:
             return False
-        return self._windows.window_belongs_to_process(tracked.window_handle, tracked.process.pid)
+        if (
+            tracked.window_handle is not None
+            and self._windows.window_belongs_to_process(
+                tracked.window_handle,
+                tracked.process.pid,
+            )
+        ):
+            return True
+        replacement = self._windows.find_window_for_pid(tracked.process.pid, 0.0)
+        if replacement is None or replacement == tracked.window_handle:
+            return False
+        if not self._windows.window_belongs_to_process(replacement, tracked.process.pid):
+            return False
+        tracked.window_handle = replacement
+        return True
 
     async def _stop_tracked(self, tracked: TrackedApplication) -> bool:
         if tracked.window_handle is not None:

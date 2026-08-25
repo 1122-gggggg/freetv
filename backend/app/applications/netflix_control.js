@@ -162,7 +162,7 @@
 
   const editable = (element) => {
     if (!(element instanceof HTMLElement) || isDisabled(element)) return false
-    if (element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) return true
+    if (element instanceof HTMLTextAreaElement) return true
     if (element instanceof HTMLInputElement) {
       return !new Set(['button', 'checkbox', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']).has(
         element.type.toLowerCase(),
