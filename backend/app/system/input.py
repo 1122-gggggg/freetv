@@ -23,6 +23,7 @@ VK_LEFT = 0x25
 VK_RIGHT = 0x27
 VK_RETURN = 0x0D
 VK_ESCAPE = 0x1B
+VK_MENU = 0x12
 VK_SPACE = 0x20
 VK_MEDIA_NEXT_TRACK = 0xB0
 VK_MEDIA_PREV_TRACK = 0xB1
@@ -113,6 +114,15 @@ class WindowsInputController:
                 "這個操作不適用於目前的應用程式。",
             )
         self._send(self._key(virtual_key, 0, 0), self._key(virtual_key, 0, KEYEVENTF_KEYUP))
+
+    def send_browser_back(self) -> None:
+        self._require_windows()
+        self._send(
+            self._key(VK_MENU, 0, 0),
+            self._key(VK_LEFT, 0, 0),
+            self._key(VK_LEFT, 0, KEYEVENTF_KEYUP),
+            self._key(VK_MENU, 0, KEYEVENTF_KEYUP),
+        )
 
     @staticmethod
     def _mouse(dx: int, dy: int, mouse_data: int, flags: int) -> INPUT:

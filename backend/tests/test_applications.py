@@ -101,9 +101,13 @@ class FakeWindows:
 @dataclass
 class FakeInput:
     commands: list[Command] = field(default_factory=list)
+    browser_backs: int = 0
 
     def send_command(self, command: Command) -> None:
         self.commands.append(command)
+
+    def send_browser_back(self) -> None:
+        self.browser_backs += 1
 
 
 @dataclass
@@ -265,6 +269,18 @@ def test_forwarding_only_uses_fixed_command_mapping() -> None:
     import asyncio
 
     asyncio.run(scenario())
+
+def test_netflix_back_sends_browser_history_back() -> None:
+    async def scenario() -> None:
+        manager, _, windows, input_controller = make_manager()
+        await manager.open(ActiveApp.NETFLIX)
+        await manager.forward_command(Command.BACK)
+        assert input_controller.browser_backs == 1
+        assert input_controller.commands == []
+        assert windows.activated == [900]
+
+    asyncio.run(scenario())
+
 
 
 def test_shutdown_terminates_only_the_child_started_by_controller() -> None:

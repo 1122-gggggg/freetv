@@ -205,21 +205,21 @@ def test_home_returns_from_tracked_application_to_launcher() -> None:
 
     asyncio.run(scenario())
 
-def test_back_on_launcher_returns_to_desktop() -> None:
+def test_back_on_launcher_does_not_leave_desktop() -> None:
     async def scenario() -> None:
         bus, applications, _, _ = make_bus()
 
         result = await bus.dispatch_command(Command.BACK)
 
         assert result.success
-        assert applications.desktop_calls == 1
-        assert result.state.status_message == "已回到桌面。"
+        assert applications.desktop_calls == 0
+        assert applications.forwarded == []
         assert result.state.active_app is ActiveApp.LAUNCHER
 
     asyncio.run(scenario())
 
 
-def test_back_from_youtube_returns_to_desktop() -> None:
+def test_back_from_youtube_forwards_escape() -> None:
     async def scenario() -> None:
         bus, applications, _, _ = make_bus()
         await bus.dispatch_command(Command.OPEN_YOUTUBE)
@@ -227,11 +227,12 @@ def test_back_from_youtube_returns_to_desktop() -> None:
         result = await bus.dispatch_command(Command.BACK)
 
         assert result.success
-        assert applications.desktop_calls == 1
-        assert result.state.status_message == "已回到桌面。"
-        assert result.state.active_app is ActiveApp.LAUNCHER
+        assert applications.desktop_calls == 0
+        assert applications.forwarded == [Command.BACK]
+        assert result.state.active_app is ActiveApp.YOUTUBE
 
     asyncio.run(scenario())
+
 
 
 def test_live_tv_channel_commands_publish_selected_channel() -> None:

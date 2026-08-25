@@ -49,6 +49,7 @@ class WindowController(Protocol):
 
 class CommandInputController(Protocol):
     def send_command(self, command: Command) -> None: ...
+    def send_browser_back(self) -> None: ...
 
 
 @dataclass(slots=True)
@@ -247,6 +248,12 @@ class ApplicationManager:
 
     async def forward_command(self, command: Command) -> None:
         self.require_input_target(self._active_app)
+        if command is Command.BACK and self._active_app in {
+            ActiveApp.NETFLIX,
+            ActiveApp.BROWSER,
+        }:
+            self._input.send_browser_back()
+            return
         self._input.send_command(command)
 
     def require_input_target(self, app: ActiveApp) -> None:
