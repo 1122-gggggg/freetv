@@ -98,14 +98,20 @@ class FakeWindows:
 
     def close_launcher(self) -> None:
         self.closed_launcher += 1
-
-
 @dataclass
 class FakeInput:
     commands: list[Command] = field(default_factory=list)
 
     def send_command(self, command: Command) -> None:
         self.commands.append(command)
+
+
+@dataclass
+class FakeAdFilter:
+    ports: list[int] = field(default_factory=list)
+
+    async def attach(self, port: int) -> None:
+        self.ports.append(port)
 
 
 def _ready_adblock(tmp_path: Path) -> Path:
@@ -144,33 +150,25 @@ def make_manager(
         input_controller=input_controller,
         adblock_dir=adblock_dir,
         adblock_youtube_dir=adblock_youtube_dir,
+        adfilter=FakeAdFilter(),
+        debug_port=9333,
     )
     return manager, launcher, windows, input_controller
 
-
-def test_youtube_uses_isolated_chrome_kiosk_and_adblock(tmp_path: Path) -> None:
-    adblock = _ready_adblock(tmp_path)
-    youtube_adblock = tmp_path / "adblock-youtube"
-    manager, launcher, windows, _ = make_manager(adblock_dir=adblock)
+def test_youtube_uses_isolated_chrome_fullscreen_and_ad_filter(tmp_path: Path) -> None:
+    manager, launcher, windows, _ = make_manager()
     asyncio.run(manager.open(ActiveApp.YOUTUBE))
     argv = launcher.calls[0]
     assert argv[0].endswith("chrome.exe")
     assert "--start-fullscreen" in argv
     assert "--kiosk" not in argv
+    assert "--load-extension" not in " ".join(argv)
+    assert "--disable-extensions-except" not in " ".join(argv)
     assert any(part.startswith("--user-data-dir=") and "chrome-tv-profile" in part for part in argv)
-    load_extension = next(part for part in argv if part.startswith("--load-extension="))
-    disable_except = next(part for part in argv if part.startswith("--disable-extensions-except="))
-    loaded = load_extension.removeprefix("--load-extension=").split(",")
-    excepted = disable_except.removeprefix("--disable-extensions-except=").split(",")
-    assert loaded == [str(adblock), str(youtube_adblock)]
-    assert excepted == [str(adblock), str(youtube_adblock)]
-    assert any(
-        part.startswith("--disable-features=")
-        and "DisableLoadExtensionCommandLineSwitch" in part
-        for part in argv
-    )
-    assert "--start-maximized" not in argv
+    assert "--remote-debugging-address=127.0.0.1" in argv
+    assert "--remote-debugging-port=9333" in argv
     assert argv[-1] == "https://www.youtube.com/"
+    assert manager._adfilter.ports == [9333]
 def test_netflix_uses_chrome_without_adblock() -> None:
     manager, launcher, windows, _ = make_manager()
     asyncio.run(manager.open(ActiveApp.NETFLIX))
@@ -179,54 +177,14 @@ def test_netflix_uses_chrome_without_adblock() -> None:
     assert "--load-extension" not in " ".join(launcher.calls[0])
     assert "chrome-tv-profile" not in " ".join(launcher.calls[0])
 
-
-def test_missing_chrome_returns_chrome_not_found(tmp_path: Path) -> None:
-    adblock = _ready_adblock(tmp_path)
+def test_missing_chrome_returns_chrome_not_found() -> None:
     with pytest.raises(CommandExecutionError) as error:
-        asyncio.run(make_manager(chrome=None, adblock_dir=adblock)[0].open(ActiveApp.YOUTUBE))
+        asyncio.run(make_manager(chrome=None)[0].open(ActiveApp.YOUTUBE))
     assert error.value.code == "chrome_not_found"
 
 
-def test_missing_adblock_returns_adblock_not_installed() -> None:
-    with pytest.raises(CommandExecutionError) as error:
-        asyncio.run(make_manager(adblock_dir=Path("C:/missing-adblock"))[0].open(ActiveApp.YOUTUBE))
-    assert error.value.code == "adblock_not_installed"
-
-
-def test_default_adblock_dir_loads_vendor_adblock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    adblock = tmp_path / "vendor" / "adblock"
-    adblock.mkdir(parents=True)
-    (adblock / "manifest.json").write_text("{}", encoding="utf-8")
-    youtube_adblock = tmp_path / "vendor" / "adblock-youtube"
-    youtube_adblock.mkdir(parents=True)
-    (youtube_adblock / "manifest.json").write_text("{}", encoding="utf-8")
-    monkeypatch.setattr("app.applications.manager.project_root", lambda: tmp_path)
+def test_search_youtube_opens_results_url() -> None:
     manager, launcher, _, _ = make_manager()
-    asyncio.run(manager.open(ActiveApp.YOUTUBE))
-    argv = launcher.calls[0]
-    load_extension = next(part for part in argv if part.startswith("--load-extension="))
-    assert load_extension == f"--load-extension={adblock},{youtube_adblock}"
-    assert any(
-        part.startswith("--disable-features=")
-        and "DisableLoadExtensionCommandLineSwitch" in part
-        for part in argv
-    )
-
-
-def test_missing_default_adblock_dir_returns_adblock_not_installed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("app.applications.manager.project_root", lambda: tmp_path)
-    with pytest.raises(CommandExecutionError) as error:
-        asyncio.run(make_manager()[0].open(ActiveApp.YOUTUBE))
-    assert error.value.code == "adblock_not_installed"
-
-
-def test_search_youtube_opens_results_url(tmp_path: Path) -> None:
-    adblock = _ready_adblock(tmp_path)
-    manager, launcher, _, _ = make_manager(adblock_dir=adblock)
     asyncio.run(manager.search_youtube("cat videos"))
     argv = launcher.calls[0]
     assert argv[0].endswith("chrome.exe")
@@ -234,15 +192,15 @@ def test_search_youtube_opens_results_url(tmp_path: Path) -> None:
     assert argv[-1] == "https://www.youtube.com/results?search_query=cat+videos"
     assert manager.active_app is ActiveApp.YOUTUBE
 
-
-def test_search_youtube_replaces_an_existing_youtube_window(tmp_path: Path) -> None:
-    adblock = _ready_adblock(tmp_path)
-    manager, launcher, _, _ = make_manager(adblock_dir=adblock)
+def test_search_youtube_replaces_an_existing_youtube_window() -> None:
+    manager, launcher, _, _ = make_manager()
     asyncio.run(manager.open(ActiveApp.YOUTUBE))
     asyncio.run(manager.search_youtube("cat videos"))
     assert len(launcher.calls) == 2
     assert launcher.calls[1][-1] == "https://www.youtube.com/results?search_query=cat+videos"
     assert manager.active_app is ActiveApp.YOUTUBE
+
+
 
 
 def test_leave_to_desktop_closes_youtube_and_launcher(tmp_path: Path) -> None:
@@ -270,13 +228,7 @@ def test_open_news_opens_kiosk_chrome_with_live_url(tmp_path: Path) -> None:
     assert manager.active_app is ActiveApp.NEWS
 
 
-def test_missing_youtube_adblock_returns_adblock_not_installed(tmp_path: Path) -> None:
-    adblock = tmp_path / "adblock"
-    adblock.mkdir()
-    (adblock / "manifest.json").write_text("{}", encoding="utf-8")
-    with pytest.raises(CommandExecutionError) as error:
-        asyncio.run(make_manager(adblock_dir=adblock)[0].open(ActiveApp.YOUTUBE))
-    assert error.value.code == "adblock_not_installed"
+
 
 
 def test_home_minimizes_only_the_tracked_window_and_restores_launcher() -> None:

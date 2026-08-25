@@ -14,6 +14,7 @@ from app.config import Settings, project_root
 from app.logging import log_event
 from app.protocol import Command
 from app.state import ActiveApp
+from app.applications.youtube_adfilter import YoutubeAdFilter, reserve_localhost_port
 
 
 
@@ -67,6 +68,8 @@ class ApplicationManager:
         adblock_dir: Path | None = None,
         adblock_youtube_dir: Path | None = None,
         profile_dir: Path | None = None,
+        adfilter: YoutubeAdFilter | None = None,
+        debug_port: int | None = None,
     ) -> None:
         self._settings = settings
         self._executables = dict(executable_paths)
@@ -78,6 +81,8 @@ class ApplicationManager:
             self._adblock_dir.parent / "adblock-youtube"
         )
         self._profile_dir = profile_dir or (project_root() / "config" / "chrome-tv-profile")
+        self._adfilter = adfilter or YoutubeAdFilter()
+        self._debug_port = debug_port if debug_port is not None else reserve_localhost_port()
         self._active_app = ActiveApp.LAUNCHER
         self._current: TrackedApplication | None = None
         self._children: list[TrackedApplication] = []
@@ -93,21 +98,12 @@ class ApplicationManager:
                 "chrome_not_found",
                 "未安裝或尚未設定 Chrome。請安裝 Chrome，或在 applications.chrome_path 指定路徑。",
             )
-        if not (self._adblock_dir / "manifest.json").is_file() or not (
-            self._adblock_youtube_dir / "manifest.json"
-        ).is_file():
-            raise CommandExecutionError(
-                "adblock_not_installed",
-                "尚未安裝 AdBlock。請重新執行 setup.ps1。",
-            )
-        extension_paths = f"{self._adblock_dir},{self._adblock_youtube_dir}"
         return [
             chrome.as_posix(),
             f"--user-data-dir={self._profile_dir}",
-            f"--disable-extensions-except={extension_paths}",
-            f"--load-extension={extension_paths}",
-            "--disable-features=DisableLoadExtensionCommandLineSwitch",
             "--start-fullscreen",
+            "--remote-debugging-address=127.0.0.1",
+            f"--remote-debugging-port={self._debug_port}",
             "--no-first-run",
             "--no-default-browser-check",
             "--autoplay-policy=no-user-gesture-required",
@@ -186,6 +182,11 @@ class ApplicationManager:
         self._current = tracked
         self._active_app = app
         log_event(logger, "application_launched", app=app.value, process_id=process.pid)
+        if app in {ActiveApp.YOUTUBE, ActiveApp.NEWS}:
+            try:
+                await self._adfilter.attach(self._debug_port)
+            except Exception:
+                log_event(logger, "youtube_adfilter_failed", port=self._debug_port)
 
     async def return_home(self) -> None:
         self._minimize_current_window()
