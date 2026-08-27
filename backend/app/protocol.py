@@ -39,6 +39,39 @@ class Command(StrEnum):
     POWER_SLEEP = "POWER_SLEEP"
 
 
+
+class NetflixStage(StrEnum):
+    LOGIN = "login"
+    VERIFICATION = "verification"
+    BROWSE = "browse"
+    DETAILS = "details"
+    WATCH = "watch"
+    UNKNOWN = "unknown"
+
+
+class NetflixInputKind(StrEnum):
+    EMAIL = "email"
+    PASSWORD = "password"
+    CODE = "code"
+    SEARCH = "search"
+    NONE = "none"
+
+
+class NetflixContext(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    stage: NetflixStage
+    input_kind: NetflixInputKind
+    has_error: bool = Field(default=False, strict=True)
+    can_submit: bool = Field(default=False, strict=True)
+    focused_title: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def title_is_browse_only(self) -> NetflixContext:
+        if self.stage is not NetflixStage.BROWSE and self.focused_title is not None:
+            raise ValueError("focused_title is only valid during browse")
+        return self
+
 class PointerAction(StrEnum):
     MOVE = "move"
     TAP = "tap"
@@ -91,6 +124,7 @@ class TextInputMessage(WireModel):
     type: Literal["text_input"]
     request_id: str = Field(min_length=1, max_length=64, pattern=REQUEST_ID_PATTERN)
     text: str = Field(min_length=1, max_length=256)
+    submit: bool = Field(default=False, strict=True)
 
     @field_validator("text", mode="before")
     @classmethod
@@ -158,6 +192,7 @@ class StateMessage(WireModel):
     channel_name: str | None = Field(default=None, max_length=120)
     status_message: str | None = Field(default=None, max_length=256)
     error_message: str | None = Field(default=None, max_length=256)
+    netflix_context: NetflixContext | None = None
 
 
 def parse_client_message(payload: object) -> ClientMessage:

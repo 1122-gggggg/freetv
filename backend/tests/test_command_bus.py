@@ -3,17 +3,33 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
+import pytest
+
 from app.commands.bus import CommandBus
 from app.commands.ports import CommandExecutionError
 from app.player.channels import Channel
 from app.protocol import (
     Command,
+    NetflixContext,
+    NetflixInputKind,
+    NetflixStage,
     PointerAction,
     PointerActionMessage,
     SearchVideoMessage,
     TextInputMessage,
 )
 from app.state import ActiveApp, ControllerState, StateStore
+
+LOGIN_CONTEXT = NetflixContext(
+    stage=NetflixStage.LOGIN,
+    input_kind=NetflixInputKind.EMAIL,
+    can_submit=True,
+)
+BROWSE_CONTEXT = NetflixContext(
+    stage=NetflixStage.BROWSE,
+    input_kind=NetflixInputKind.NONE,
+    focused_title="Example",
+)
 
 
 @dataclass
@@ -25,11 +41,13 @@ class FakeApplications:
     desktop_calls: int = 0
     forwarded: list[Command] = field(default_factory=list)
     input_targets: list[ActiveApp] = field(default_factory=list)
-    typed: list[str] = field(default_factory=list)
+    typed: list[tuple[str, bool]] = field(default_factory=list)
+    next_context: NetflixContext | None = None
     failure: CommandExecutionError | None = None
 
-    async def open(self, app: ActiveApp) -> None:
+    async def open(self, app: ActiveApp) -> NetflixContext | None:
         self.opened.append(app)
+        return self.next_context
     async def open_news(self, url: str) -> None:
         self.opened_news.append(url)
 
@@ -42,15 +60,19 @@ class FakeApplications:
     async def leave_to_desktop(self) -> None:
         self.desktop_calls += 1
 
-    async def forward_command(self, command: Command) -> None:
+    async def forward_command(self, command: Command) -> NetflixContext | None:
         if self.failure is not None:
             raise self.failure
         self.forwarded.append(command)
+        return self.next_context
 
-    async def type_text(self, text: str) -> None:
+    async def type_text(
+        self, text: str, submit: bool = False
+    ) -> NetflixContext | None:
         if self.failure is not None:
             raise self.failure
-        self.typed.append(text)
+        self.typed.append((text, submit))
+        return self.next_context
 
     def require_input_target(self, app: ActiveApp) -> None:
         self.input_targets.append(app)
@@ -63,16 +85,17 @@ class BlockingApplications(FakeApplications):
     release_open: asyncio.Event = field(default_factory=asyncio.Event)
     open_calls: int = 0
 
-    async def open(self, app: ActiveApp) -> None:
+    async def open(self, app: ActiveApp) -> NetflixContext | None:
         self.open_calls += 1
         if self.open_calls == 1:
             self.open_started.set()
             await self.release_open.wait()
         self.opened.append(app)
+        return self.next_context
 
 
 class RejectingApplications(FakeApplications):
-    async def open(self, app: ActiveApp) -> None:
+    async def open(self, app: ActiveApp) -> NetflixContext | None:
         raise CommandExecutionError("application_not_found", "Configured browser is unavailable.")
 
 
@@ -174,12 +197,14 @@ class FakeNews:
 
 def make_bus(
     news: FakeNews | None = None,
+    *,
+    initial: ControllerState | None = None,
 ) -> tuple[CommandBus, FakeApplications, FakePlayer, FakeInput]:
     applications = FakeApplications()
     player = FakePlayer()
     input_controller = FakeInput()
     bus = CommandBus(
-        StateStore(ControllerState()),
+        StateStore(initial or ControllerState()),
         applications=applications,
         player=player,
         volume=FakeVolume(),
@@ -368,7 +393,7 @@ def test_netflix_text_is_typed_into_the_netflix_page() -> None:
             )
         )
         assert result.success
-        assert applications.typed == ["user@example.com"]
+        assert applications.typed == [("user@example.com", False)]
         assert input_controller.texts == []
 
     asyncio.run(scenario())
@@ -398,10 +423,10 @@ def test_netflix_commands_and_text_use_only_application_port() -> None:
             )
         )
 
-        assert all(outcome.success and not outcome.state_changed for outcome in outcomes)
-        assert text.success and not text.state_changed
+        assert all(outcome.success and outcome.state_changed for outcome in outcomes)
+        assert text.success and text.state_changed
         assert applications.forwarded == commands
-        assert applications.typed == ["x" * 256]
+        assert applications.typed == [("x" * 256, False)]
         assert input_controller.texts == []
 
     asyncio.run(scenario())
@@ -437,6 +462,143 @@ def test_netflix_error_becomes_failed_ack_without_active_app_change() -> None:
 
     asyncio.run(scenario())
 
+
+
+def test_command_bus_alone_owns_netflix_context_and_clears_home() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus()
+        applications.next_context = LOGIN_CONTEXT
+
+        opened = await bus.dispatch_command(Command.OPEN_NETFLIX)
+        assert opened.state.netflix_context == LOGIN_CONTEXT
+        assert opened.state_changed
+
+        applications.next_context = BROWSE_CONTEXT
+        moved = await bus.dispatch_command(Command.NAV_RIGHT)
+        assert moved.state.netflix_context == BROWSE_CONTEXT
+        assert moved.state_changed
+
+        home = await bus.dispatch_command(Command.HOME)
+        assert home.state.netflix_context is None
+        assert home.state_changed
+
+    asyncio.run(scenario())
+
+
+def test_command_bus_forwards_submit_once_and_stores_only_returned_context() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus(
+            initial=ControllerState(active_app=ActiveApp.NETFLIX)
+        )
+        applications.next_context = LOGIN_CONTEXT
+        outcome = await bus.dispatch_text(
+            TextInputMessage(
+                version=1,
+                type="text_input",
+                request_id="text-submit",
+                text="secret",
+                submit=True,
+            )
+        )
+
+        assert applications.typed == [("secret", True)]
+        assert outcome.state.netflix_context == LOGIN_CONTEXT
+        assert outcome.state_changed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        Command.OPEN_YOUTUBE,
+        Command.OPEN_NEWS,
+        Command.OPEN_LIVE_TV,
+        Command.OPEN_BROWSER,
+    ],
+)
+def test_non_netflix_open_commands_clear_existing_context(command: Command) -> None:
+    async def scenario() -> None:
+        bus, _, _, _ = make_bus(
+            initial=ControllerState(
+                active_app=ActiveApp.NETFLIX,
+                netflix_context=LOGIN_CONTEXT,
+            )
+        )
+        outcome = await bus.dispatch_command(command)
+        assert outcome.success
+        assert outcome.state.netflix_context is None
+        assert outcome.state_changed
+
+    asyncio.run(scenario())
+
+
+def test_youtube_search_clears_existing_netflix_context() -> None:
+    async def scenario() -> None:
+        bus, _, _, _ = make_bus(
+            initial=ControllerState(
+                active_app=ActiveApp.NETFLIX,
+                netflix_context=LOGIN_CONTEXT,
+            )
+        )
+        outcome = await bus.dispatch_search(
+            SearchVideoMessage(
+                version=1,
+                type="search_video",
+                request_id="search-clear-context",
+                query="cats",
+            )
+        )
+        assert outcome.success
+        assert outcome.state.netflix_context is None
+
+    asyncio.run(scenario())
+
+
+def test_failed_netflix_command_clears_stale_context() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus(
+            initial=ControllerState(
+                active_app=ActiveApp.NETFLIX,
+                netflix_context=LOGIN_CONTEXT,
+            )
+        )
+        applications.failure = CommandExecutionError(
+            "netflix_controller_unavailable",
+            "Netflix unavailable",
+        )
+        outcome = await bus.dispatch_command(Command.OK)
+        assert not outcome.success
+        assert outcome.state.netflix_context is None
+
+    asyncio.run(scenario())
+
+
+def test_failed_live_tv_transition_rollback_clears_context() -> None:
+    async def scenario() -> None:
+        applications = RejectingApplications()
+        bus = CommandBus(
+            StateStore(
+                ControllerState(
+                    active_app=ActiveApp.LIVE_TV,
+                    netflix_context=LOGIN_CONTEXT,
+                )
+            ),
+            applications=applications,
+            player=FakePlayer(),
+            volume=FakeVolume(),
+            input_controller=FakeInput(),
+            power=FakePower(),
+            news=FakeNews(),
+        )
+
+        outcome = await bus.dispatch_command(Command.OPEN_BROWSER)
+        assert not outcome.success
+        assert outcome.state.active_app is ActiveApp.LAUNCHER
+        assert outcome.state.netflix_context is None
+        assert applications.home_calls == 1
+
+    asyncio.run(scenario())
 
 
 def test_external_navigation_is_forwarded_without_changing_active_application() -> None:

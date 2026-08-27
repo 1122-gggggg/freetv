@@ -25,6 +25,18 @@ export type Command =
 
 export type PointerAction = 'move' | 'tap' | 'double_tap' | 'scroll'
 
+export type NetflixStage = 'login' | 'verification' | 'browse' | 'details' | 'watch' | 'unknown'
+
+export type NetflixInputKind = 'email' | 'password' | 'code' | 'search' | 'none'
+
+export interface NetflixContext {
+  stage: NetflixStage
+  input_kind: NetflixInputKind
+  has_error: boolean
+  can_submit: boolean
+  focused_title: string | null
+}
+
 export interface ControllerState {
   version: 1
   type: 'state'
@@ -36,6 +48,7 @@ export interface ControllerState {
   channel_name: string | null
   status_message: string | null
   error_message: string | null
+  netflix_context: NetflixContext | null
 }
 
 export interface Acknowledgement {
@@ -84,6 +97,7 @@ export interface TextInputMessage {
   type: 'text_input'
   request_id: string
   text: string
+  submit?: boolean
 }
 
 export type ClientMessage = CommandMessage | AuthenticationMessage | PointerMessage | TextInputMessage

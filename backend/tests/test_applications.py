@@ -13,7 +13,7 @@ from app.applications.manager import ApplicationManager
 from app.applications.netflix_page import NetflixAction
 from app.commands.ports import CommandExecutionError
 from app.config import ApplicationSettings, Settings, UrlSettings
-from app.protocol import Command
+from app.protocol import Command, NetflixContext, NetflixInputKind, NetflixStage
 from app.state import ActiveApp
 
 
@@ -261,6 +261,8 @@ def test_youtube_uses_isolated_chrome_fullscreen_and_ad_filter(tmp_path: Path) -
 def test_netflix_chrome_launches_as_standalone_app_window_without_positional_url() -> None:
     manager, launcher, _, _ = make_manager()
     asyncio.run(manager.open(ActiveApp.NETFLIX))
+
+
     argv = launcher.calls[0]
     netflix_url = manager._settings.urls.netflix
     expected_app_arg = f"--app={netflix_url}"
@@ -284,6 +286,23 @@ def test_netflix_chrome_launches_as_standalone_app_window_without_positional_url
     assert "--start-maximized" not in argv
     assert manager._adfilter.ports == []
     assert manager._netflix_page.actions == [(9444, NetflixAction.FOCUS_PRIMARY)]
+def test_manager_returns_safe_unknown_netflix_context_until_runtime_support() -> None:
+    async def scenario() -> None:
+        expected = NetflixContext(
+            stage=NetflixStage.UNKNOWN,
+            input_kind=NetflixInputKind.NONE,
+        )
+        manager, _, _, _ = make_manager()
+
+        opened = await manager.open(ActiveApp.NETFLIX)
+        typed = await manager.type_text("secret", submit=True)
+        forwarded = await manager.forward_command(Command.NAV_RIGHT)
+
+        assert opened == expected
+        assert typed == expected
+        assert forwarded == expected
+
+    asyncio.run(scenario())
 
 
 def test_youtube_and_news_kiosk_args_do_not_contain_app_flag() -> None:

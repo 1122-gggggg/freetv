@@ -79,12 +79,17 @@ class CommandBus:
             try:
                 return await self._dispatch_command(command)
             except CommandExecutionError as error:
-                state = await self._state.update(error_message=error.message, status_message=None)
+                state = await self._state.update(
+                    netflix_context=None,
+                    error_message=error.message,
+                    status_message=None,
+                )
                 return CommandOutcome(False, state, error.code, error.message)
             except Exception:
                 state = await self._state.update(
                     error_message="控制器無法完成這個操作。",
                     status_message=None,
+                    netflix_context=None,
                 )
                 return CommandOutcome(
                     False,
@@ -110,9 +115,17 @@ class CommandBus:
                 current = await self._state.snapshot()
                 self._require_external_input_target(current)
                 if current.active_app is ActiveApp.NETFLIX:
-                    await self._applications.type_text(message.text)
-                else:
-                    await self._input.text(message.text)
+                    context = await self._applications.type_text(
+                        message.text,
+                        submit=message.submit,
+                    )
+                    state = await self._state.update(
+                        netflix_context=context,
+                        error_message=None,
+                        status_message=None,
+                    )
+                    return CommandOutcome(True, state)
+                await self._input.text(message.text)
                 return await self._passive_success()
             except CommandExecutionError as error:
                 return await self._failure(error)
@@ -135,6 +148,7 @@ class CommandBus:
                             channel_number=None,
                             channel_name=None,
                             status_message=None,
+                            netflix_context=None,
                         )
                         raise
                 else:
@@ -143,6 +157,7 @@ class CommandBus:
                     active_app=ActiveApp.YOUTUBE,
                     channel_number=None,
                     channel_name=None,
+                    netflix_context=None,
                     error_message=None,
                     status_message=None,
                 )
@@ -165,6 +180,7 @@ class CommandBus:
                 active_app=ActiveApp.LAUNCHER,
                 channel_number=None,
                 channel_name=None,
+                netflix_context=None,
                 error_message=None,
                 status_message=None,
             )
@@ -177,25 +193,28 @@ class CommandBus:
 
         if command in _LAUNCH_TARGETS:
             target = _LAUNCH_TARGETS[command]
+            context = None
             if current.active_app is ActiveApp.LIVE_TV:
                 await self._player.close()
                 try:
-                    await self._applications.open(target)
+                    context = await self._applications.open(target)
                 except Exception:
                     await self._applications.return_home()
                     await self._state.update(
                         active_app=ActiveApp.LAUNCHER,
                         channel_number=None,
                         channel_name=None,
+                        netflix_context=None,
                         status_message=None,
                     )
                     raise
             else:
-                await self._applications.open(target)
+                context = await self._applications.open(target)
             state = await self._state.update(
-                active_app=_LAUNCH_TARGETS[command],
+                active_app=target,
                 channel_number=None,
                 channel_name=None,
+                netflix_context=context if target is ActiveApp.NETFLIX else None,
                 error_message=None,
                 status_message=None,
             )
@@ -207,6 +226,7 @@ class CommandBus:
                 active_app=ActiveApp.LIVE_TV,
                 channel_number=channel_number,
                 channel_name=channel_name,
+                netflix_context=None,
                 error_message=None,
                 status_message=None,
             )
@@ -223,6 +243,7 @@ class CommandBus:
                         active_app=ActiveApp.LAUNCHER,
                         channel_number=None,
                         channel_name=None,
+                        netflix_context=None,
                         status_message=None,
                     )
                     raise
@@ -232,6 +253,7 @@ class CommandBus:
                 active_app=ActiveApp.NEWS,
                 channel_number=channel.number,
                 channel_name=channel.name,
+                netflix_context=None,
                 error_message=None,
                 status_message=None,
             )
@@ -273,6 +295,7 @@ class CommandBus:
                 state = await self._state.update(
                     channel_number=channel.number,
                     channel_name=channel.name,
+                    netflix_context=None,
                     error_message=None,
                     status_message=None,
                 )
@@ -282,6 +305,7 @@ class CommandBus:
                 state = await self._state.update(
                     channel_number=channel_number,
                     channel_name=channel_name,
+                    netflix_context=None,
                     error_message=None,
                     status_message=None,
                 )
@@ -307,7 +331,14 @@ class CommandBus:
             ActiveApp.BROWSER,
             ActiveApp.NEWS,
         }:
-            await self._applications.forward_command(command)
+            context = await self._applications.forward_command(command)
+            if current.active_app is ActiveApp.NETFLIX:
+                state = await self._state.update(
+                    netflix_context=context,
+                    error_message=None,
+                    status_message=None,
+                )
+                return CommandOutcome(True, state)
             return await self._passive_success()
         raise CommandExecutionError(
             "command_not_supported", "目前應用程式不支援這個操作。"
@@ -321,13 +352,23 @@ class CommandBus:
                 ActiveApp.BROWSER,
                 ActiveApp.NEWS,
             }:
-                await self._applications.forward_command(command)
+                context = await self._applications.forward_command(command)
+                if current.active_app is ActiveApp.NETFLIX:
+                    state = await self._state.update(
+                        netflix_context=context,
+                        error_message=None,
+                        status_message=None,
+                    )
+                    return CommandOutcome(True, state)
                 return await self._passive_success()
             raise CommandExecutionError(
                 "command_not_supported", "目前應用程式不支援這個操作。"
             )
 
-        focused_tile = _FOCUS_TRANSITIONS.get((current.focused_tile, command), current.focused_tile)
+        focused_tile = _FOCUS_TRANSITIONS.get(
+            (current.focused_tile, command),
+            current.focused_tile,
+        )
         state = await self._success_state(focused_tile=focused_tile)
         return CommandOutcome(True, state)
 
@@ -354,10 +395,18 @@ class CommandBus:
         return CommandOutcome(True, state, state_changed=False)
 
     async def _failure(self, error: CommandExecutionError) -> CommandOutcome:
-        state = await self._state.update(error_message=error.message, status_message=None)
+        state = await self._state.update(
+            netflix_context=None,
+            error_message=error.message,
+            status_message=None,
+        )
         return CommandOutcome(False, state, error.code, error.message)
 
     async def _unknown_failure(self) -> CommandOutcome:
         message = "控制器無法完成這個操作。"
-        state = await self._state.update(error_message=message, status_message=None)
+        state = await self._state.update(
+            netflix_context=None,
+            error_message=message,
+            status_message=None,
+        )
         return CommandOutcome(False, state, "controller_error", message)

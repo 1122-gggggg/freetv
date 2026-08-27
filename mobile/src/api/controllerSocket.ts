@@ -110,13 +110,14 @@ export class ControllerSocket {
     this.sendPointerDirect(action, sanitizedDx, sanitizedDy)
   }
 
-  public sendTextInput(text: string): Promise<Acknowledgement> {
+  public sendTextInput(text: string, submit = false): Promise<Acknowledgement> {
     const requestId = this.generateRequestId()
     const message: ClientMessage = {
       version: 1,
       type: 'text_input',
       request_id: requestId,
       text,
+      submit,
     }
     return this.sendWithAck(requestId, message)
   }

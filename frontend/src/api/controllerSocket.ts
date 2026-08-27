@@ -127,8 +127,14 @@ export class ControllerSocket {
     return this.sendRaw(message)
   }
 
-  sendText(text: string): string | null {
-    return this.sendRaw({ version: PROTOCOL_VERSION, type: 'text_input', request_id: this.requestId(), text })
+  sendText(text: string, submit = false): string | null {
+    return this.sendRaw({
+      version: PROTOCOL_VERSION,
+      type: 'text_input',
+      request_id: this.requestId(),
+      text,
+      submit,
+    })
   }
 
   sendSearch(query: string): string | null {

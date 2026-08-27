@@ -5,7 +5,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.protocol import StateMessage
+from app.protocol import NetflixContext, StateMessage
 
 
 class ActiveApp(StrEnum):
@@ -37,6 +37,7 @@ class ControllerState(BaseModel):
     channel_name: str | None = Field(default=None, max_length=120)
     status_message: str | None = Field(default=None, max_length=256)
     error_message: str | None = Field(default=None, max_length=256)
+    netflix_context: NetflixContext | None = None
 
     def to_wire(self) -> StateMessage:
         return StateMessage(
@@ -48,6 +49,7 @@ class ControllerState(BaseModel):
             channel_name=self.channel_name,
             status_message=self.status_message,
             error_message=self.error_message,
+            netflix_context=self.netflix_context,
         )
 
 

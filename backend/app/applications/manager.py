@@ -17,7 +17,7 @@ from app.applications.youtube_fullscreen import YoutubeFullscreenController
 from app.commands.ports import CommandExecutionError
 from app.config import Settings, project_root
 from app.logging import log_event
-from app.protocol import Command
+from app.protocol import Command, NetflixContext, NetflixInputKind, NetflixStage
 from app.state import ActiveApp
 
 YOUTUBE_TV_USER_AGENT = (
@@ -29,6 +29,11 @@ CHROME_RESTORE_SUPPRESS_ARGS = (
     "--hide-crash-restore-bubble",
     "--disable-session-crashed-bubble",
     "--noerrdialogs",
+)
+
+UNKNOWN_NETFLIX_CONTEXT = NetflixContext(
+    stage=NetflixStage.UNKNOWN,
+    input_kind=NetflixInputKind.NONE,
 )
 
 NETFLIX_ACTIONS: dict[Command, NetflixAction] = {
@@ -209,7 +214,7 @@ class ApplicationManager:
         ]
 
 
-    async def open(self, app: ActiveApp) -> None:
+    async def open(self, app: ActiveApp) -> NetflixContext | None:
         if app not in {ActiveApp.YOUTUBE, ActiveApp.NETFLIX, ActiveApp.BROWSER}:
             raise CommandExecutionError(
                 "unsupported_application", f"這個啟動器無法開啟 {app.value}。"
@@ -219,18 +224,18 @@ class ApplicationManager:
             await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
             arguments = self._chrome_kiosk_args(self._settings.urls.youtube)
             await self._launch_and_track(app, arguments, "YouTube")
-            return
+            return None
         if app is ActiveApp.NETFLIX:
             await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
             if self._focus_existing(ActiveApp.NETFLIX):
                 await self._initialize_netflix(reused=True)
-                return
+                return UNKNOWN_NETFLIX_CONTEXT
             arguments = self._chrome_desktop_args(
                 self._settings.urls.netflix, self._netflix_profile_dir
             )
             await self._launch_and_track(app, arguments, "Netflix")
             await self._initialize_netflix(reused=False)
-            return
+            return UNKNOWN_NETFLIX_CONTEXT
 
 
         await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
@@ -243,6 +248,7 @@ class ApplicationManager:
 
         arguments = [executable.as_posix(), "--new-window", "--start-maximized", url]
         await self._launch_and_track(app, arguments, app_name)
+        return None
 
     async def open_news(self, url: str) -> None:
         await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
@@ -365,11 +371,13 @@ class ApplicationManager:
 
 
 
-    async def type_text(self, text: str) -> None:
+    async def type_text(
+        self, text: str, submit: bool = False
+    ) -> NetflixContext | None:
         self.require_input_target(self._active_app)
         if self._active_app is ActiveApp.NETFLIX:
             await self._netflix_page.type_text(self._netflix_debug_port, text)
-            return
+            return UNKNOWN_NETFLIX_CONTEXT
         raise CommandExecutionError(
             "input_target_not_active",
             "請先開啟 Netflix 再從遙控器輸入。",
@@ -416,7 +424,7 @@ class ApplicationManager:
         self._active_app = ActiveApp.LAUNCHER
         self._windows.bring_launcher_to_foreground()
 
-    async def forward_command(self, command: Command) -> None:
+    async def forward_command(self, command: Command) -> NetflixContext | None:
         self.require_input_target(self._active_app)
         if self._active_app is ActiveApp.NETFLIX:
             action = NETFLIX_ACTIONS.get(command)
@@ -426,11 +434,12 @@ class ApplicationManager:
                     "Netflix 不支援這個遙控指令。",
                 )
             await self._netflix_page.execute(self._netflix_debug_port, action)
-            return
+            return UNKNOWN_NETFLIX_CONTEXT
         if command is Command.BACK and self._active_app is ActiveApp.BROWSER:
             self._input.send_browser_back()
-            return
+            return None
         self._input.send_command(command)
+        return None
 
 
     def require_input_target(self, app: ActiveApp) -> None:

@@ -504,6 +504,7 @@ describe('RemoteScreen', () => {
       channel_name: 'Documentary HD',
       status_message: 'Playing video stream',
       error_message: null,
+      netflix_context: null,
     }
 
     act(() => {

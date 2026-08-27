@@ -520,14 +520,16 @@ describe('ControllerSocket', () => {
     authenticate(ws)
 
     const commandAck = socket.sendCommand('PLAY_PAUSE')
-    const textAck = socket.sendTextInput('x'.repeat(256))
+    const defaultTextAck = socket.sendTextInput('default')
+    const submitTextAck = socket.sendTextInput('submit', true)
     const messages = ws.sent
       .map((raw) => JSON.parse(raw) as Record<string, unknown>)
       .filter((message) => message.type !== 'authenticate')
 
-    expect(messages.map(({ type }) => type)).toEqual(['command', 'text_input'])
+    expect(messages.map(({ type }) => type)).toEqual(['command', 'text_input', 'text_input'])
     expect(messages[0]).toMatchObject({ version: 1, command: 'PLAY_PAUSE' })
-    expect(messages[1]).toMatchObject({ version: 1, text: 'x'.repeat(256) })
+    expect(messages[1]).toMatchObject({ version: 1, text: 'default', submit: false })
+    expect(messages[2]).toMatchObject({ version: 1, text: 'submit', submit: true })
     expect(Object.keys(messages[0]).sort()).toEqual([
       'command',
       'request_id',
@@ -536,14 +538,24 @@ describe('ControllerSocket', () => {
     ])
     expect(Object.keys(messages[1]).sort()).toEqual([
       'request_id',
+      'submit',
+      'text',
+      'type',
+      'version',
+    ])
+    expect(Object.keys(messages[2]).sort()).toEqual([
+      'request_id',
+      'submit',
       'text',
       'type',
       'version',
     ])
     sendAck(ws, messages[0].request_id as string)
     sendAck(ws, messages[1].request_id as string)
+    sendAck(ws, messages[2].request_id as string)
     await expect(commandAck).resolves.toMatchObject({ success: true })
-    await expect(textAck).resolves.toMatchObject({ success: true })
+    await expect(defaultTextAck).resolves.toMatchObject({ success: true })
+    await expect(submitTextAck).resolves.toMatchObject({ success: true })
     socket.disconnect()
   })
 })

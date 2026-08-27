@@ -3,10 +3,19 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from app.protocol import Command, CommandMessage, PointerActionMessage, TextInputMessage
+from pydantic import ValidationError
+
+from app.protocol import (
+    Command,
+    CommandMessage,
+    NetflixContext,
+    NetflixInputKind,
+    NetflixStage,
+    PointerActionMessage,
+    TextInputMessage,
+)
 from app.security.pairing import PairingCodeExpired, PairingCodeInvalid, PairingService
 from app.security.tokens import TokenStore
-from pydantic import ValidationError
 
 
 def test_command_message_accepts_only_whitelisted_command() -> None:
@@ -71,6 +80,86 @@ def test_text_input_accepts_256_characters_and_rejects_257() -> None:
                 "text": "x" * 257,
             }
         )
+
+
+def test_text_input_submit_is_backward_compatible_and_strict() -> None:
+    base = {
+        "version": 1,
+        "type": "text_input",
+        "request_id": "text-submit",
+        "text": "secret",
+    }
+    assert TextInputMessage.model_validate(base).submit is False
+    assert TextInputMessage.model_validate({**base, "submit": True}).submit is True
+    for invalid in ("true", 1, None):
+        with pytest.raises(ValidationError):
+            TextInputMessage.model_validate({**base, "submit": invalid})
+
+
+def test_netflix_context_allows_title_only_in_browse() -> None:
+    context = NetflixContext(
+        stage=NetflixStage.BROWSE,
+        input_kind=NetflixInputKind.NONE,
+        focused_title="Example",
+    )
+    assert context.model_dump(mode="json") == {
+        "stage": "browse",
+        "input_kind": "none",
+        "has_error": False,
+        "can_submit": False,
+        "focused_title": "Example",
+    }
+    with pytest.raises(ValidationError):
+        NetflixContext(
+            stage=NetflixStage.LOGIN,
+            input_kind=NetflixInputKind.PASSWORD,
+            focused_title="forbidden",
+        )
+    with pytest.raises(ValidationError):
+        NetflixContext(
+            stage=NetflixStage.BROWSE,
+            input_kind=NetflixInputKind.NONE,
+            focused_title="x" * 121,
+        )
+
+
+@pytest.mark.parametrize(
+    "extra_field",
+    ["value", "length", "email", "password", "code", "cookie", "token"],
+)
+def test_netflix_context_forbids_sensitive_or_derived_fields(extra_field: str) -> None:
+    payload: dict[str, object] = {
+        "stage": "login",
+        "input_kind": "password",
+        "has_error": False,
+        "can_submit": True,
+        "focused_title": None,
+        extra_field: 6 if extra_field == "length" else "secret",
+    }
+    with pytest.raises(ValidationError):
+        NetflixContext.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("has_error", "false"),
+        ("has_error", 0),
+        ("can_submit", "true"),
+        ("can_submit", 1),
+    ],
+)
+def test_netflix_context_boolean_fields_are_strict(field: str, value: object) -> None:
+    payload = {
+        "stage": "unknown",
+        "input_kind": "none",
+        "has_error": False,
+        "can_submit": False,
+        "focused_title": None,
+    }
+    payload[field] = value
+    with pytest.raises(ValidationError):
+        NetflixContext.model_validate(payload)
 
 
 @pytest.mark.parametrize("extra_field", ["javascript", "selector", "url", "raw_key"])

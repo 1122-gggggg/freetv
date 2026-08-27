@@ -157,14 +157,16 @@ describe('ControllerSocket request IDs', () => {
     socket.open()
 
     controller.sendCommand('PLAY_PAUSE')
-    controller.sendText('x'.repeat(256))
+    controller.sendText('default')
+    controller.sendText('submit', true)
     const messages = socket.sent
       .map((raw) => JSON.parse(raw) as Record<string, unknown>)
       .filter((message) => message.type !== 'authenticate')
 
-    expect(messages.map(({ type }) => type)).toEqual(['command', 'text_input'])
+    expect(messages.map(({ type }) => type)).toEqual(['command', 'text_input', 'text_input'])
     expect(messages[0]).toMatchObject({ version: 1, command: 'PLAY_PAUSE' })
-    expect(messages[1]).toMatchObject({ version: 1, text: 'x'.repeat(256) })
+    expect(messages[1]).toMatchObject({ version: 1, text: 'default', submit: false })
+    expect(messages[2]).toMatchObject({ version: 1, text: 'submit', submit: true })
     expect(Object.keys(messages[0]).sort()).toEqual([
       'command',
       'request_id',
@@ -173,6 +175,14 @@ describe('ControllerSocket request IDs', () => {
     ])
     expect(Object.keys(messages[1]).sort()).toEqual([
       'request_id',
+      'submit',
+      'text',
+      'type',
+      'version',
+    ])
+    expect(Object.keys(messages[2]).sort()).toEqual([
+      'request_id',
+      'submit',
       'text',
       'type',
       'version',

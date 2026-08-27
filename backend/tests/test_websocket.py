@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from types import SimpleNamespace
-
 from ipaddress import IPv4Address
+from types import SimpleNamespace
 
 import pytest
 from fastapi import WebSocketDisconnect
@@ -15,10 +14,17 @@ from app.config import ServerSettings, Settings
 from app.controller import ControllerRuntime
 from app.main import RemoteAuthenticationGuard, create_app
 from app.player.channels import Channel
-from app.protocol import Command, PointerActionMessage
+from app.protocol import (
+    Command,
+    NetflixContext,
+    NetflixInputKind,
+    NetflixStage,
+    PointerActionMessage,
+)
 from app.security.pairing import PairingService
 from app.security.tokens import TokenStore
 from app.state import ActiveApp, ControllerState, StateStore
+
 TRUSTED_REMOTE_HEADERS = {"host": "127.0.0.1:8765", "origin": "https://127.0.0.1:8765"}
 REMOTE_SOCKET_URL = "wss://127.0.0.1:8765/ws/remote"
 
@@ -32,9 +38,11 @@ class FakeApplications:
     opened: list[ActiveApp] = field(default_factory=list)
     opened_news: list[str] = field(default_factory=list)
     searches: list[str] = field(default_factory=list)
+    next_context: NetflixContext | None = None
 
-    async def open(self, app: ActiveApp) -> None:
+    async def open(self, app: ActiveApp) -> NetflixContext | None:
         self.opened.append(app)
+        return self.next_context
 
     async def open_news(self, url: str) -> None:
         self.opened_news.append(url)
@@ -48,11 +56,13 @@ class FakeApplications:
     async def leave_to_desktop(self) -> None:
         return None
 
-    async def forward_command(self, command: Command) -> None:
-        return None
+    async def forward_command(self, command: Command) -> NetflixContext | None:
+        return self.next_context
 
-    async def type_text(self, text: str) -> None:
-        return None
+    async def type_text(
+        self, text: str, submit: bool = False
+    ) -> NetflixContext | None:
+        return self.next_context
 
     def require_input_target(self, app: ActiveApp) -> None:
         return None
@@ -229,6 +239,51 @@ def test_paired_remote_receives_acknowledgement_and_state_after_command(tmp_path
     assert state["focused_tile"] == "netflix"
 
 
+
+def test_netflix_context_is_broadcast_as_object_then_null_on_home(tmp_path) -> None:
+    app = make_app(tmp_path)
+    runtime = app.state.runtime
+    runtime.applications.next_context = NetflixContext(
+        stage=NetflixStage.LOGIN,
+        input_kind=NetflixInputKind.EMAIL,
+        can_submit=True,
+    )
+    token = runtime.pairing.pair("482731")
+
+    with secure_remote_client(app) as client:
+        with client.websocket_connect(
+            REMOTE_SOCKET_URL, headers=TRUSTED_REMOTE_HEADERS
+        ) as socket:
+            authenticate(socket, token, "auth-context")
+            socket.send_json(
+                {
+                    "version": 1,
+                    "type": "command",
+                    "request_id": "open-netflix-context",
+                    "command": "OPEN_NETFLIX",
+                }
+            )
+            assert socket.receive_json()["success"] is True
+            opened = socket.receive_json()
+            assert opened["netflix_context"] == {
+                "stage": "login",
+                "input_kind": "email",
+                "has_error": False,
+                "can_submit": True,
+                "focused_title": None,
+            }
+
+            socket.send_json(
+                {
+                    "version": 1,
+                    "type": "command",
+                    "request_id": "home-context",
+                    "command": "HOME",
+                }
+            )
+            assert socket.receive_json()["success"] is True
+            assert socket.receive_json()["netflix_context"] is None
+
 def test_all_paired_remotes_receive_state_broadcasts(tmp_path) -> None:
     app = make_app(tmp_path)
     runtime = app.state.runtime
@@ -295,7 +350,10 @@ def test_tv_socket_rejects_cross_origin_commands(tmp_path) -> None:
 
     with TestClient(app, client=("127.0.0.1", 50_000)) as client:
         with pytest.raises(WebSocketDisconnect) as error:
-            with client.websocket_connect("/ws/tv", headers={"origin": "https://attacker.example"}):
+            with client.websocket_connect(
+                "/ws/tv",
+                headers={"origin": "https://attacker.example"},
+            ):
                 pass
 
     assert error.value.code == 1008
@@ -345,7 +403,9 @@ def test_remote_socket_rejects_a_missing_origin(tmp_path) -> None:
     assert error.value.code == 1008
 
 
-def test_remote_socket_rejects_plain_websocket_from_the_lan_in_https_mode(tmp_path, monkeypatch) -> None:
+def test_remote_socket_rejects_plain_websocket_from_the_lan_in_https_mode(
+    tmp_path, monkeypatch
+) -> None:
     app = make_app(tmp_path, transport="https")
     lan_ip = "192.168.1.44"
     monkeypatch.setattr(
@@ -399,7 +459,10 @@ def test_remote_socket_holds_its_capacity_slot_until_disconnect(tmp_path) -> Non
                     pass
 
         assert error.value.code == 1008
-        with client.websocket_connect(REMOTE_SOCKET_URL, headers=TRUSTED_REMOTE_HEADERS) as next_socket:
+        with client.websocket_connect(
+            REMOTE_SOCKET_URL,
+            headers=TRUSTED_REMOTE_HEADERS,
+        ) as next_socket:
             authenticate(next_socket, token, "auth-2")
 
 
@@ -505,7 +568,9 @@ def test_pairing_accepts_public_tunnel_origin_from_public_peer(tmp_path, monkeyp
     assert app.state.runtime.pairing.verify_token(response.json()["token"])
 
 
-def test_remote_socket_accepts_public_tunnel_origin_from_public_peer(tmp_path, monkeypatch) -> None:
+def test_remote_socket_accepts_public_tunnel_origin_from_public_peer(
+    tmp_path, monkeypatch
+) -> None:
     app = make_app(tmp_path)
     monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
     headers = {
@@ -555,7 +620,9 @@ def test_pairing_endpoint_rejects_an_oversized_body_before_validation(tmp_path) 
     assert response.status_code == 413
 
 
-def test_pairing_endpoint_rejects_plain_http_from_the_lan_in_https_mode(tmp_path, monkeypatch) -> None:
+def test_pairing_endpoint_rejects_plain_http_from_the_lan_in_https_mode(
+    tmp_path, monkeypatch
+) -> None:
     app = make_app(tmp_path, transport="https")
     lan_ip = "192.168.1.44"
     monkeypatch.setattr(
@@ -626,7 +693,9 @@ def test_pairing_accepts_plain_http_from_the_lan_in_http_mode(tmp_path, monkeypa
     assert app.state.runtime.pairing.verify_token(response.json()["token"])
 
 
-def test_remote_socket_accepts_plain_websocket_from_the_lan_in_http_mode(tmp_path, monkeypatch) -> None:
+def test_remote_socket_accepts_plain_websocket_from_the_lan_in_http_mode(
+    tmp_path, monkeypatch
+) -> None:
     app = make_app(tmp_path)
     lan_ip = "192.168.1.44"
     monkeypatch.setattr(
@@ -702,7 +771,11 @@ def test_pairing_endpoint_rejects_a_missing_origin(tmp_path) -> None:
     app = make_app(tmp_path)
 
     with secure_remote_client(app) as client:
-        response = client.post("/api/pair", json={"code": "482731"}, headers={"host": "127.0.0.1:8765"})
+        response = client.post(
+            "/api/pair",
+            json={"code": "482731"},
+            headers={"host": "127.0.0.1:8765"},
+        )
 
     assert response.status_code == 403
 
@@ -877,7 +950,11 @@ def test_remote_socket_rejects_off_subnet_peer(tmp_path, monkeypatch) -> None:
     )
     headers = {"host": f"{lan_ip}:8765", "origin": f"https://{lan_ip}:8765"}
 
-    with TestClient(app, base_url=f"https://{lan_ip}:8765", client=(off_subnet_peer, 50_000)) as client:
+    with TestClient(
+        app,
+        base_url=f"https://{lan_ip}:8765",
+        client=(off_subnet_peer, 50_000),
+    ) as client:
         with pytest.raises(WebSocketDisconnect) as error:
             with client.websocket_connect(f"wss://{lan_ip}:8765/ws/remote", headers=headers):
                 pass
@@ -902,7 +979,11 @@ def test_pairing_endpoint_rejects_off_subnet_peer(tmp_path, monkeypatch) -> None
     )
     headers = {"host": f"{lan_ip}:8765", "origin": f"https://{lan_ip}:8765"}
 
-    with TestClient(app, base_url=f"https://{lan_ip}:8765", client=(off_subnet_peer, 50_000)) as client:
+    with TestClient(
+        app,
+        base_url=f"https://{lan_ip}:8765",
+        client=(off_subnet_peer, 50_000),
+    ) as client:
         response = client.post("/api/pair", json={"code": "482731"}, headers=headers)
 
     assert response.status_code == 403
@@ -927,7 +1008,11 @@ def test_pairing_endpoint_rejects_global_and_link_local_and_ipv6_peers(
     headers = {"host": f"{lan_ip}:8765", "origin": f"https://{lan_ip}:8765"}
 
     for invalid_peer in ("8.8.8.8", "169.254.1.5", "2001:db8::1", "fe80::1", "unknown"):
-        with TestClient(app, base_url=f"https://{lan_ip}:8765", client=(invalid_peer, 50_000)) as client:
+        with TestClient(
+            app,
+            base_url=f"https://{lan_ip}:8765",
+            client=(invalid_peer, 50_000),
+        ) as client:
             response = client.post("/api/pair", json={"code": "482731"}, headers=headers)
         assert response.status_code == 403
 
@@ -949,7 +1034,11 @@ def test_remote_token_revocation_rejects_off_subnet_peer(tmp_path, monkeypatch) 
     )
     token = app.state.runtime.pairing.pair("482731")
 
-    with TestClient(app, base_url=f"https://{lan_ip}:8765", client=(off_subnet_peer, 50_000)) as client:
+    with TestClient(
+        app,
+        base_url=f"https://{lan_ip}:8765",
+        client=(off_subnet_peer, 50_000),
+    ) as client:
         response = client.delete(
             "/api/remote-token",
             headers={
@@ -979,7 +1068,11 @@ def test_pairing_endpoint_rejects_public_interface_host_and_origin(tmp_path, mon
     )
     headers = {"host": f"{public_ip}:8765", "origin": f"https://{public_ip}:8765"}
 
-    with TestClient(app, base_url=f"https://{public_ip}:8765", client=(public_ip, 50_000)) as client:
+    with TestClient(
+        app,
+        base_url=f"https://{public_ip}:8765",
+        client=(public_ip, 50_000),
+    ) as client:
         response = client.post("/api/pair", json={"code": "482731"}, headers=headers)
 
     assert response.status_code == 403
@@ -1001,7 +1094,11 @@ def test_remote_socket_rejects_public_interface_host_and_origin(tmp_path, monkey
     )
     headers = {"host": f"{public_ip}:8765", "origin": f"https://{public_ip}:8765"}
 
-    with TestClient(app, base_url=f"https://{public_ip}:8765", client=(public_ip, 50_000)) as client:
+    with TestClient(
+        app,
+        base_url=f"https://{public_ip}:8765",
+        client=(public_ip, 50_000),
+    ) as client:
         with pytest.raises(WebSocketDisconnect) as error:
             with client.websocket_connect(f"wss://{public_ip}:8765/ws/remote", headers=headers):
                 pass
@@ -1024,13 +1121,19 @@ def test_remote_frontend_rejects_public_interface_host(tmp_path, monkeypatch) ->
         },
     )
 
-    with TestClient(app, base_url=f"https://{public_ip}:8765", client=(public_ip, 50_000)) as client:
+    with TestClient(
+        app,
+        base_url=f"https://{public_ip}:8765",
+        client=(public_ip, 50_000),
+    ) as client:
         response = client.get("/remote", headers={"host": f"{public_ip}:8765"})
 
     assert response.status_code == 403
 
 
-def test_private_virtual_or_cellular_adapters_are_not_controller_or_remote_lans(monkeypatch) -> None:
+def test_private_virtual_or_cellular_adapters_are_not_controller_or_remote_lans(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(
         main.psutil,
         "net_if_addrs",
