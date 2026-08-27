@@ -1,11 +1,16 @@
 import React from 'react'
-import { Alert, Text, TouchableOpacity, View } from 'react-native'
+import { Alert, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import ReactTestRenderer, { act } from 'react-test-renderer'
 import { RemoteScreen } from './RemoteScreen'
 import { ControllerSocket, type SocketOptions, type SocketStatus } from '../api/controllerSocket'
 import { revokeDeviceToken } from '../discovery/deviceScanner'
 import { forgetCurrentDevice, type SavedDevice } from '../storage/tokenStorage'
-import type { Acknowledgement, Command, ControllerState } from '../types/protocol'
+import type {
+  Acknowledgement,
+  Command,
+  ControllerState,
+  NetflixContext,
+} from '../types/protocol'
 import { Dpad } from '../components/Dpad'
 import { MediaControls } from '../components/MediaControls'
 import { AppLaunchers } from '../components/AppLaunchers'
@@ -17,7 +22,7 @@ interface MockSocket {
   connect: jest.Mock
   disconnect: jest.Mock
   sendCommand: jest.Mock<Promise<Acknowledgement>, [Command]>
-  sendTextInput: jest.Mock<Promise<Acknowledgement>, [string]>
+  sendTextInput: jest.Mock<Promise<Acknowledgement>, [string, boolean?]>
   sendPointer: jest.Mock<void, [string, number, number]>
   simulateStatusChange: (status: SocketStatus) => void
   simulateStateChange: (state: ControllerState) => void
@@ -104,6 +109,25 @@ const mockDevice: SavedDevice = {
   port: 8765,
   token: 'auth-token-xyz',
   lastConnected: 1700000000000,
+}
+
+function netflixState(
+  context: NetflixContext | null,
+  activeApp: ControllerState['active_app'] = 'netflix',
+): ControllerState {
+  return {
+    version: 1,
+    type: 'state',
+    active_app: activeApp,
+    focused_tile: 'netflix',
+    volume: 50,
+    muted: false,
+    channel_number: null,
+    channel_name: null,
+    status_message: null,
+    error_message: null,
+    netflix_context: context,
+  }
 }
 
 function findTextNodes(root: ReactTestRenderer.ReactTestInstance, text: string): ReactTestRenderer.ReactTestInstance[] {
@@ -278,7 +302,7 @@ describe('RemoteScreen', () => {
       getTypeButton(root).props.onPress()
     })
     const text = 'x'.repeat(256)
-    await expect(root.findByType(TextInputModal).props.onSend(text)).resolves.toBeUndefined()
+    await expect(root.findByType(TextInputModal).props.onSend(text, false)).resolves.toBeUndefined()
 
     expect(latestMockSocket!.sendCommand.mock.calls.map(([command]) => command)).toEqual([
       'NAV_UP',
@@ -289,7 +313,7 @@ describe('RemoteScreen', () => {
       'BACK',
       'PLAY_PAUSE',
     ])
-    expect(latestMockSocket!.sendTextInput).toHaveBeenCalledWith(text)
+    expect(latestMockSocket!.sendTextInput).toHaveBeenCalledWith(text, false)
   })
 
   it('surfaces failed command ACK in error banner and clears on success', async () => {
@@ -388,11 +412,206 @@ describe('RemoteScreen', () => {
       }),
     )
 
-    await expect(textModal.props.onSend('Hello TV')).rejects.toThrow('Target input field not focused')
+    await expect(textModal.props.onSend('Hello TV', false)).rejects.toThrow('Target input field not focused')
 
     // Successful text ACK
     latestMockSocket!.sendTextInput.mockResolvedValueOnce(mockAck())
-    await expect(textModal.props.onSend('Valid query')).resolves.toBeUndefined()
+    await expect(textModal.props.onSend('Valid query', false)).resolves.toBeUndefined()
+  })
+
+  it('sends TAB from the native toolbar', async () => {
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+      )
+    })
+    const root = renderer!.root
+    act(() => latestMockSocket!.simulateStatusChange('authenticated'))
+
+    await act(async () => {
+      await root.findByProps({ accessibilityLabel: '下一欄' }).props.onPress()
+    })
+
+    expect(latestMockSocket!.sendCommand).toHaveBeenCalledWith('TAB')
+  })
+
+  it.each([
+    ['email', 'email-address', false, 'username'],
+    ['password', 'default', true, 'password'],
+    ['code', 'number-pad', false, 'oneTimeCode'],
+  ] as const)(
+    'renders %s context with safe native input mode',
+    async (inputKind, keyboardType, secureTextEntry, textContentType) => {
+      await act(async () => {
+        renderer = ReactTestRenderer.create(
+          <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+        )
+      })
+      const root = renderer!.root
+      act(() => {
+        latestMockSocket!.simulateStatusChange('authenticated')
+        latestMockSocket!.simulateStateChange(
+          netflixState({
+            stage: inputKind === 'code' ? 'verification' : 'login',
+            input_kind: inputKind,
+            has_error: false,
+            can_submit: true,
+            focused_title: null,
+          }),
+        )
+      })
+
+      act(() => {
+        root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' }).props.onPress()
+      })
+      const input = root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' })
+      expect(input.props.keyboardType).toBe(keyboardType)
+      expect(input.props.secureTextEntry).toBe(secureTextEntry)
+      expect(input.props.textContentType).toBe(textContentType)
+      expect(input.props.autoCapitalize).toBe('none')
+      expect(input.props.autoCorrect).toBe(false)
+      expect(root.findAllByProps({ accessibilityLabel: '在電視上輸入文字' })).toHaveLength(0)
+    },
+  )
+
+  it('clears context text before acknowledgement and waits until context changes', async () => {
+    let resolveAck!: (ack: Acknowledgement) => void
+    const pendingAck = new Promise<Acknowledgement>((resolve) => {
+      resolveAck = resolve
+    })
+    latestMockSocket = null
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+      )
+    })
+    const root = renderer!.root
+    act(() => {
+      latestMockSocket!.simulateStatusChange('authenticated')
+      latestMockSocket!.simulateStateChange(
+        netflixState({
+          stage: 'login',
+          input_kind: 'password',
+          has_error: false,
+          can_submit: true,
+          focused_title: null,
+        }),
+      )
+    })
+    act(() => {
+      root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' }).props.onPress()
+    })
+    latestMockSocket!.sendTextInput.mockReturnValueOnce(pendingAck)
+    const input = root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' })
+    act(() => input.props.onChangeText('secret'))
+
+    act(() => {
+      void root.findByProps({ accessibilityLabel: '送出 Netflix 輸入' }).props.onPress()
+    })
+
+    expect(latestMockSocket!.sendTextInput).toHaveBeenCalledWith('secret', true)
+    expect(root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' }).props.value).toBe('')
+    expect(root.findByProps({ accessibilityLabel: '等待電視端回應' })).toBeTruthy()
+    resolveAck(mockAck())
+    await act(async () => {
+      await pendingAck
+    })
+    expect(root.findAllByType(TextInputModal)).toHaveLength(0)
+    expect(root.findByProps({ accessibilityLabel: '等待電視端回應' })).toBeTruthy()
+
+    act(() => {
+      latestMockSocket!.simulateStateChange(
+        netflixState({
+          stage: 'browse',
+          input_kind: 'none',
+          has_error: false,
+          can_submit: false,
+          focused_title: 'Example',
+        }),
+      )
+    })
+    expect(root.findAllByProps({ accessibilityLabel: '等待電視端回應' })).toHaveLength(0)
+  })
+
+  it('shows a generic retry after context acknowledgement failure without restoring text', async () => {
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+      )
+    })
+    const root = renderer!.root
+    act(() => {
+      latestMockSocket!.simulateStatusChange('authenticated')
+      latestMockSocket!.simulateStateChange(
+        netflixState({
+          stage: 'login',
+          input_kind: 'password',
+          has_error: false,
+          can_submit: true,
+          focused_title: null,
+        }),
+      )
+    })
+    act(() => {
+      root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' }).props.onPress()
+    })
+    latestMockSocket!.sendTextInput.mockResolvedValueOnce(
+      mockAck({ success: false, message: 'raw sensitive failure' }),
+    )
+    const input = root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' })
+    act(() => input.props.onChangeText('secret'))
+
+    await act(async () => {
+      await root.findByProps({ accessibilityLabel: '送出 Netflix 輸入' }).props.onPress()
+    })
+
+    expect(findTextNodes(root, '無法送出，請重試')).toHaveLength(1)
+    expect(root.findAllByType(TextInputModal)).toHaveLength(0)
+    expect(
+      root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' }).props.disabled,
+    ).toBe(false)
+    expect(JSON.stringify(renderer!.toJSON())).not.toContain('secret')
+    expect(JSON.stringify(renderer!.toJSON())).not.toContain('raw sensitive failure')
+  })
+
+  it('shows browse context and falls back to generic input for null or unknown', async () => {
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+      )
+    })
+    const root = renderer!.root
+    act(() => {
+      latestMockSocket!.simulateStatusChange('authenticated')
+      latestMockSocket!.simulateStateChange(
+        netflixState({
+          stage: 'browse',
+          input_kind: 'none',
+          has_error: false,
+          can_submit: false,
+          focused_title: 'Example',
+        }),
+      )
+    })
+    expect(findTextNodes(root, '目前選取：Example')).toHaveLength(1)
+    expect(findTextNodes(root, '左右換片、上下換列，按確定播放。')).toHaveLength(1)
+    expect(root.findAllByProps({ accessibilityLabel: '在電視上輸入文字' })).toHaveLength(0)
+
+    act(() => latestMockSocket!.simulateStateChange(netflixState(null)))
+    expect(root.findByProps({ accessibilityLabel: '在電視上輸入文字' })).toBeTruthy()
+
+    act(() =>
+      latestMockSocket!.simulateStateChange(
+        netflixState({
+          stage: 'unknown',
+          input_kind: 'none',
+          has_error: false,
+          can_submit: false,
+          focused_title: null,
+        }),
+      ),
+    )
+    expect(root.findByProps({ accessibilityLabel: '在電視上輸入文字' })).toBeTruthy()
   })
 
   it('confirms destructive unpair dialog, revokes token, forgets device, and disconnects', async () => {

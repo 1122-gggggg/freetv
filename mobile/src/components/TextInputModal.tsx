@@ -11,39 +11,72 @@ import {
 } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import type { NetflixInputKind } from '../types/protocol'
 
 interface TextInputModalProps {
   visible: boolean
+  inputKind: NetflixInputKind
+  submit: boolean
   onClose: () => void
-  onSend: (text: string) => Promise<void>
+  onSend: (text: string, submit: boolean) => Promise<void>
 }
 
-export function TextInputModal({ visible, onClose, onSend }: TextInputModalProps): React.ReactElement {
+export function TextInputModal({
+  visible,
+  inputKind,
+  submit,
+  onClose,
+  onSend,
+}: TextInputModalProps): React.ReactElement {
   const insets = useSafeAreaInsets()
   const [text, setText] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
+  const handleClose = () => {
+    setText('')
+    setErrorMessage(null)
+    setIsSending(false)
+    onClose()
+  }
+
   const handleSend = async () => {
     if (!text.trim() || isSending) return
+    const value = text
+    setText('')
     setIsSending(true)
     setErrorMessage(null)
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     try {
-      await onSend(text)
-      setText('')
-      setErrorMessage(null)
-      onClose()
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '無法送出文字'
-      setErrorMessage(message)
-    } finally {
-      setIsSending(false)
+      await onSend(value, submit)
+      handleClose()
+    } catch {
+      if (submit) {
+        handleClose()
+      } else {
+        setErrorMessage('無法送出，請重試')
+        setIsSending(false)
+      }
     }
   }
 
+  const keyboardType =
+    inputKind === 'email'
+      ? 'email-address'
+      : inputKind === 'code'
+        ? 'number-pad'
+        : 'default'
+  const textContentType =
+    inputKind === 'email'
+      ? 'username'
+      : inputKind === 'password'
+        ? 'password'
+        : inputKind === 'code'
+          ? 'oneTimeCode'
+          : 'none'
+
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={[styles.overlay, { paddingTop: insets.top }]}
@@ -56,15 +89,29 @@ export function TextInputModal({ visible, onClose, onSend }: TextInputModalProps
 
           <TextInput
             style={styles.input}
-            placeholder="在此輸入文字…"
+            accessibilityLabel={submit ? 'Netflix 情境輸入' : '文字輸入'}
+            placeholder={
+              inputKind === 'email'
+                ? '請輸入 Netflix 電子郵件或手機號碼'
+                : inputKind === 'password'
+                  ? '請輸入 Netflix 密碼'
+                  : inputKind === 'code'
+                    ? '請輸入驗證碼 (OTP)'
+                    : '在此輸入文字…'
+            }
             placeholderTextColor="#64748b"
             value={text}
-            onChangeText={(val) => {
-              setText(val)
+            onChangeText={(value) => {
+              setText(value)
               if (errorMessage) setErrorMessage(null)
             }}
             maxLength={256}
             autoFocus
+            keyboardType={keyboardType}
+            autoCapitalize="none"
+            autoCorrect={false}
+            textContentType={textContentType}
+            secureTextEntry={inputKind === 'password'}
             returnKeyType="send"
             onSubmitEditing={handleSend}
           />
@@ -73,7 +120,7 @@ export function TextInputModal({ visible, onClose, onSend }: TextInputModalProps
             <Text style={styles.errorText}>{errorMessage}</Text>
           ) : null}
           <View style={styles.actions}>
-            <TouchableOpacity style={[styles.btn, styles.cancelBtn]} onPress={onClose}>
+            <TouchableOpacity style={[styles.btn, styles.cancelBtn]} onPress={handleClose}>
               <Text style={styles.cancelText}>取消</Text>
             </TouchableOpacity>
 
@@ -81,6 +128,7 @@ export function TextInputModal({ visible, onClose, onSend }: TextInputModalProps
               style={[styles.btn, styles.sendBtn, !text.trim() && styles.disabledBtn]}
               onPress={handleSend}
               disabled={!text.trim() || isSending}
+              accessibilityLabel={submit ? '送出 Netflix 輸入' : '送出文字'}
             >
               <Text style={styles.sendText}>{isSending ? '送出中…' : '送出'}</Text>
             </TouchableOpacity>

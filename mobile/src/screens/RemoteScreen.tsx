@@ -18,7 +18,12 @@ import { MediaControls } from '../components/MediaControls'
 import { TextInputModal } from '../components/TextInputModal'
 import { Trackpad } from '../components/Trackpad'
 import { forgetCurrentDevice, type SavedDevice } from '../storage/tokenStorage'
-import type { Command, ControllerState, PointerAction } from '../types/protocol'
+import type {
+  Command,
+  ControllerState,
+  NetflixInputKind,
+  PointerAction,
+} from '../types/protocol'
 
 interface RemoteScreenProps {
   device: SavedDevice
@@ -26,6 +31,11 @@ interface RemoteScreenProps {
 }
 
 type ControlMode = 'dpad' | 'touchpad'
+
+interface TextInputSource {
+  inputKind: NetflixInputKind
+  submit: boolean
+}
 
 function formatActiveApp(app: ControllerState['active_app']): string {
   switch (app) {
@@ -52,10 +62,12 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
   const [hasEverConnected, setHasEverConnected] = useState(false)
   const [controllerState, setControllerState] = useState<ControllerState | null>(null)
   const [mode, setMode] = useState<ControlMode>('dpad')
-  const [isTextModalVisible, setIsTextModalVisible] = useState(false)
+  const [textInputSource, setTextInputSource] = useState<TextInputSource | null>(null)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [isUnpairing, setIsUnpairing] = useState(false)
+  const [waitingForNetflix, setWaitingForNetflix] = useState(false)
+  const [netflixSendFailed, setNetflixSendFailed] = useState(false)
 
   useEffect(() => {
     const client = new ControllerSocket({
@@ -96,6 +108,19 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
     }
   }, [device])
 
+  const netflixContext =
+    controllerState?.active_app === 'netflix'
+      ? (controllerState.netflix_context ?? null)
+      : null
+  const knownNetflixContext =
+    netflixContext !== null && netflixContext.stage !== 'unknown'
+
+  useEffect(() => {
+    setWaitingForNetflix(false)
+    setNetflixSendFailed(false)
+    setTextInputSource(null)
+  }, [controllerState?.active_app, netflixContext])
+
   const handleCommand = async (command: Command) => {
     if (!socket || status !== 'authenticated') {
       setCommandError('電視未連線')
@@ -117,12 +142,21 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
     socket?.sendPointer(action, dx, dy)
   }
 
-  const handleSendText = async (text: string) => {
+  const handleSendText = async (text: string, submit: boolean) => {
     if (!socket || status !== 'authenticated') {
       throw new Error('電視未連線')
     }
-    const ack = await socket.sendTextInput(text)
+    if (submit) {
+      setWaitingForNetflix(true)
+      setNetflixSendFailed(false)
+    }
+    const ack = await socket.sendTextInput(text, submit)
     if (!ack.success) {
+      if (submit) {
+        setWaitingForNetflix(false)
+        setNetflixSendFailed(true)
+        throw new Error('無法送出，請重試')
+      }
       throw new Error(ack.message || ack.error_code || '無法送出文字')
     }
   }
@@ -237,6 +271,80 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
         </View>
       )}
 
+      {isConnected && knownNetflixContext ? (
+        <View
+          style={[
+            styles.netflixContextCard,
+            netflixContext.has_error && styles.netflixContextError,
+          ]}
+          accessibilityLabel="Netflix 情境卡"
+        >
+          <Text style={styles.netflixContextEyebrow}>Netflix 電視情境</Text>
+          {netflixContext.has_error ? (
+            <Text style={styles.netflixErrorText}>
+              登入或驗證失敗，請檢查電視畫面後重試
+            </Text>
+          ) : null}
+          {['email', 'password', 'code'].includes(netflixContext.input_kind) ? (
+            <>
+              <Text style={styles.netflixContextText}>
+                {netflixContext.input_kind === 'email'
+                  ? '請輸入 Netflix 電子郵件或手機號碼'
+                  : netflixContext.input_kind === 'password'
+                    ? '請輸入 Netflix 密碼'
+                    : '請輸入驗證碼 (OTP)'}
+              </Text>
+              <TouchableOpacity
+                style={[styles.netflixInputButton, waitingForNetflix && styles.disabledBtn]}
+                accessibilityRole="button"
+                accessibilityLabel="開啟 Netflix 情境輸入"
+                disabled={waitingForNetflix}
+                onPress={() =>
+                  setTextInputSource({
+                    inputKind: netflixContext.input_kind,
+                    submit: true,
+                  })
+                }
+              >
+                <Text style={styles.netflixInputButtonText}>輸入並繼續</Text>
+              </TouchableOpacity>
+            </>
+          ) : netflixContext.stage === 'browse' ? (
+            <>
+              {netflixContext.focused_title ? (
+                <Text style={styles.netflixFocusedTitle}>
+                  目前選取：{netflixContext.focused_title}
+                </Text>
+              ) : null}
+              <Text style={styles.netflixContextText}>
+                左右換片、上下換列，按確定播放。
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.netflixContextText}>
+              使用方向鍵與確定鍵操作目前 Netflix 畫面。
+            </Text>
+          )}
+          {waitingForNetflix ? (
+            <Text
+              style={styles.netflixWaitingText}
+              accessibilityLabel="等待電視端回應"
+              accessibilityLiveRegion="polite"
+            >
+              等待電視端回應...
+            </Text>
+          ) : null}
+          {netflixSendFailed ? (
+            <Text
+              style={styles.netflixErrorText}
+              accessibilityLiveRegion="polite"
+            >
+              無法送出，請重試
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
       {/* Mode Switcher Tabs */}
       <View
         style={styles.tabs}
@@ -271,19 +379,35 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
           <Text style={[styles.tabText, mode === 'touchpad' && styles.activeTabText]}>🖱 觸控板</Text>
         </TouchableOpacity>
 
+        {!knownNetflixContext ? (
+          <TouchableOpacity
+            style={[styles.textInputBtn, !isConnected && styles.disabledBtn]}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+              setTextInputSource({ inputKind: 'none', submit: false })
+            }}
+            disabled={!isConnected}
+            accessibilityRole="button"
+            accessibilityLabel="在電視上輸入文字"
+            accessibilityHint="開啟文字欄位，將文字傳送到電視上目前焦點的應用程式。"
+            accessibilityState={{ disabled: !isConnected }}
+          >
+            <Text style={styles.textInputBtnText}>⌨ 輸入</Text>
+          </TouchableOpacity>
+        ) : null}
+
         <TouchableOpacity
           style={[styles.textInputBtn, !isConnected && styles.disabledBtn]}
           onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-            setIsTextModalVisible(true)
+            void handleCommand('TAB')
           }}
           disabled={!isConnected}
           accessibilityRole="button"
-          accessibilityLabel="在電視上輸入文字"
-          accessibilityHint="開啟文字欄位，將文字傳送到電視上目前焦點的應用程式。"
+          accessibilityLabel="下一欄"
+          accessibilityHint="切換到 Netflix 或瀏覽器的下一個輸入欄位。"
           accessibilityState={{ disabled: !isConnected }}
         >
-          <Text style={styles.textInputBtnText}>⌨ 輸入</Text>
+          <Text style={styles.textInputBtnText}>下一欄</Text>
         </TouchableOpacity>
       </View>
 
@@ -309,12 +433,15 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
         />
       </ScrollView>
 
-      {/* Text Input Modal */}
-      <TextInputModal
-        visible={isTextModalVisible}
-        onClose={() => setIsTextModalVisible(false)}
-        onSend={handleSendText}
-      />
+      {textInputSource ? (
+        <TextInputModal
+          visible
+          inputKind={textInputSource.inputKind}
+          submit={textInputSource.submit}
+          onClose={() => setTextInputSource(null)}
+          onSend={handleSendText}
+        />
+      ) : null}
     </View>
   )
 }
@@ -458,6 +585,56 @@ const styles = StyleSheet.create({
     color: '#fca5a5',
     fontSize: 12,
     fontWeight: '600',
+  },
+  netflixContextCard: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 14,
+    borderColor: '#43516a',
+    borderWidth: 1,
+    backgroundColor: '#141d2b',
+  },
+  netflixContextError: {
+    borderColor: '#e50914',
+  },
+  netflixContextEyebrow: {
+    color: '#f7d488',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  netflixContextText: {
+    color: '#d9e3f0',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 6,
+  },
+  netflixFocusedTitle: {
+    color: '#f8fafc',
+    fontSize: 15,
+    fontWeight: '800',
+    marginTop: 6,
+  },
+  netflixInputButton: {
+    minHeight: 48,
+    marginTop: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f7d488',
+  },
+  netflixInputButtonText: {
+    color: '#141820',
+    fontWeight: '800',
+  },
+  netflixWaitingText: {
+    color: '#cbd6e4',
+    marginTop: 8,
+  },
+  netflixErrorText: {
+    color: '#fca5a5',
+    marginTop: 8,
   },
   tabs: {
     flexDirection: 'row',
