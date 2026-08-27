@@ -12,9 +12,14 @@ flowchart LR
   Bus --> Player[MpvController]
   Bus --> Input[Windows input adapter]
   Bus --> Volume[Windows volume adapter]
-  Apps --> Owned[Controller-owned browser windows]
-  Apps -->|typed Netflix action| Page[NetflixPageController]
-  Page -->|short-lived CDP on 127.0.0.1| NetflixDOM[Netflix DOM in owned Chrome]
+  Apps --> Shell["Netflix standalone Chrome app window<br/>--app=&lt;url&gt;"]
+  Apps -->|typed Netflix command/text| Page[NetflixPageController]
+  Page -->|fresh short-lived CDP on 127.0.0.1| NetflixDOM[Netflix DOM runtime]
+  NetflixDOM -->|safe NetflixContext| Bus
+  Apps --> Fullscreen[YoutubeFullscreenController]
+  Fullscreen -->|bounded per-video short CDP| YoutubeDOM[Owned YouTube/News Chrome]
+  Bus -->|authoritative state| PWA
+  Bus -->|authoritative state| Expo
   Player --> MPV[mpv JSON IPC]
 ```
 
@@ -33,10 +38,11 @@ QR pairing is the primary endpoint-discovery path. A code-only QR is never assig
 | `app/protocol.py` | Versioned, strict Pydantic WebSocket models and command whitelist. |
 | `app/websocket/` | Authenticated connection registry, acknowledgements, and state fan-out. |
 | `app/security/` | Pairing codes, salted token store, and the per-user local CA/IP-SAN TLS materials. |
-| `app/commands/bus.py` | Central command routing, state/error outcome, and launcher focus transitions. |
-| `app/applications/manager.py` | Tracks owned child processes/windows, maps Netflix commands to typed page actions, and retains HOME ownership. |
-| `app/applications/netflix_page.py` | Discovers the unique Netflix target and performs bounded, short-lived localhost CDP transactions. |
-| `app/applications/netflix_control.js` | Versioned fixed DOM runtime for visible candidates, semantic focus, navigation, BACK, and playback. |
+| `app/commands/bus.py` | Sole owner of `ControllerState`, including Netflix context update/invalidation and state/error outcomes. |
+| `app/applications/manager.py` | Tracks owned process/PID/HWND lifecycle, standalone Netflix shell, and YouTube/News fullscreen-controller lifecycle. |
+| `app/applications/netflix_page.py` | Discovers the unique Netflix target and performs bounded, short-lived localhost CDP transactions returning strict context. |
+| `app/applications/netflix_control.js` | Fixed async DOM runtime for safe context, rail navigation, bounded direct play, submit, BACK, and ready-video playback. |
+| `app/applications/youtube_fullscreen.py` | Bounded localhost probe that requests fullscreen at most once per YouTube video identity. |
 | `app/player/channels.py` | Validates and selects enabled, ordered channels. |
 | `app/player/mpv.py` | Starts mpv and controls it over named-pipe JSON IPC. |
 | `app/system/` | Narrow Windows adapters for mouse, Unicode text, windows, sleep, and Core Audio volume. |
@@ -47,27 +53,33 @@ QR pairing is the primary endpoint-discovery path. A code-only QR is never assig
 
 1. A Remote loads `<scheme>://<controller-literal-IP>:<port>/remote` using the configured `server.transport`; the server rejects arbitrary Host names and mismatched browser Origins. Plaintext LAN access is rejected only in HTTPS mode.
 2. The Remote connects with `ws://` or `wss://` matching that transport, has bounded pre-authentication admission, and must authenticate with a valid token before any command, pointer, or text-input message.
-3. `CommandBus` routes through the unchanged `ApplicationPort.forward_command()` and `type_text()` boundary. HOME remains a separate `return_home()` branch.
-4. `ApplicationManager` sends Netflix navigation and text only to `NetflixPageController`. Browser BACK still uses Alt+Left, while YouTube and News retain their Windows input path.
-5. The bus updates `StateStore` after the action outcome is known. A stable controller error becomes a failed acknowledgement without changing the active application.
-6. `ConnectionRegistry` broadcasts a new `state` message only when an observable state value changed, filtering invalid Remote sessions first.
-7. The source Remote receives an `ack` for each request ID.
+3. `CommandBus` routes through `ApplicationPort`. HOME remains the separate `return_home()` lifecycle branch.
+4. `ApplicationManager` returns strict Netflix context from `NetflixPageController`; Browser BACK and YouTube/News Windows-input behavior remain separate. The manager never receives `StateStore` or a broadcast capability.
+5. `CommandBus` alone writes returned context to `StateStore`. Netflix commands/text update it; HOME, another app, rollback, and failure clear it.
+6. `ConnectionRegistry` broadcasts authoritative state only for `state_changed` outcomes, after filtering invalid sessions.
+7. The source Remote receives one `ack` per request ID. PWA/Expo submit uses the existing version 1 `text_input` with `submit=true`, not a new command type.
 
 The TV socket accepts only `CommandMessage`, requires both a loopback client address and the exact local TV Origin, and cannot pair, send text, or move the pointer. Production startup uses the configured transport; loopback plaintext remains available for the development proxy.
 
 ## Netflix page adapter
 
-Netflix starts in Google Chrome with `config/chrome-netflix-profile`, `--start-fullscreen`, `--remote-debugging-address=127.0.0.1`, and a reserved local port. It does not load the YouTube/News AdBlock extension. New and reused owned windows run `FOCUS_PRIMARY`; an initialization failure closes only a newly launched owned Netflix window or re-minimizes a reused one before returning to the launcher.
+Netflix starts in a controller-owned Chrome **app window** with exactly one `--app=<configured HTTPS Netflix URL>`, no positional Netflix URL, and therefore no normal tab strip or omnibox. This is still desktop Chrome—not a native/Android Netflix app. It uses `config/chrome-netflix-profile`, `--start-fullscreen`, `--disable-extensions`, both permission-prompt suppression flags, `--remote-debugging-address=127.0.0.1`, and a reserved port. It does not load the YouTube/News AdBlock extension. New and reused windows call idempotent `initialize()`; failure closes only a new owned window or re-minimizes a reused one.
 
-Every command attempt performs a fresh `GET http://127.0.0.1:<port>/json/list`, requires exactly one top-level page with no opener whose URL host is `netflix.com` or a subdomain, and accepts only a `ws://127.0.0.1:<valid-port>` debugger URL. It then opens one WebSocket context, verifies runtime version `1`, injects the local fixed runtime only when missing, executes one typed action against a newly enumerated DOM, and closes the socket. Element references and rectangles never cross commands.
+Each transaction performs a fresh `GET http://127.0.0.1:<port>/json/list`, requires one top-level `netflix.com` page without an opener, validates a `ws://127.0.0.1:<port>` debugger URL, opens one WebSocket, verifies/injects runtime version `1`, performs its bounded operation, and closes. No CDP socket, DOM node, or rectangle persists between transactions.
 
-Connection, version-check, and runtime-injection failures occur before an action and may retry once. `FOCUS_PRIMARY` and `FOCUS_EDITABLE` are idempotent and may also retry once. For NAV, FOCUS_NEXT, OK, BACK, PLAY_PAUSE, or `Input.insertText`, a successful WebSocket send followed by a lost, malformed, or invalid response is an outcome-unknown failure: the controller returns `netflix_controller_unavailable` without replaying the side effect.
+The runtime returns a strict frozen `NetflixContext`: `stage`, `input_kind`, boolean `has_error`, boolean `can_submit`, and browse-only `focused_title` (at most 120 characters). Extra fields are rejected. Values, lengths, emails, passwords, codes, cookies, tokens, session data, request bodies, MediaKeys, Widevine exchanges, and licensing traffic are never read into context, logs, acknowledgements, or state.
 
-This is a clean cutover. Netflix navigation never falls back to SendInput, Alt+Left, coordinates, another tab, or another Chrome process.
-Phones cannot provide JavaScript, selectors, URLs, raw keys, CDP methods, or debugger addresses.
-Text is sent only to the focused editable field and is excluded from logs, state, and acknowledgements.
-The adapter does not inspect credentials, cookies, requests, MediaKeys, Widevine exchanges, or DRM licensing traffic, and it does not bypass DRM.
-Netflix DOM changes can require a tested runtime update; permanent compatibility is not guaranteed.
+Visible title cards are grouped into rails. Left/Right stays in one rail; Up/Down chooses the nearest-X card in the adjacent rail and excludes headers, slider handles, and preview controls. OK clicks one visible card-contained or newly opened detail Play/Resume control without synthesizing a watch URL. BACK prefers Netflix's player back control; PLAY_PAUSE requires `readyState >= 2`. Type+submit focuses one editable field, sends one `Input.insertText`, clicks one primary action, and bounded-settles context.
+
+Only pre-action discovery/version/injection and explicitly idempotent initialization may retry. After insert/click/BACK/playback/submit is sent, any lost or invalid acknowledgement is outcome-unknown and never replays the side effect. Netflix never falls back to SendInput, coordinates, another tab, or another Chrome process.
+
+Netflix DOM compatibility is necessarily bounded: a site redesign can require runtime/test updates. Credentialed browse/direct-play acceptance additionally requires an externally provided authorized account. The controller does not provision, save, or expose credentials and does not bypass DRM.
+
+## YouTube/News fullscreen lifecycle
+
+YouTube and News use controller-owned fullscreen Chrome with `config/chrome-tv-profile`, localhost-only debugging, store AdBlock, `--disable-notifications`, and `--deny-permission-prompts`. After the owned PID/HWND and AdBlock attach succeed, `ApplicationManager` starts one `YoutubeFullscreenController` for that debug port. HOME, another app, replacement, launch rollback, desktop exit, and shutdown await `stop()` before disposing the process.
+
+The controller performs a bounded probe about once per second. Each inspect/fullscreen operation resolves the unique top-level YouTube target through `127.0.0.1`, opens a short CDP socket, and closes it on leaving the async context. A ready video that is not fullscreen receives one `Runtime.evaluate` with `userGesture=true`; its video identity is marked before send. A lost acknowledgement is never retried. Escape therefore remains effective for that identity across later probes, while a new watch/hash-watch/shorts/live identity can request fullscreen once.
 
 ## Ownership and Home
 
@@ -84,6 +96,7 @@ The manager never searches for or terminates arbitrary Chrome, Brave, Edge, or m
 - `volume` and `muted`.
 - `channel_number` and `channel_name` when Live TV is active.
 - `error_message` and transient `status_message` for explicit UI feedback.
+- `netflix_context`: strict safe context while Netflix is active; `null` after HOME, another app, rollback, or failure.
 
 Each connected, still-valid paired Remote receives snapshots after state changes, so multiple remotes converge on the same state. Revoked, evicted, and expired sessions are removed before state fan-out; an authenticated socket is also closed when its token expires.
 

@@ -6,7 +6,7 @@ A local Windows 11 controller that turns an HDMI-connected PC into a TV-style la
 
 - Windows 11, signed in as the user who will run the TV controller.
 - Python 3.11+ for appliance deployment, available as `python` on `PATH` or through the Windows `py` launcher; Node.js LTS only for frontend development.
-- Google Chrome for YouTube and News (fullscreen with store AdBlock in an isolated TV profile) and Netflix (fullscreen with Widevine in its own profile).
+- Google Chrome for YouTube/News TV playback and the Netflix standalone app window. Netflix still relies on Chrome/Widevine and the user's normal Netflix authorization.
 - [mpv](https://mpv.io/installation/) for Live TV.
 - Laptop/PC on a private LAN. Phone may be on another network if `cloudflared` is installed.
 - Native Android builds additionally require Android Studio, its Android SDK, and a JDK. Native iOS builds require macOS/Xcode or an authenticated Expo EAS build account.
@@ -87,7 +87,7 @@ Pairing codes expire after 10 minutes and can be used once. Five failed attempts
 
 ## Native Remote app
 
-`mobile/` is an Expo/React Native app for Android and iOS. It scans the TV pairing QR code, supports manual numeric-IP pairing, stores Remote tokens in device-bound secure storage, and exposes the same typed Remote controls, touchpad, text input, reconnect, and token-revocation flow as the PWA.
+`mobile/` is an Expo/React Native app for Android and iOS. It scans the TV pairing QR code, supports manual numeric-IP pairing, stores Remote tokens in device-bound secure storage, and exposes the same typed controls and Netflix context card as the PWA. The context card selects safe email/password/verification input modes but never persists field contents.
 
 Native Remote is HTTPS-only. Before pairing, set `server.transport` to `"https"` and install and trust the controller CA. Android builds include a network-security configuration that trusts user-installed CAs for this app; iOS still requires enabling full trust for the imported CA. The app deliberately does not scan arbitrary LAN addresses: use the TV QR code or enter the numeric LAN IP printed by `start.ps1`.
 
@@ -112,27 +112,29 @@ Pop-Location
 - Home: minimize/stop the project-owned active application and return to 我的電視.
 - Space: Play/Pause.
 
-The phone Remote exposes a dedicated physical-remote layout with three app keys (YouTube, Netflix, 新聞), D-pad navigation, Back/Home, Channel Up/Down, Volume/Mute, one-touch voice recognition, video search, text input, and a constrained touchpad:
+The PWA and Expo Remotes expose three app keys (YouTube, Netflix, 新聞), D-pad navigation, Back/Home, TAB/下一欄, Channel Up/Down, Volume/Mute, voice search, bounded text input, and a constrained touchpad:
 
 - One-finger drag: bounded relative mouse motion.
 - One tap / double tap: left click / double click.
 - Two-finger vertical drag: mouse-wheel scrolling.
-- Voice & Search: dictation and video search query sent directly to launch YouTube search in kiosk Chrome.
-- Text: up to 256 sanitized printable characters, sent as Unicode input to the active application.
-The Remote never offers raw key sequences, shell commands, PowerShell commands, file paths, or unrestricted pointer coordinates.
+- Voice & Search: dictation and a bounded query that opens YouTube TV search.
+- Text: up to 256 sanitized printable characters. Ordinary keyboard input sends `submit=false`; the Netflix context card can send one type-and-submit operation with `submit=true`.
+
+The Remote never offers raw key sequences, shell commands, PowerShell commands, file paths, browser selectors, JavaScript, or unrestricted pointer coordinates. Local password/code state is cleared when sent or when Netflix context changes; it is not logged or persisted.
 
 ## YouTube, Netflix, News, and Browser
 
-- **YouTube** opens Google Chrome in fullscreen kiosk mode (`--kiosk`) with store AdBlock (`gighmmpiobklfepjocnamgkkbiglidom`) in an isolated TV profile (`config/chrome-tv-profile`).
-- **News** opens official YouTube Live news streams in fullscreen kiosk Chrome with AdBlock. Switch streams using Channel Up / Channel Down on the Remote or TV interface.
-- **Netflix** opens Google Chrome with the dedicated `config/chrome-netflix-profile`, `--start-fullscreen`, and a debugging endpoint bound only to `127.0.0.1` on a reserved local port. It does not load AdBlock.
-- **Browser** opens the configured browser start URL. By default it uses Edge when no `browser_path` is specified.
+- **YouTube** opens controller-owned Google Chrome fullscreen in `config/chrome-tv-profile`, with localhost-only debugging and the verified store AdBlock. A bounded `YoutubeFullscreenController` checks short-lived CDP sessions and requests fullscreen once for each new `/watch`, TV hash-watch, `/shorts`, or `/live` identity. Escape is respected for that identity; a different video can trigger fullscreen once.
+- **News** uses the same owned TV Chrome profile and lifecycle for official YouTube Live URLs. Channel Up/Down replaces the owned stream, stopping the prior fullscreen probe before starting the next.
+- **Netflix** opens Chrome as a standalone app shell with exactly one `--app=<configured-https-Netflix-URL>`, not a positional URL. The window has no normal Chrome tabs or omnibox, but it is still a Chrome desktop app window—not an Android/native Netflix client. It uses `config/chrome-netflix-profile`, `--start-fullscreen`, `--disable-extensions`, and a debugger bound only to `127.0.0.1`.
+- All TV Chrome launches include `--disable-notifications` and `--deny-permission-prompts`; these flags affect only controller-owned TV/Netflix processes and do not write a global Chrome permission policy.
+- **Browser** opens the configured browser start URL in its normal browser window.
 
-Both the `/remote` PWA and the `mobile/` Expo app use the existing version 1 command and text-input messages for mouse-free Netflix navigation. The D-pad, OK, BACK, PLAY_PAUSE, and up to 256 characters of sanitized text are routed through `NetflixPageController`; they are not converted to Windows mouse coordinates or arbitrary browser commands.
+Netflix navigation enumerates visible title cards by rail: Left/Right stays within a rail, Up/Down chooses the nearest card in the adjacent rail, OK clicks one visible card/detail Play or Resume action, BACK prefers Netflix's player back control, and PLAY_PAUSE requires a ready video. Each operation uses a fresh localhost target lookup and a short CDP WebSocket that closes after the result. Non-idempotent sends, clicks, playback, and submit operations are never replayed when their outcome is unknown.
 
-Each Netflix page action discovers the one controller-owned, top-level `netflix.com` page and uses a short-lived localhost CDP connection that closes after the result is known. Chrome and Netflix remain responsible for sign-in, cookies, protected-content authorization, Widevine, and playback. This project does not read credentials, intercept licensing traffic, or bypass DRM.
+`NetflixContext` broadcasts only `stage`, `input_kind`, `has_error`, `can_submit`, and an optional browse-only `focused_title` (maximum 120 characters). It never contains a field value, length, email, password, verification code, cookie, token, or session secret. `CommandBus` is the sole state owner: it stores returned Netflix context and clears it on HOME, another app, rollback, or failure. The PWA and Expo clients render inline email/password/code or browse guidance and fall back to their ordinary D-pad/keyboard when context is null or unknown.
 
-HOME never becomes a Netflix DOM command. It only minimizes the still-owned Netflix window and restores 我的電視; it does not close or steer another Chrome window. Netflix can change its DOM and accessibility metadata without notice, so `backend/app/applications/netflix_control.js` and its fixtures may need maintenance after a site redesign. The page adapter is a constrained integration, not a promise of permanent compatibility.
+HOME never becomes a Netflix DOM command. It minimizes the specific still-owned Netflix app window and restores 我的電視; it never steers or terminates another Chrome process. Chrome and Netflix remain responsible for sign-in, cookies, protected-content authorization, Widevine, and playback. This project does not store credentials, intercept licensing traffic, or bypass DRM. Credentialed browse/direct-play acceptance requires an operator-provided authorized Netflix account and cannot be claimed by automated tests without that external prerequisite. Netflix DOM changes can require a tested runtime update.
 
 Only a concrete window/process launched by this controller is minimized or terminated. The controller never kills every Chrome, Edge, or mpv process on the machine.
 

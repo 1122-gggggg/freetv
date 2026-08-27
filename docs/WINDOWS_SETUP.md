@@ -3,7 +3,7 @@
 ## First installation
 
 1. Install Python 3.11+ as `python` on `PATH` or through the Windows `py` launcher. Node.js LTS is needed only if you clone the repo and `frontend\dist` is missing.
-2. Install Brave if YouTube should use Brave.
+2. Install Google Chrome. YouTube/News and Netflix use separate ignored Chrome profiles; Netflix protected playback still depends on Chrome/Widevine and a user-authorized Netflix account.
 3. Install [mpv](https://mpv.io/installation/) if Live TV is required. Add its directory to `PATH` or set `applications.mpv_path` in `config/settings.json`.
 4. In PowerShell at the repository root or unzipped Release directory, run `Set-ExecutionPolicy -Scope Process Bypass` then `./scripts/setup.ps1`.
 5. Review local `config/settings.json` and `config/channels.json`. Those files are intentionally ignored by Git because they are machine-specific. Default `server.transport` is `"http"`.
@@ -18,7 +18,11 @@ Find the Remote address by running `./scripts/start.ps1`; it prints the selected
 
 ## TV appliance behavior
 
-Run `./scripts/start.ps1` to start the backend, wait for health, and open the local TV page. Re-running it restarts only this repository's non-reload production controller when transport or TLS material changed; an unrelated listener on the configured port is rejected. In HTTPS mode startup waits up to 30 seconds for an eligible private LAN address before issuing the controller certificate. If Wi-Fi is still unavailable, startup fails instead of creating a loopback-only certificate; the autostart task then uses its finite retry policy. When Edge is available, it starts the launcher in Edge's documented full-screen kiosk mode with an absolute dedicated profile directory (`--user-data-dir` under `config\edge-profile`), extensions disabled, and sync disabled. The launcher itself has no account state, and this dedicated user data directory ensures the TV kiosk runs in a separate process that does not share, lock, or affect YouTube or Netflix's normal browser profiles. If Edge is unavailable, the script warns and falls back to the default browser without profile overrides. The controller uses the MY TV page as the Home destination; keep that page open.
+Run `./scripts/start.ps1` to start the backend, wait for health, and open the local TV page. Re-running it restarts only this repository's non-reload production controller when transport or TLS material changed; an unrelated listener on the configured port is rejected. In HTTPS mode startup waits up to 30 seconds for an eligible private LAN address before issuing the controller certificate. If Wi-Fi is still unavailable, startup fails instead of creating a loopback-only certificate; the autostart task then uses its finite retry policy.
+
+When Edge is available, it starts only the local MY TV launcher in Edge's documented full-screen kiosk mode with an absolute dedicated `config\edge-profile`, extensions disabled, and sync disabled. That launcher profile contains no account state and does not share or lock the controller-owned Chrome TV/Netflix profiles or the user's daily Chrome profile. If Edge is unavailable, startup warns and opens the MY TV page in the default browser.
+
+The controller launches only its own browser children. YouTube/News use `config\chrome-tv-profile`; Netflix uses `config\chrome-netflix-profile`. Both profiles receive `--disable-notifications` and `--deny-permission-prompts` on their command line, so setup does not grant a global website permission or alter a daily Chrome profile. HOME and shutdown act only on the tracked PID/HWND tree.
 
 For automatic start after sign-in:
 
@@ -39,7 +43,12 @@ Set an explicit executable path if your installation differs. Paths are local ad
 
 ## Browser behavior
 
-YouTube opens Brave using the existing default profile; Google login persists normally. Netflix opens Edge with normal browser DRM and user profile state, completely isolated from the TV kiosk session. Do not expect automatic Netflix login, credential management, DRM extraction, or ad blocking: none is implemented.
+- YouTube and News open controller-owned fullscreen Google Chrome with the TV profile, store AdBlock, localhost-only debugging, and the two permission-prompt suppression flags. A bounded probe requests fullscreen once per new video identity. Escape remains effective for that identity; changing videos permits one new request.
+- Netflix opens desktop Chrome with exactly one `--app=<configured HTTPS Netflix URL>` in `config\chrome-netflix-profile`, `--start-fullscreen`, `--disable-extensions`, localhost-only debugging, and the same permission flags. `--app` removes the normal tab strip/omnibox, but this is not an Android/native Netflix app.
+- Netflix login, cookie persistence, protected-content permission, Widevine, and playback remain Chrome/Netflix responsibilities. The controller never stores or reads credentials and cannot validate credentialed browse/direct-play without an operator-supplied authorized account.
+- The page adapter requires one controller-owned top-level Netflix target. It uses one short CDP socket per operation and never keeps a debugger connection resident. A Netflix site redesign can require an updated tested runtime.
+- PWA/Expo Netflix context cards show safe input mode, generic error state, browse title, and navigation hints. Sending clears local password/code text immediately. Null/unknown context falls back to the ordinary D-pad/keyboard.
+- The configured Browser tile opens its ordinary browser window independently of the TV and Netflix profiles.
 
 ## Live TV behavior
 

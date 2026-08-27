@@ -81,7 +81,7 @@ The controller verifies and removes the token's persisted salted hash, closes an
 
 Allowed command values:
 
-- `NAV_UP`, `NAV_DOWN`, `NAV_LEFT`, `NAV_RIGHT`, `OK`, `BACK`, `HOME`
+- `NAV_UP`, `NAV_DOWN`, `NAV_LEFT`, `NAV_RIGHT`, `OK`, `BACK`, `TAB`, `HOME`
 - `PLAY_PAUSE`, `NEXT`, `PREVIOUS`
 - `VOLUME_UP`, `VOLUME_DOWN`, `MUTE`
 - `CHANNEL_UP`, `CHANNEL_DOWN`
@@ -116,11 +116,14 @@ This intentionally cannot position the pointer absolutely or inject arbitrary mo
   "version": 1,
   "type": "text_input",
   "request_id": "text-45",
-  "text": "Search phrase"
+  "text": "Search phrase",
+  "submit": false
 }
 ```
 
-Text is limited to 256 characters. Control characters are removed before dispatch and Unicode text is sent to the foreground application with Windows Unicode input events. Text is data, not a shell or command language.
+`text` is limited to 256 sanitized characters. `submit` is an optional strict boolean that defaults to `false`, preserving protocol version 1 and the existing `text_input` message type. Ordinary PWA/Expo keyboard input sends `false`; a Netflix context-card send-and-continue operation sends `true`.
+
+Text is data, never a shell or command language. Netflix text goes only through the unique controller-owned Netflix target. Input field values and lengths are not read back into state, acknowledgement, or logs. After `Input.insertText` is sent, submit is attempted at most once in the same verified short socket; failures do not restart the transaction or repeat text.
 
 ## Video search
 
@@ -169,15 +172,31 @@ Malformed protocol data produces a non-sensitive `error` message. A client shoul
 {
   "version": 1,
   "type": "state",
-  "active_app": "live_tv",
-  "focused_tile": "live_tv",
+  "active_app": "netflix",
+  "focused_tile": "netflix",
   "volume": 42,
   "muted": false,
-  "channel_number": 3,
-  "channel_name": "Demo News",
+  "channel_number": null,
+  "channel_name": null,
   "error_message": null,
-  "status_message": "CH 03 Demo News"
+  "status_message": null,
+  "netflix_context": {
+    "stage": "login",
+    "input_kind": "password",
+    "has_error": false,
+    "can_submit": true,
+    "focused_title": null
+  }
 }
 ```
 
-The server broadcasts a state message to every still-valid authenticated Remote after an observable change. State is authoritative; clients do not independently implement application-control decisions.
+`netflix_context` is either `null` or an object with exactly five fields:
+
+- `stage`: `login`, `verification`, `browse`, `details`, `watch`, or `unknown`.
+- `input_kind`: `email`, `password`, `code`, `search`, or `none`.
+- `has_error` and `can_submit`: strict booleans.
+- `focused_title`: `null`, except during `browse`, where a sanitized title up to 120 characters is allowed.
+
+Extra fields—including `value`, `length`, `email`, `password`, `code`, `cookie`, and `token`—are rejected by the protocol model. The object is safe presentation context, not a credential or DOM snapshot. `CommandBus` alone writes it and clears it on HOME, another application, rollback, and failures.
+
+The server broadcasts a state message to every still-valid authenticated Remote after an observable change. Netflix command/text outcomes set `state_changed=true` so PWA/Expo waiting state resolves from authoritative context. Other clients do not independently infer Netflix page state.
