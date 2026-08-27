@@ -730,6 +730,69 @@ describe('RemoteScreen', () => {
     })
   })
 
+  it('guards true-to-false submit readiness without clearing modal text', async () => {
+    const context: NetflixContext = {
+      stage: 'login',
+      input_kind: 'password',
+      has_error: false,
+      can_submit: true,
+      focused_title: null,
+    }
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+      )
+    })
+    const root = renderer!.root
+    act(() => {
+      latestMockSocket!.simulateStatusChange('authenticated')
+      latestMockSocket!.simulateStateChange(netflixState(context))
+    })
+    act(() => {
+      root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' }).props.onPress()
+    })
+    act(() => {
+      root
+        .findByProps({ accessibilityLabel: 'Netflix 情境輸入' })
+        .props.onChangeText('secret')
+    })
+
+    act(() => {
+      latestMockSocket!.simulateStateChange(
+        netflixState({ ...context, can_submit: false }),
+      )
+    })
+    let modal = root.findByType(TextInputModal)
+    expect(modal.props.canSubmit).toBe(false)
+    expect(root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' }).props.value).toBe(
+      'secret',
+    )
+    expect(
+      root.findByProps({ accessibilityLabel: '送出 Netflix 輸入' }).props.disabled,
+    ).toBe(true)
+    await act(async () => {
+      await expect(modal.props.onSend('secret', true)).rejects.toThrow(
+        'Netflix 尚未可送出',
+      )
+    })
+    expect(latestMockSocket!.sendTextInput).not.toHaveBeenCalled()
+
+    act(() => {
+      latestMockSocket!.simulateStateChange(
+        netflixState({ ...context, can_submit: true }),
+      )
+    })
+    modal = root.findByType(TextInputModal)
+    expect(modal.props.canSubmit).toBe(true)
+    expect(root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' }).props.value).toBe(
+      'secret',
+    )
+    await act(async () => {
+      await expect(modal.props.onSend('secret', true)).resolves.toBeUndefined()
+    })
+    expect(latestMockSocket!.sendTextInput).toHaveBeenCalledWith('secret', true)
+  })
+
   it('shows browse context and falls back to generic input for null or unknown', async () => {
     await act(async () => {
       renderer = ReactTestRenderer.create(

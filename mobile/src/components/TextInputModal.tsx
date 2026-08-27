@@ -17,6 +17,7 @@ interface TextInputModalProps {
   visible: boolean
   inputKind: NetflixInputKind
   submit: boolean
+  canSubmit: boolean
   onClose: () => void
   onSend: (text: string, submit: boolean) => Promise<void>
 }
@@ -24,6 +25,7 @@ interface TextInputModalProps {
 export function TextInputModal({
   visible,
   inputKind,
+  canSubmit,
   submit,
   onClose,
   onSend,
@@ -41,7 +43,7 @@ export function TextInputModal({
   }
 
   const handleSend = async () => {
-    if (!text.trim() || isSending) return
+    if (!text.trim() || isSending || (submit && !canSubmit)) return
     const value = text
     setText('')
     setIsSending(true)
@@ -123,11 +125,15 @@ export function TextInputModal({
             <TouchableOpacity style={[styles.btn, styles.cancelBtn]} onPress={handleClose}>
               <Text style={styles.cancelText}>取消</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
-              style={[styles.btn, styles.sendBtn, !text.trim() && styles.disabledBtn]}
+              style={[
+                styles.btn,
+                styles.sendBtn,
+                (!text.trim() || isSending || (submit && !canSubmit)) &&
+                  styles.disabledBtn,
+              ]}
               onPress={handleSend}
-              disabled={!text.trim() || isSending}
+              disabled={!text.trim() || isSending || (submit && !canSubmit)}
               accessibilityLabel={submit ? '送出 Netflix 輸入' : '送出文字'}
             >
               <Text style={styles.sendText}>{isSending ? '送出中…' : '送出'}</Text>

@@ -154,6 +154,11 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
     if (!socket || status !== 'authenticated') {
       throw new Error('電視未連線')
     }
+    if (submit && !netflixContext?.can_submit) {
+      setWaitingForNetflix(false)
+      setNetflixSendFailed(true)
+      throw new Error('Netflix 尚未可送出，請稍後再試')
+    }
     if (submit) {
       setWaitingForNetflix(true)
       setNetflixSendFailed(false)
@@ -465,6 +470,9 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
           visible
           inputKind={textInputSource.inputKind}
           submit={textInputSource.submit}
+          canSubmit={
+            !textInputSource.submit || Boolean(netflixContext?.can_submit)
+          }
           onClose={() => setTextInputSource(null)}
           onSend={handleSendText}
         />
