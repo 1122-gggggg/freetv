@@ -1,7 +1,7 @@
 (() => {
   'use strict'
 
-  const VERSION = '2'
+  const VERSION = '3'
 
   const ACTIONS = new Set([
     'FOCUS_PRIMARY',
@@ -577,16 +577,16 @@
   const readyWatchPlayback = () => {
     const context = netflixContext()
     if (context.stage !== 'watch') return null
-    const video = [...document.querySelectorAll('video')].find(
-      (element) =>
-        element instanceof HTMLVideoElement &&
-        visible(element) &&
-        element.readyState >= 2,
-    )
+    const video = [...document.querySelectorAll('video')].find((element) => {
+      if (!(element instanceof HTMLVideoElement) || !element.isConnected) return false
+      if (element.readyState < 2) return false
+      const rect = element.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0
+    })
     return video ? { context, video } : null
   }
 
-  const settlePlayingWatchContext = async (timeoutMs = 3000) => {
+  const settlePlayingWatchContext = async (timeoutMs = 8000) => {
     const deadline = performance.now() + timeoutMs
     let playRequested = false
     while (performance.now() < deadline) {

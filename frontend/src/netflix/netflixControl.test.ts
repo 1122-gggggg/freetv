@@ -396,6 +396,42 @@ describe('Netflix DOM control runtime', () => {
     })
   })
 
+  it('settles OK playback when a ready watch video is covered by player chrome', async () => {
+    window.history.replaceState({}, '', '/browse')
+    document.body.innerHTML = `
+      <div class="lolomoRow">
+        <div id="card" class="title-card" tabindex="0">
+          陽光女子合唱團 <button id="play">播放</button>
+        </div>
+      </div>
+    `
+    const card = document.querySelector('#card') as HTMLElement
+    const play = document.querySelector('#play') as HTMLButtonElement
+    setRect(card, 20, 80)
+    setRect(play, 40, 40)
+    card.focus()
+    vi.spyOn(play, 'click').mockImplementation(() => {
+      window.history.replaceState({}, '', '/watch/one')
+      document.body.innerHTML = '<video></video><div id="spinner"></div>'
+      const video = document.querySelector('video') as HTMLVideoElement
+      const spinner = document.querySelector('#spinner') as HTMLElement
+      setRect(video, 0, 0, 640, 360)
+      setRect(spinner, 0, 0, 640, 360)
+      Object.defineProperty(video, 'readyState', { configurable: true, value: 4 })
+      Object.defineProperty(video, 'paused', { configurable: true, value: false })
+    })
+
+    const result = await runtime().run('OK', null)
+
+    expect(result).toMatchObject({
+      ok: true,
+      status: 'playing',
+      context: { stage: 'watch' },
+    })
+  })
+
+
+
 
 
   it('direct-play timeout clicks the card once and returns a fixed error', async () => {
@@ -417,7 +453,7 @@ describe('Netflix DOM control runtime', () => {
     expect(click).toHaveBeenCalledOnce()
     vi.useRealTimers()
   })
-  it('exposes only the fixed global version and run interface and re-enumerates every run', async () => { expect(runtime().version).toBe('2')
+  it('exposes only the fixed global version and run interface and re-enumerates every run', async () => { expect(runtime().version).toBe('3')
 
   expect(Object.keys(runtime()).sort()).toEqual(['run', 'version'])
   document.body.innerHTML = '<button id="first">First</button>'
@@ -1308,7 +1344,7 @@ describe('Netflix DOM control runtime', () => {
     const sentinel = { sentinel: true }
     const outcome = Promise.race([
       runtime().run('OK', null),
-      new Promise<typeof sentinel>((resolve) => setTimeout(() => resolve(sentinel), 3100)),
+      new Promise<typeof sentinel>((resolve) => setTimeout(() => resolve(sentinel), 8100)),
     ])
 
     await vi.runAllTimersAsync()

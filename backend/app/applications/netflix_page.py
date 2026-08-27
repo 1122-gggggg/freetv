@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from app.commands.ports import CommandExecutionError
 from app.protocol import Command, NetflixContext, NetflixStage
 
-RUNTIME_VERSION = "2"
+RUNTIME_VERSION = "3"
 ERROR_MESSAGES = {
     "netflix_page_unavailable": "無法連到 Netflix 控制頁面，請稍後再試。",
     "netflix_controller_unavailable": "無法載入 Netflix 遙控控制，請稍後再試。",
