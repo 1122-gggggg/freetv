@@ -1146,4 +1146,166 @@ describe('Netflix DOM control runtime', () => {
     expect(click).toHaveBeenCalledOnce()
     expect(play).toHaveBeenCalledOnce()
   })
+
+  it('keeps class-only card wrappers out of the focus representatives', async () => {
+    document.body.innerHTML = `
+      <div class="lolomoRow">
+        ${[1, 2, 3, 4, 5]
+          .map(
+            (index) =>
+              `<div class="title-card"><button class="slider-item">${index}</button></div>`,
+          )
+          .join('')}
+      </div>
+    `
+    const wrappers = [...document.querySelectorAll('.title-card')]
+    const buttons = [...document.querySelectorAll('button')]
+    wrappers.forEach((card, index) => setRect(card, index * 180, 80))
+    buttons.forEach((card, index) => setRect(card, index * 180 + 10, 80))
+    ;(buttons[0] as HTMLElement).focus()
+
+    for (const expected of [2, 3, 4, 5]) {
+      await runtime().run('NAV_RIGHT', null)
+      expect(document.activeElement).toBe(buttons[expected - 1])
+    }
+  })
+
+  it('does not click stale overlay Play before the selected details update', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = `
+      <div class="lolomoRow"><div class="title-card" tabindex="0">Selected</div></div>
+      <div class="detail-modal" id="details"><button id="old-play">Play</button></div>
+    `
+    const card = document.querySelector('.title-card') as HTMLElement
+    const overlay = document.querySelector('#details') as HTMLElement
+    const oldPlay = document.querySelector('#old-play') as HTMLButtonElement
+    setRect(card, 20, 80)
+    setRect(overlay, 400, 20, 400, 600)
+    setRect(oldPlay, 420, 40)
+    card.focus()
+    const oldClick = vi.spyOn(oldPlay, 'click')
+    let selectedPlayClicks = 0
+    vi.spyOn(card, 'click').mockImplementation(() => {
+      setTimeout(() => {
+        overlay.innerHTML = '<button id="selected-play">Play</button>'
+        const selectedPlay = document.querySelector('#selected-play') as HTMLButtonElement
+        setRect(selectedPlay, 420, 40)
+        vi.spyOn(selectedPlay, 'click').mockImplementation(() => {
+          selectedPlayClicks += 1
+          window.history.replaceState({}, '', '/watch/selected')
+          document.body.innerHTML = '<video></video>'
+          setReadyVideo()
+        })
+      }, 80)
+    })
+
+    let settled = false
+    const pending = runtime().run('OK', null).then((result) => {
+      settled = true
+      return result
+    })
+    await vi.advanceTimersByTimeAsync(30)
+    expect(settled).toBe(false)
+    expect(oldClick).not.toHaveBeenCalled()
+    await vi.runAllTimersAsync()
+    const result = await pending
+    vi.useRealTimers()
+
+    expect(oldClick).not.toHaveBeenCalled()
+    expect(selectedPlayClicks).toBe(1)
+    expect(result).toMatchObject({ ok: true, context: { stage: 'watch' } })
+  })
+
+  it('bounds a pending video.play promise inside the direct-play deadline', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = `
+      <div class="lolomoRow">
+        <div class="title-card" tabindex="0">Example <button>Play</button></div>
+      </div>
+    `
+    const card = document.querySelector('.title-card') as HTMLElement
+    const button = document.querySelector('button') as HTMLButtonElement
+    setRect(card, 20, 80)
+    setRect(button, 40, 90)
+    card.focus()
+    const play = vi.fn(
+      () => new Promise<void>(() => {
+        // Deliberately unresolved to prove the runtime deadline owns completion.
+      }),
+    )
+    const click = vi.spyOn(button, 'click').mockImplementation(() => {
+      window.history.replaceState({}, '', '/watch/pending-play')
+      document.body.innerHTML = '<video></video>'
+      const video = document.querySelector('video') as HTMLVideoElement
+      setRect(video, 20, 20, 640, 360)
+      Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+      Object.defineProperty(video, 'paused', { configurable: true, value: true })
+      Object.defineProperty(video, 'play', { configurable: true, value: play })
+    })
+    const sentinel = { sentinel: true }
+    const outcome = Promise.race([
+      runtime().run('OK', null),
+      new Promise<typeof sentinel>((resolve) => setTimeout(() => resolve(sentinel), 3100)),
+    ])
+
+    await vi.runAllTimersAsync()
+    const result = await outcome
+    vi.useRealTimers()
+
+    expect(result).toEqual({
+      ok: false,
+      status: 'error',
+      code: 'netflix_direct_play_unavailable',
+    })
+    expect(click).toHaveBeenCalledOnce()
+    expect(play).toHaveBeenCalledOnce()
+  })
+
+  it('maps requestFullscreen rejection to a fixed non-retryable error', async () => {
+    window.history.replaceState({}, '', '/watch/fullscreen-reject')
+    document.body.innerHTML = '<video></video>'
+    const video = document.querySelector('video') as HTMLVideoElement
+    setRect(video, 20, 20, 640, 360)
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+    const requestFullscreen = vi.fn().mockRejectedValue(new Error('denied'))
+    Object.defineProperty(video, 'requestFullscreen', {
+      configurable: true,
+      value: requestFullscreen,
+    })
+
+    const result = await runtime().run('FULLSCREEN', null)
+
+    expect(result).toEqual({
+      ok: false,
+      status: 'error',
+      code: 'netflix_fullscreen_unavailable',
+    })
+    expect(requestFullscreen).toHaveBeenCalledOnce()
+  })
+
+  it('uses one anchor representative per class-only card wrapper', async () => {
+    document.body.innerHTML = `
+      <div class="lolomoRow">
+        ${[1, 2, 3, 4, 5]
+          .map(
+            (index) =>
+              `<div class="title-card"><a href="/title/${index}">${index}</a><button>Play</button></div>`,
+          )
+          .join('')}
+      </div>
+    `
+    const wrappers = [...document.querySelectorAll('.title-card')]
+    const anchors = [...document.querySelectorAll('a')]
+    const buttons = [...document.querySelectorAll('button')]
+    wrappers.forEach((card, index) => setRect(card, index * 180, 80))
+    anchors.forEach((card, index) => setRect(card, index * 180 + 5, 80, 70, 60))
+    buttons.forEach((card, index) => setRect(card, index * 180 + 90, 80, 20, 60))
+    ;(anchors[0] as HTMLElement).focus()
+
+    for (const expected of [2, 3, 4, 5]) {
+      await runtime().run('NAV_RIGHT', null)
+      expect(document.activeElement).toBe(anchors[expected - 1])
+      expect(document.activeElement).not.toBe(buttons[expected - 1])
+    }
+  })
 })

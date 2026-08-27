@@ -11,6 +11,7 @@ from app.applications import youtube_fullscreen as fullscreen_module
 from app.applications.youtube_fullscreen import (
     ShortCdpYoutubeProbe,
     YoutubeFullscreenController,
+    _fullscreen_expression,
     extract_video_identity,
 )
 from app.commands.ports import CommandExecutionError
@@ -39,6 +40,7 @@ class FakeProbe:
         default_factory=lambda: [("watch:alpha", True, False)]
     )
     fullscreen_calls: list[tuple[int, str, bool]] = field(default_factory=list)
+    fullscreen_result: bool = True
     fail_after_send: bool = False
 
     async def inspect(self, port: int) -> tuple[str | None, bool, bool]:
@@ -47,10 +49,11 @@ class FakeProbe:
             return self.inspections[0]
         return self.inspections.pop(0)
 
-    async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> None:
+    async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> bool:
         self.fullscreen_calls.append((port, video_id, user_gesture))
         if self.fail_after_send:
             raise TimeoutError
+        return self.fullscreen_result
 
 
 @pytest.mark.parametrize(
@@ -154,6 +157,59 @@ def test_force_fullscreen_unknown_outcome_sends_only_once() -> None:
     assert asyncio.run(scenario()) == [(9222, "watch:alpha", True)]
 
 
+
+@dataclass
+class CoalescingProbe:
+    inspections: list[tuple[str | None, bool, bool]] = field(
+        default_factory=lambda: [
+            ("watch:alpha", True, False),
+            ("watch:alpha", True, True),
+        ]
+    )
+    fullscreen_calls: list[tuple[int, str, bool]] = field(default_factory=list)
+    fullscreen_started: asyncio.Event = field(default_factory=asyncio.Event)
+    release_fullscreen: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def inspect(self, port: int) -> tuple[str | None, bool, bool]:
+        assert port == 9222
+        return self.inspections.pop(0)
+
+    async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> bool:
+        self.fullscreen_calls.append((port, video_id, user_gesture))
+        self.fullscreen_started.set()
+        await self.release_fullscreen.wait()
+        return True
+
+
+def test_auto_and_manual_fullscreen_coalesce_without_duplicate_request() -> None:
+    async def scenario() -> tuple[bool, bool, list[tuple[int, str, bool]]]:
+        probe = CoalescingProbe()
+        controller = YoutubeFullscreenController(probe=probe)
+        automatic = asyncio.create_task(controller.probe_once(9222))
+        await probe.fullscreen_started.wait()
+        forced = asyncio.create_task(controller.force_fullscreen(9222))
+        await asyncio.sleep(0)
+        assert probe.fullscreen_calls == [(9222, "watch:alpha", True)]
+        probe.release_fullscreen.set()
+        return await automatic, await forced, probe.fullscreen_calls
+
+    assert asyncio.run(scenario()) == (
+        True,
+        False,
+        [(9222, "watch:alpha", True)],
+    )
+
+
+def test_force_fullscreen_rejects_second_session_identity_change() -> None:
+    async def scenario() -> str:
+        controller = YoutubeFullscreenController(
+            probe=FakeProbe(fullscreen_result=False)
+        )
+        with pytest.raises(CommandExecutionError) as caught:
+            await controller.force_fullscreen(9222)
+        return caught.value.code
+
+    assert asyncio.run(scenario()) == "youtube_video_unavailable"
 @dataclass
 class BlockingProbe:
     entered: asyncio.Event = field(default_factory=asyncio.Event)
@@ -169,7 +225,7 @@ class BlockingProbe:
             raise
         raise AssertionError("unreachable")
 
-    async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> None:
+    async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> bool:
         raise AssertionError("fullscreen must not be reached")
 
 
@@ -377,6 +433,41 @@ def test_fullscreen_outer_runtime_exception_is_not_retried(
     ]
     assert len(fullscreen_requests) == 1
     assert all(context.exited for context in connect.contexts)
+
+
+def test_short_cdp_fullscreen_revalidates_expected_identity_in_second_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    FakeAsyncClient.payload = [
+        _youtube_target("ws://127.0.0.1:9222/devtools/page/alpha")
+    ]
+    connect = FakeConnect()
+    connect.contexts = [FakeSocketContext(FakeSocket(False))]
+    monkeypatch.setattr(fullscreen_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(fullscreen_module.websockets, "connect", connect)
+
+    result = asyncio.run(
+        ShortCdpYoutubeProbe(timeout=0.8).fullscreen(
+            9222,
+            'watch:alpha\";globalThis.pwned=true;//',
+            True,
+        )
+    )
+
+    assert result is False
+    request = connect.contexts[0].socket.requests[0]
+    expression = request["params"]["expression"]
+    assert request["params"]["userGesture"] is True
+    assert json.dumps('watch:alpha\";globalThis.pwned=true;//') in expression
+    assert expression.count("requestFullscreen") == 1
+
+
+def test_fullscreen_expression_rejects_non_youtube_watch_host() -> None:
+    expression = _fullscreen_expression("watch:same")
+
+    assert "url.hostname === 'youtube.com'" in expression
+    assert "url.hostname.endsWith('.youtube.com')" in expression
+    assert expression.index("url.hostname") < expression.index("requestFullscreen")
 
 
 @pytest.mark.parametrize(

@@ -18,15 +18,46 @@ _INSPECT_EXPRESSION = """(() => {
     fullscreen: document.fullscreenElement !== null,
   };
 })()"""
-_FULLSCREEN_EXPRESSION = """(() => {
-  const target = document.querySelector('#movie_player') || document.querySelector('video');
-  return target?.requestFullscreen?.();
-})()"""
+
+
+def _fullscreen_expression(video_id: str) -> str:
+    expected = json.dumps(video_id, ensure_ascii=True)
+    return f"""(async () => {{
+  const expected = {expected};
+  const url = new URL(location.href);
+  const parts = url.pathname.split('/').filter(Boolean);
+  const youtubeHost =
+    url.hostname === 'youtube.com' || url.hostname.endsWith('.youtube.com');
+  if (!youtubeHost) return false;
+  let identity = null;
+  if (url.pathname.endsWith('/watch') && url.searchParams.get('v')) {{
+    identity = `watch:${{url.searchParams.get('v')}}`;
+  }} else if (url.hash.startsWith('#/watch?')) {{
+    const params = new URLSearchParams(url.hash.split('?')[1] || '');
+    if (params.get('v')) identity = `watch:${{params.get('v')}}`;
+  }} else if (parts.length >= 2 && ['shorts', 'live'].includes(parts.at(-2))) {{
+    identity = `${{parts.at(-2)}}:${{parts.at(-1)}}`;
+  }}
+  const video = document.querySelector('video');
+  if (
+    identity !== expected ||
+    !video ||
+    video.readyState < 2 ||
+    document.fullscreenElement !== null
+  ) return false;
+  const target = document.querySelector('#movie_player') || video;
+  const request = target.requestFullscreen;
+  if (typeof request !== 'function') return false;
+  await request.call(target);
+  return true;
+}})()"""
 
 
 class YoutubeProbe(Protocol):
     async def inspect(self, port: int) -> tuple[str | None, bool, bool]: ...
-    async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> None: ...
+    async def fullscreen(
+        self, port: int, video_id: str, user_gesture: bool
+    ) -> bool: ...
 
 
 def extract_video_identity(url: str) -> str | None:
@@ -70,15 +101,18 @@ class ShortCdpYoutubeProbe:
             raise ValueError("YouTube inspection result is invalid")
         return extract_video_identity(url), ready, fullscreen
 
-    async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> None:
+    async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> bool:
         if not video_id or user_gesture is not True:
             raise ValueError("A video identity and user gesture are required")
         debugger_url = await self._debugger_url(port)
-        await self._evaluate(
+        value = await self._evaluate(
             debugger_url,
-            _FULLSCREEN_EXPRESSION,
+            _fullscreen_expression(video_id),
             user_gesture=True,
         )
+        if type(value) is not bool:
+            raise ValueError("YouTube fullscreen result is invalid")
+        return value
 
     async def _debugger_url(self, port: int) -> str:
         if type(port) is not int or not 1 <= port <= 65535:
@@ -165,6 +199,7 @@ class YoutubeFullscreenController:
         self._task: asyncio.Task[None] | None = None
         self._port: int | None = None
         self._last_fullscreen_video_id: str | None = None
+        self._probe_lock = asyncio.Lock()
 
     async def start(self, port: int) -> None:
         if self._task is not None and not self._task.done() and self._port == port:
@@ -187,27 +222,36 @@ class YoutubeFullscreenController:
             pass
 
     async def probe_once(self, port: int) -> bool:
+        async with self._probe_lock:
+            return await self._probe_once_locked(port)
+
+    async def _probe_once_locked(self, port: int) -> bool:
         video_id, ready, fullscreen = await self._probe.inspect(port)
         if video_id is None or not ready or fullscreen:
             return False
         if video_id == self._last_fullscreen_video_id:
             return False
         self._last_fullscreen_video_id = video_id
-        await self._probe.fullscreen(port, video_id, True)
-        return True
+        return await self._probe.fullscreen(port, video_id, True)
 
     async def force_fullscreen(self, port: int) -> bool:
-        video_id, ready, fullscreen = await self._probe.inspect(port)
-        if video_id is None or not ready:
-            raise CommandExecutionError(
-                "youtube_video_unavailable",
-                "目前沒有可切換為全螢幕的 YouTube 影片。",
-            )
-        self._last_fullscreen_video_id = video_id
-        if fullscreen:
-            return False
-        await self._probe.fullscreen(port, video_id, True)
-        return True
+        async with self._probe_lock:
+            video_id, ready, fullscreen = await self._probe.inspect(port)
+            if video_id is None or not ready:
+                raise CommandExecutionError(
+                    "youtube_video_unavailable",
+                    "目前沒有可切換為全螢幕的 YouTube 影片。",
+                )
+            self._last_fullscreen_video_id = video_id
+            if fullscreen:
+                return False
+            performed = await self._probe.fullscreen(port, video_id, True)
+            if not performed:
+                raise CommandExecutionError(
+                    "youtube_video_unavailable",
+                    "目前沒有可切換為全螢幕的 YouTube 影片。",
+                )
+            return True
 
     async def _run(self, port: int) -> None:
         while True:

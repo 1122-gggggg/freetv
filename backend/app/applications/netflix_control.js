@@ -384,33 +384,74 @@
     '[role="dialog"]',
   ].join(',')
 
-  const canonicalCard = (element) => {
-    let card = element instanceof HTMLElement ? element.closest(CARD_SELECTOR) : null
-    while (card instanceof HTMLElement) {
-      const parentCard = card.parentElement?.closest(CARD_SELECTOR)
-      if (!(parentCard instanceof HTMLElement)) break
-      if (railContainer(parentCard) !== railContainer(card)) break
-      card = parentCard
+  const cardRoot = (element) => {
+    let root = element instanceof HTMLElement ? element.closest(CARD_SELECTOR) : null
+    while (root instanceof HTMLElement) {
+      const parentRoot = root.parentElement?.closest(CARD_SELECTOR)
+      if (
+        !(parentRoot instanceof HTMLElement) ||
+        railContainer(parentRoot) !== railContainer(root)
+      ) {
+        break
+      }
+      root = parentRoot
     }
-    return card
+    return root
   }
 
-  const cardElements = () => {
-    const cards = []
+  const cardRepresentative = (root, preferred = null) => {
+    if (
+      preferred instanceof HTMLElement &&
+      root.contains(preferred) &&
+      interactiveCandidate(preferred) &&
+      visible(preferred)
+    ) {
+      return preferred
+    }
+    if (interactiveCandidate(root) && visible(root)) return root
+    const candidates = [...root.querySelectorAll(CANDIDATE_SELECTOR)].filter(
+      (candidate) =>
+        candidate instanceof HTMLElement &&
+        interactiveCandidate(candidate) &&
+        visible(candidate),
+    )
+    for (const selector of [
+      'a[href]',
+      '[tabindex]:not([tabindex="-1"])',
+      '[role="button"],[role="link"]',
+      'button',
+    ]) {
+      const candidate = candidates.find((element) => element.matches(selector))
+      if (candidate) return candidate
+    }
+    return candidates[0] || null
+  }
+
+  const canonicalCard = (element) => {
+    const root = cardRoot(element)
+    return root instanceof HTMLElement ? cardRepresentative(root, element) : null
+  }
+
+  const cardEntries = () => {
+    const entries = []
+    const roots = []
     for (const candidate of document.querySelectorAll(CARD_SELECTOR)) {
-      const card = canonicalCard(candidate)
+      const root = cardRoot(candidate)
       if (
-        !(card instanceof HTMLElement) ||
-        cards.includes(card) ||
-        !visible(card) ||
-        card.closest(CARD_EXCLUSION_SELECTOR)
+        !(root instanceof HTMLElement) ||
+        roots.includes(root) ||
+        !visible(root) ||
+        root.closest(CARD_EXCLUSION_SELECTOR)
       ) {
         continue
       }
-      const rect = card.getBoundingClientRect()
-      const duplicate = cards.some((existing) => {
-        if (railContainer(existing) !== railContainer(card)) return false
-        const existingRect = existing.getBoundingClientRect()
+      roots.push(root)
+      const representative = cardRepresentative(root)
+      if (!(representative instanceof HTMLElement)) continue
+      const rect = root.getBoundingClientRect()
+      const duplicate = entries.some((entry) => {
+        if (railContainer(entry.root) !== railContainer(root)) return false
+        const existingRect = entry.root.getBoundingClientRect()
         return (
           Math.abs(existingRect.left - rect.left) <= 1 &&
           Math.abs(existingRect.top - rect.top) <= 1 &&
@@ -418,9 +459,9 @@
           Math.abs(existingRect.bottom - rect.bottom) <= 1
         )
       })
-      if (!duplicate) cards.push(card)
+      if (!duplicate) entries.push({ root, representative })
     }
-    return cards
+    return entries
   }
 
   const settle = async (predicate, timeoutMs) => {
@@ -444,6 +485,21 @@
         (uiaIncludes(element, ['play', 'resume']) ||
           /^(play|resume|播放|繼續播放)$/i.test(safeText(element))),
     ) || null
+
+  const overlaySignature = (overlay) =>
+    JSON.stringify({
+      id: overlay.id,
+      uia: overlay.getAttribute('data-uia'),
+      text: safeText(overlay),
+      controls: [...overlay.querySelectorAll('button,[role="button"]')].map(
+        (control) => ({
+          id: control.id,
+          uia: control.getAttribute('data-uia'),
+          aria: control.getAttribute('aria-label'),
+          text: safeText(control),
+        }),
+      ),
+    })
 
   const visibleSubmitButton = (scope) =>
     [...scope.querySelectorAll('button,[role="button"]')].find(
@@ -498,11 +554,23 @@
       if (playback) {
         if (playback.video.paused && !playRequested) {
           playRequested = true
+          const remainingMs = Math.max(0, deadline - performance.now())
+          let playPromise
           try {
-            await playback.video.play()
+            playPromise = Promise.resolve(playback.video.play())
           } catch {
             return null
           }
+          const playOutcome = await Promise.race([
+            playPromise.then(
+              () => 'resolved',
+              () => 'rejected',
+            ),
+            new Promise((resolve) =>
+              setTimeout(() => resolve('timeout'), remainingMs),
+            ),
+          ])
+          if (playOutcome !== 'resolved') return null
         }
         if (!playback.video.paused) return playback.context
       }
@@ -640,57 +708,70 @@
   }
 
   const directionalTarget = (elements, current, action) => {
-    const currentCard = canonicalCard(current)
-    if (currentCard instanceof HTMLElement) {
-      const cards = cardElements()
-      const currentRail = railContainer(currentCard)
-      const sourceCenter = rectCenter(currentCard.getBoundingClientRect())
+    const currentRepresentative = canonicalCard(current)
+    const currentRoot = cardRoot(currentRepresentative)
+    if (
+      currentRepresentative instanceof HTMLElement &&
+      currentRoot instanceof HTMLElement
+    ) {
+      const entries = cardEntries()
+      const currentRail = railContainer(currentRoot)
+      const sourceCenter = rectCenter(currentRoot.getBoundingClientRect())
       const horizontal = action === 'NAV_LEFT' || action === 'NAV_RIGHT'
       const positive = action === 'NAV_RIGHT' || action === 'NAV_DOWN'
       if (horizontal) {
         return (
-          cards
+          entries
             .filter(
-              (card) =>
-                card !== currentCard &&
-                railContainer(card) === currentRail &&
+              (entry) =>
+                entry.root !== currentRoot &&
+                railContainer(entry.root) === currentRail &&
                 (positive
-                  ? rectCenter(card.getBoundingClientRect()).x > sourceCenter.x
-                  : rectCenter(card.getBoundingClientRect()).x < sourceCenter.x),
+                  ? rectCenter(entry.root.getBoundingClientRect()).x > sourceCenter.x
+                  : rectCenter(entry.root.getBoundingClientRect()).x < sourceCenter.x),
             )
             .sort((left, right) => {
               const leftDelta = Math.abs(
-                rectCenter(left.getBoundingClientRect()).x - sourceCenter.x,
+                rectCenter(left.root.getBoundingClientRect()).x - sourceCenter.x,
               )
               const rightDelta = Math.abs(
-                rectCenter(right.getBoundingClientRect()).x - sourceCenter.x,
+                rectCenter(right.root.getBoundingClientRect()).x - sourceCenter.x,
               )
               return leftDelta - rightDelta
-            })[0] || null
+            })[0]?.representative || null
         )
       }
 
-      const rails = [...new Set(cards.map((card) => railContainer(card)).filter(Boolean))]
+      const rails = [
+        ...new Set(entries.map((entry) => railContainer(entry.root)).filter(Boolean)),
+      ]
       const adjacentRail = rails
         .filter((rail) => rail !== currentRail)
         .map((rail) => {
-          const railCards = cards.filter((card) => railContainer(card) === rail)
+          const railEntries = entries.filter(
+            (entry) => railContainer(entry.root) === rail,
+          )
           const y =
-            railCards.reduce(
-              (sum, card) => sum + rectCenter(card.getBoundingClientRect()).y,
+            railEntries.reduce(
+              (sum, entry) =>
+                sum + rectCenter(entry.root.getBoundingClientRect()).y,
               0,
-            ) / railCards.length
-          return { rail, railCards, delta: y - sourceCenter.y }
+            ) / railEntries.length
+          return { railEntries, delta: y - sourceCenter.y }
         })
         .filter(({ delta }) => (positive ? delta > 0 : delta < 0))
         .sort((left, right) => Math.abs(left.delta) - Math.abs(right.delta))[0]
       if (!adjacentRail) return null
       return (
-        adjacentRail.railCards.sort(
+        adjacentRail.railEntries.sort(
           (left, right) =>
-            Math.abs(rectCenter(left.getBoundingClientRect()).x - sourceCenter.x) -
-            Math.abs(rectCenter(right.getBoundingClientRect()).x - sourceCenter.x),
-        )[0] || null
+            Math.abs(
+              rectCenter(left.root.getBoundingClientRect()).x - sourceCenter.x,
+            ) -
+            Math.abs(
+              rectCenter(right.root.getBoundingClientRect()).x - sourceCenter.x,
+            ),
+        )[0]?.representative || null
       )
     }
 
@@ -806,7 +887,11 @@
       ) {
         return error('netflix_fullscreen_unavailable')
       }
-      await target.requestFullscreen()
+      try {
+        await target.requestFullscreen()
+      } catch {
+        return error('netflix_fullscreen_unavailable')
+      }
       return success('fullscreen')
     }
 
@@ -853,6 +938,7 @@
     const active = document.activeElement
     const current = active instanceof HTMLElement && elements.includes(active) ? active : null
     const activeCard = canonicalCard(active)
+    const activeCardRoot = cardRoot(activeCard)
     if (
       errorField &&
       (!current || action === 'FOCUS_PRIMARY' || action === 'FOCUS_EDITABLE')
@@ -881,9 +967,12 @@
     }
 
     if (action === 'OK') {
-      if (activeCard instanceof HTMLElement) {
+      if (
+        activeCard instanceof HTMLElement &&
+        activeCardRoot instanceof HTMLElement
+      ) {
         const currentFocus = fingerprint(activeCard, elements)
-        const existingPlay = visiblePlayButton(activeCard)
+        const existingPlay = visiblePlayButton(activeCardRoot)
         if (existingPlay instanceof HTMLElement) {
           existingPlay.click()
           const context = await settlePlayingWatchContext()
@@ -891,10 +980,21 @@
             ? success('playing', { focus: currentFocus }, context)
             : error('netflix_direct_play_unavailable')
         }
+        const previousOverlay = visibleOverlays().at(-1)
+        const previousOverlaySignature = previousOverlay
+          ? overlaySignature(previousOverlay)
+          : null
         activeCard.click()
         const detailPlay = await settle(() => {
           const overlay = visibleOverlays().at(-1)
-          return overlay ? visiblePlayButton(overlay) : null
+          if (!overlay) return null
+          if (
+            overlay === previousOverlay &&
+            overlaySignature(overlay) === previousOverlaySignature
+          ) {
+            return null
+          }
+          return visiblePlayButton(overlay)
         }, 1200)
         if (!(detailPlay instanceof HTMLElement)) {
           return error('netflix_direct_play_unavailable')
