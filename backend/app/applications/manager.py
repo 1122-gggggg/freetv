@@ -205,7 +205,7 @@ class ApplicationManager:
             "--disable-extensions",
             *CHROME_RESTORE_SUPPRESS_ARGS,
             *TV_CHROME_NOTIFICATION_FLAGS,
-            url,
+            f"--app={url}",
         ]
 
 

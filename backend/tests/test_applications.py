@@ -258,27 +258,48 @@ def test_youtube_uses_isolated_chrome_fullscreen_and_ad_filter(tmp_path: Path) -
     assert manager._adfilter.ports == [9333]
 
 
-def test_netflix_opens_desktop_chrome_fullscreen() -> None:
-    manager, launcher, windows, _ = make_manager()
+def test_netflix_chrome_launches_as_standalone_app_window_without_positional_url() -> None:
+    manager, launcher, _, _ = make_manager()
     asyncio.run(manager.open(ActiveApp.NETFLIX))
     argv = launcher.calls[0]
+    netflix_url = manager._settings.urls.netflix
+    expected_app_arg = f"--app={netflix_url}"
+
     assert argv[0].endswith("chrome.exe")
-    assert argv[-1] == "https://www.netflix.com/"
-    assert "--start-fullscreen" in argv
-    assert "--app=" not in " ".join(argv)
+    assert argv.count(expected_app_arg) == 1
+    assert sum(argument.startswith("--app=") for argument in argv) == 1
+    assert not any(argument == netflix_url for argument in argv)
+    assert argv.count("--start-fullscreen") == 1
+    assert argv.count("--disable-extensions") == 1
+    assert argv.count("--remote-debugging-address=127.0.0.1") == 1
+    assert argv.count("--remote-debugging-port=9444") == 1
+    assert any(
+        argument.startswith("--user-data-dir=")
+        and "chrome-netflix-profile" in argument
+        for argument in argv
+    )
+    assert argv.count("--disable-notifications") == 1
+    assert argv.count("--deny-permission-prompts") == 1
     assert "--new-window" not in argv
     assert "--start-maximized" not in argv
-    assert any(
-        part.startswith("--user-data-dir=") and "chrome-netflix-profile" in part
-        for part in argv
-    )
-    assert "--remote-debugging-address=127.0.0.1" in argv
-    assert "--remote-debugging-port=9444" in argv
-    assert "--load-extension" not in " ".join(argv)
-    assert "--disable-extensions" in argv
-    assert "--hide-crash-restore-bubble" in argv
     assert manager._adfilter.ports == []
     assert manager._netflix_page.actions == [(9444, NetflixAction.FOCUS_PRIMARY)]
+
+
+def test_youtube_and_news_kiosk_args_do_not_contain_app_flag() -> None:
+    async def scenario() -> None:
+        manager, launcher, _, _ = make_manager()
+
+        await manager.open(ActiveApp.YOUTUBE)
+        await manager.open_news("https://www.youtube.com/watch?v=live_stream_id")
+
+        youtube_argv, news_argv = launcher.calls
+        assert not any(argument.startswith("--app=") for argument in youtube_argv)
+        assert not any(argument.startswith("--app=") for argument in news_argv)
+        assert youtube_argv[-1] == manager._settings.urls.youtube
+        assert news_argv[-1] == "https://www.youtube.com/watch?v=live_stream_id"
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("app", [ActiveApp.YOUTUBE, ActiveApp.NETFLIX])
@@ -402,8 +423,8 @@ def test_opening_netflix_closes_playing_youtube() -> None:
         assert youtube.poll() is not None
         assert windows.closed_windows == [900]
         assert manager.active_app is ActiveApp.NETFLIX
-        assert launcher.calls[1][-1] == "https://www.netflix.com/"
-        assert "--app=" not in " ".join(launcher.calls[1])
+        assert launcher.calls[1][-1] == "--app=https://www.netflix.com/"
+        assert "https://www.netflix.com/" not in launcher.calls[1]
 
     asyncio.run(scenario())
 
