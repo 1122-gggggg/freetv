@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from ipaddress import IPv4Address
 from types import SimpleNamespace
@@ -39,6 +40,7 @@ class FakeApplications:
     opened_news: list[str] = field(default_factory=list)
     searches: list[str] = field(default_factory=list)
     next_context: NetflixContext | None = None
+    lifecycle_callback: Callable[[ActiveApp], Awaitable[None]] | None = None
 
     async def open(self, app: ActiveApp) -> NetflixContext | None:
         self.opened.append(app)
@@ -66,6 +68,16 @@ class FakeApplications:
 
     def require_input_target(self, app: ActiveApp) -> None:
         return None
+
+    def set_application_exit_callback(
+        self,
+        callback: Callable[[ActiveApp], Awaitable[None]],
+    ) -> None:
+        self.lifecycle_callback = callback
+
+    async def simulate_exit(self, app: ActiveApp) -> None:
+        assert self.lifecycle_callback is not None
+        await self.lifecycle_callback(app)
 
 
     async def shutdown(self) -> None:
@@ -308,6 +320,56 @@ def test_all_paired_remotes_receive_state_broadcasts(tmp_path) -> None:
 
     assert first_state["focused_tile"] == "live_tv"
     assert second_state["focused_tile"] == "live_tv"
+
+
+def test_unexpected_netflix_exit_broadcasts_cleared_context_to_all_remotes(
+    tmp_path,
+) -> None:
+    app = make_app(tmp_path)
+    runtime = app.state.runtime
+    runtime.applications.next_context = NetflixContext(
+        stage=NetflixStage.LOGIN,
+        input_kind=NetflixInputKind.EMAIL,
+        can_submit=True,
+    )
+    token_one = runtime.pairing.pair("482731")
+    runtime.pairing.rotate_code()
+    token_two = runtime.pairing.pair("482731")
+
+    with secure_remote_client(app) as client:
+        with (
+            client.websocket_connect(
+                REMOTE_SOCKET_URL,
+                headers=TRUSTED_REMOTE_HEADERS,
+            ) as first,
+            client.websocket_connect(
+                REMOTE_SOCKET_URL,
+                headers=TRUSTED_REMOTE_HEADERS,
+            ) as second,
+        ):
+            authenticate(first, token_one, "auth-exit-1")
+            authenticate(second, token_two, "auth-exit-2")
+            first.send_json(
+                {
+                    "version": 1,
+                    "type": "command",
+                    "request_id": "open-netflix-exit",
+                    "command": "OPEN_NETFLIX",
+                }
+            )
+            assert first.receive_json()["success"] is True
+            assert first.receive_json()["netflix_context"]["stage"] == "login"
+            assert second.receive_json()["netflix_context"]["stage"] == "login"
+
+            assert client.portal is not None
+            client.portal.call(runtime.applications.simulate_exit, ActiveApp.NETFLIX)
+            first_exit = first.receive_json()
+            second_exit = second.receive_json()
+
+    for state in (first_exit, second_exit):
+        assert state["active_app"] == "launcher"
+        assert state["netflix_context"] is None
+        assert state["error_message"] == "Netflix 已意外關閉。"
 
 
 def test_remote_socket_uses_a_distinct_close_code_for_invalid_tokens(tmp_path) -> None:

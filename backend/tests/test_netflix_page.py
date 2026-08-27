@@ -781,6 +781,7 @@ def test_type_text_does_not_expose_secret_in_error_log_or_state(
         ("netflix_video_unavailable", "目前沒有可播放或暫停的 Netflix 影片。"),
         ("netflix_direct_play_unavailable", "找不到可播放的 Netflix 項目，請稍後再試。"),
         ("netflix_submit_unavailable", "Netflix 目前無法送出，請確認電視畫面後再試。"),
+        ("netflix_back_unavailable", "Netflix 目前無法返回，請確認電視畫面後再試。"),
     ],
 )
 def test_runtime_codes_map_to_fixed_local_chinese_messages_without_retry(

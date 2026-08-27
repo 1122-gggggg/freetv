@@ -672,6 +672,64 @@ describe('RemoteScreen', () => {
     expect(error?.props.accessibilityRole).toBe('alert')
   })
 
+  it('preserves modal text and waiting across semantically identical state frames', async () => {
+    const context: NetflixContext = {
+      stage: 'login',
+      input_kind: 'password',
+      has_error: false,
+      can_submit: true,
+      focused_title: null,
+    }
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+      )
+    })
+    const root = renderer!.root
+    act(() => {
+      latestMockSocket!.simulateStatusChange('authenticated')
+      latestMockSocket!.simulateStateChange(netflixState(context))
+    })
+    act(() => {
+      root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' }).props.onPress()
+    })
+    const input = root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' })
+    act(() => input.props.onChangeText('secret'))
+
+    act(() => {
+      latestMockSocket!.simulateStateChange({
+        ...netflixState({ ...context }),
+        volume: 55,
+      })
+    })
+    expect(root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' }).props.value).toBe(
+      'secret',
+    )
+
+    let resolveAck!: (ack: Acknowledgement) => void
+    const pendingAck = new Promise<Acknowledgement>((resolve) => {
+      resolveAck = resolve
+    })
+    latestMockSocket!.sendTextInput.mockReturnValueOnce(pendingAck)
+    act(() => {
+      void root.findByProps({ accessibilityLabel: '送出 Netflix 輸入' }).props.onPress()
+    })
+    expect(root.findByProps({ accessibilityLabel: '等待電視端回應' })).toBeTruthy()
+
+    act(() => {
+      latestMockSocket!.simulateStateChange({
+        ...netflixState({ ...context }),
+        muted: true,
+      })
+    })
+    expect(root.findByProps({ accessibilityLabel: '等待電視端回應' })).toBeTruthy()
+
+    resolveAck(mockAck())
+    await act(async () => {
+      await pendingAck
+    })
+  })
+
   it('shows browse context and falls back to generic input for null or unknown', async () => {
     await act(async () => {
       renderer = ReactTestRenderer.create(

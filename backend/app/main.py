@@ -32,6 +32,7 @@ from app.protocol import (
 )
 from app.security.pairing import AuthenticatedRemoteSession, PairingCodeExpired, PairingCodeInvalid
 from app.security.request_limits import BoundedPairingRequestBodyMiddleware
+from app.state import ActiveApp
 from app.system.network import eligible_lan_interface_names, is_eligible_lan_peer
 from app.websocket.registry import ConnectionRegistry
 
@@ -164,6 +165,23 @@ def create_app(
     app.state.pairing_attempts = PairingAttemptGuard()
     app.state.remote_authentication_guard = RemoteAuthenticationGuard()
     app.state.dispatch_lock = asyncio.Lock()
+
+    async def handle_application_exit(exited_app: ActiveApp) -> None:
+        async with app.state.dispatch_lock:
+            outcome = await app.state.runtime.bus.handle_application_exit(exited_app)
+            if outcome.state_changed:
+                await app.state.connections.broadcast_state(
+                    outcome.state.to_wire(),
+                    session_is_valid=app.state.runtime.pairing.session_is_valid,
+                )
+
+    set_exit_callback = getattr(
+        resolved_runtime.applications,
+        "set_application_exit_callback",
+        None,
+    )
+    if set_exit_callback is not None:
+        set_exit_callback(handle_application_exit)
 
     @app.get("/api/health")
     async def health() -> dict[str, bool | str]:

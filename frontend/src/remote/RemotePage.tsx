@@ -209,9 +209,17 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   const netflixInput = netflixContext
     ? NETFLIX_INPUT_PRESENTATION[netflixContext.input_kind]
     : undefined
-  const [previousNetflixContext, setPreviousNetflixContext] = useState(netflixContext)
-  if (previousNetflixContext !== netflixContext) {
-    setPreviousNetflixContext(netflixContext)
+  const netflixSemanticKey = JSON.stringify([
+    status === 'connected' ? (state?.active_app ?? null) : status,
+    netflixContext?.stage ?? null,
+    netflixContext?.input_kind ?? null,
+    netflixContext?.focused_title ?? null,
+    netflixContext?.has_error ?? null,
+  ])
+  const [previousNetflixSemanticKey, setPreviousNetflixSemanticKey] =
+    useState(netflixSemanticKey)
+  if (previousNetflixSemanticKey !== netflixSemanticKey) {
+    setPreviousNetflixSemanticKey(netflixSemanticKey)
     setNetflixTyped('')
     setPendingNetflixRequest(null)
     setNetflixLocalSendFailed(false)

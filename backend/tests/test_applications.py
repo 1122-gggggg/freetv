@@ -225,6 +225,8 @@ def make_manager(
     netflix_page: FakeNetflixPageController | None = None,
     youtube_fullscreen: FakeYoutubeFullscreen | None = None,
     debug_port: int = 9333,
+    on_application_exit=None,
+    watch_interval_seconds: float = 0.01,
 ) -> tuple[ApplicationManager, FakeLauncher, FakeWindows, FakeInput]:
     launcher = FakeLauncher()
     windows = FakeWindows()
@@ -251,6 +253,8 @@ def make_manager(
         youtube_fullscreen=youtube_fullscreen or FakeYoutubeFullscreen(),
         debug_port=debug_port,
         netflix_debug_port=9444,
+        on_application_exit=on_application_exit,
+        watch_interval_seconds=watch_interval_seconds,
     )
     return manager, launcher, windows, input_controller
 
@@ -617,6 +621,104 @@ def test_youtube_fullscreen_start_failure_rolls_back_new_process() -> None:
 
 
 
+
+
+def test_unexpected_youtube_exit_stops_probe_and_notifies_lifecycle() -> None:
+    async def scenario() -> None:
+        exited: list[ActiveApp] = []
+        notified = asyncio.Event()
+
+        async def on_exit(app: ActiveApp) -> None:
+            exited.append(app)
+            notified.set()
+
+        fullscreen = FakeYoutubeFullscreen()
+        manager, launcher, _, _ = make_manager(
+            youtube_fullscreen=fullscreen,
+            on_application_exit=on_exit,
+        )
+        await manager.open(ActiveApp.YOUTUBE)
+        launcher.process.exit_code = 1
+
+        await asyncio.wait_for(notified.wait(), timeout=0.5)
+
+        assert exited == [ActiveApp.YOUTUBE]
+        assert fullscreen.events == ["start:9333", "stop"]
+        assert manager.active_app is ActiveApp.LAUNCHER
+        assert manager._children == []
+        await manager.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_expected_home_close_cancels_watcher_without_exit_notification() -> None:
+    async def scenario() -> None:
+        exited: list[ActiveApp] = []
+
+        async def on_exit(app: ActiveApp) -> None:
+            exited.append(app)
+
+        manager, _, _, _ = make_manager(on_application_exit=on_exit)
+        await manager.open(ActiveApp.YOUTUBE)
+        await manager.return_home()
+        await manager.shutdown()
+
+        assert exited == []
+
+    asyncio.run(scenario())
+
+
+def test_persistently_missing_netflix_window_notifies_and_clears_tracking() -> None:
+    async def scenario() -> None:
+        exited: list[ActiveApp] = []
+        notified = asyncio.Event()
+
+        async def on_exit(app: ActiveApp) -> None:
+            exited.append(app)
+            notified.set()
+
+        manager, launcher, windows, _ = make_manager(on_application_exit=on_exit)
+        await manager.open(ActiveApp.NETFLIX)
+        windows.window_owned_by_process = False
+        windows.window_for_pid = None
+
+        await asyncio.wait_for(notified.wait(), timeout=0.5)
+
+        assert exited == [ActiveApp.NETFLIX]
+        assert launcher.process.poll() is not None
+        assert manager._children == []
+        assert manager.active_app is ActiveApp.LAUNCHER
+        await manager.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_watcher_rebinds_replacement_window_without_false_exit() -> None:
+    async def scenario() -> None:
+        exited: list[ActiveApp] = []
+
+        async def on_exit(app: ActiveApp) -> None:
+            exited.append(app)
+
+        manager, _, windows, _ = make_manager(
+            on_application_exit=on_exit,
+            watch_interval_seconds=0.0,
+        )
+        await manager.open(ActiveApp.NETFLIX)
+        windows.window_for_pid = 901
+        windows.ownership_results = [False, True]
+
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if manager._current is not None and manager._current.window_handle == 901:
+                break
+
+        assert manager._current is not None
+        assert manager._current.window_handle == 901
+        assert exited == []
+        await manager.shutdown()
+
+    asyncio.run(scenario())
 
 
 def test_home_minimizes_only_the_tracked_window_and_restores_launcher() -> None:

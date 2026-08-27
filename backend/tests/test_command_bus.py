@@ -898,3 +898,43 @@ def test_pointer_and_text_accepted_when_news_active() -> None:
 
     asyncio.run(scenario())
 
+
+
+def test_application_exit_clears_matching_active_state_safely() -> None:
+    async def scenario() -> None:
+        bus, _, _, _ = make_bus(
+            initial=ControllerState(
+                active_app=ActiveApp.NETFLIX,
+                netflix_context=LOGIN_CONTEXT,
+                channel_number=7,
+                channel_name="Old",
+            )
+        )
+
+        outcome = await bus.handle_application_exit(ActiveApp.NETFLIX)
+
+        assert outcome.success
+        assert outcome.state_changed
+        assert outcome.state.active_app is ActiveApp.LAUNCHER
+        assert outcome.state.netflix_context is None
+        assert outcome.state.channel_number is None
+        assert outcome.state.channel_name is None
+        assert outcome.state.error_message == "Netflix 已意外關閉。"
+        assert outcome.state.status_message is None
+
+    asyncio.run(scenario())
+
+
+def test_application_exit_ignores_inactive_app() -> None:
+    async def scenario() -> None:
+        bus, _, _, _ = make_bus(
+            initial=ControllerState(active_app=ActiveApp.BROWSER)
+        )
+
+        outcome = await bus.handle_application_exit(ActiveApp.YOUTUBE)
+
+        assert outcome.success
+        assert not outcome.state_changed
+        assert outcome.state.active_app is ActiveApp.BROWSER
+
+    asyncio.run(scenario())

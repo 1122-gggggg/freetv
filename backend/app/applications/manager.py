@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import subprocess
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -98,6 +98,8 @@ _WINDOW_DISCOVERY_TIMEOUT_SECONDS = 10.0
 _NETFLIX_INITIALIZATION_ATTEMPTS = 20
 _NETFLIX_INITIALIZATION_TIMEOUT_SECONDS = 10.0
 _NETFLIX_INITIALIZATION_DELAY_SECONDS = 0.25
+_APPLICATION_WATCH_INTERVAL_SECONDS = 0.25
+_WINDOW_MISSING_GRACE_POLLS = 3
 _NETFLIX_INITIALIZATION_RETRY_CODES = {
     "netflix_page_unavailable",
     "netflix_controller_unavailable",
@@ -123,6 +125,8 @@ class ApplicationManager:
         netflix_page: NetflixPageController | None = None,
         debug_port: int | None = None,
         netflix_debug_port: int | None = None,
+        on_application_exit: Callable[[ActiveApp], Awaitable[None]] | None = None,
+        watch_interval_seconds: float = _APPLICATION_WATCH_INTERVAL_SECONDS,
     ) -> None:
         self._settings = settings
         self._executables = dict(executable_paths)
@@ -147,11 +151,20 @@ class ApplicationManager:
         self._active_app = ActiveApp.LAUNCHER
         self._current: TrackedApplication | None = None
         self._children: list[TrackedApplication] = []
+        self._on_application_exit = on_application_exit
+        self._watch_interval_seconds = watch_interval_seconds
+        self._watchers: dict[int, asyncio.Task[None]] = {}
 
 
     @property
     def active_app(self) -> ActiveApp:
         return self._active_app
+
+    def set_application_exit_callback(
+        self,
+        callback: Callable[[ActiveApp], Awaitable[None]],
+    ) -> None:
+        self._on_application_exit = callback
 
     def _chrome_kiosk_args(self, url: str) -> list[str]:
         chrome = self._executables.get("chrome")
@@ -295,6 +308,7 @@ class ApplicationManager:
         self._current = tracked
         self._active_app = app
         log_event(logger, "application_launched", app=app.value, process_id=process.pid)
+        self._start_watcher(tracked)
     async def return_home(self) -> None:
         await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
         self._minimize_current_window()
@@ -338,6 +352,7 @@ class ApplicationManager:
         kept: list[TrackedApplication] = []
         for tracked in self._children:
             if tracked.app in apps:
+                await self._cancel_watcher(tracked)
                 await self._stop_tracked(tracked)
             else:
                 kept.append(tracked)
@@ -346,6 +361,7 @@ class ApplicationManager:
             and current.app in apps
             and all(tracked is not current for tracked in self._children)
         ):
+            await self._cancel_watcher(current)
             await self._stop_tracked(current)
         self._children = kept
         if current is not None and current.app in apps:
@@ -456,6 +472,7 @@ class ApplicationManager:
 
     async def shutdown(self) -> None:
         await self._youtube_fullscreen.stop()
+        await self._cancel_all_watchers()
         remaining: list[TrackedApplication] = []
         for tracked in self._children:
             if not await self._stop_tracked(tracked):
@@ -477,6 +494,99 @@ class ApplicationManager:
             return
         assert self._current.window_handle is not None
         self._windows.minimize(self._current.window_handle)
+
+    def _start_watcher(self, tracked: TrackedApplication) -> None:
+        key = id(tracked)
+        task = asyncio.create_task(self._watch_tracked(tracked))
+        self._watchers[key] = task
+        task.add_done_callback(
+            lambda completed, watcher_key=key: self._discard_watcher(
+                watcher_key,
+                completed,
+            )
+        )
+
+    def _discard_watcher(
+        self,
+        key: int,
+        task: asyncio.Task[None],
+    ) -> None:
+        if self._watchers.get(key) is task:
+            self._watchers.pop(key, None)
+
+    async def _cancel_watcher(self, tracked: TrackedApplication) -> None:
+        task = self._watchers.pop(id(tracked), None)
+        if task is None or task is asyncio.current_task():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def _cancel_all_watchers(self) -> None:
+        tasks = tuple(self._watchers.values())
+        self._watchers.clear()
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    async def _watch_tracked(self, tracked: TrackedApplication) -> None:
+        timer = asyncio.Event()
+        missing_window_polls = 0
+        while True:
+            try:
+                await asyncio.wait_for(
+                    timer.wait(),
+                    timeout=self._watch_interval_seconds,
+                )
+            except TimeoutError:
+                pass
+            if not any(child is tracked for child in self._children):
+                return
+            try:
+                process_exited = tracked.process.poll() is not None
+            except OSError:
+                process_exited = True
+            if process_exited:
+                await self._handle_unexpected_exit(tracked)
+                return
+            if self._tracked_window_is_owned(tracked):
+                missing_window_polls = 0
+                continue
+            missing_window_polls += 1
+            if missing_window_polls < _WINDOW_MISSING_GRACE_POLLS:
+                continue
+            await self._terminate_process(tracked.process)
+            await self._handle_unexpected_exit(tracked)
+            return
+
+    async def _handle_unexpected_exit(self, tracked: TrackedApplication) -> None:
+        if tracked.app in {ActiveApp.YOUTUBE, ActiveApp.NEWS}:
+            await self._youtube_fullscreen.stop()
+        self._children = [child for child in self._children if child is not tracked]
+        if self._current is tracked:
+            self._current = None
+            self._active_app = ActiveApp.LAUNCHER
+        log_event(
+            logger,
+            "application_exited",
+            app=tracked.app.value,
+            process_id=tracked.process.pid,
+        )
+        if self._on_application_exit is not None:
+            try:
+                await self._on_application_exit(tracked.app)
+            except Exception:
+                log_event(
+                    logger,
+                    "application_exit_callback_failed",
+                    app=tracked.app.value,
+                )
 
     def _tracked_window_is_owned(self, tracked: TrackedApplication) -> bool:
         try:

@@ -200,6 +200,10 @@ describe('Netflix DOM control runtime', () => {
       document.body.append(overlay)
       setRect(overlay, 20, 20, 800, 600)
       setRect(play, 40, 40)
+      play.addEventListener('click', () => {
+        window.history.replaceState({}, '', '/watch/focused')
+        document.body.innerHTML = '<video></video>'
+      })
     })
 
     const result = await runtime().run('OK', null)
@@ -215,7 +219,12 @@ describe('Netflix DOM control runtime', () => {
       '<button data-uia="player-back-to-browsing">Back to browsing</button>'
     const playerBack = document.querySelector('button') as HTMLButtonElement
     setRect(playerBack, 20, 20)
-    const click = vi.spyOn(playerBack, 'click')
+    const click = vi.spyOn(playerBack, 'click').mockImplementation(() => {
+      window.history.replaceState({}, '', '/browse')
+      document.body.innerHTML =
+        '<div class="lolomoRow"><div class="title-card" tabindex="0">Browse</div></div>'
+      setRect(document.querySelector('.title-card')!, 20, 80)
+    })
     const historyBack = vi.spyOn(window.history, 'back').mockImplementation(() => undefined)
 
     const result = await runtime().run('BACK', null)
@@ -300,7 +309,10 @@ describe('Netflix DOM control runtime', () => {
     setRect(play, 40, 40)
     card.focus()
     const cardClick = vi.spyOn(card, 'click')
-    const playClick = vi.spyOn(play, 'click')
+    const playClick = vi.spyOn(play, 'click').mockImplementation(() => {
+      window.history.replaceState({}, '', '/watch/immediate')
+      document.body.innerHTML = '<video></video>'
+    })
     expect((await runtime().run('OK', null)).status).toBe('playing')
     expect(playClick).toHaveBeenCalledOnce()
     expect(cardClick).not.toHaveBeenCalled()
@@ -319,6 +331,8 @@ describe('Netflix DOM control runtime', () => {
       detailPlay.textContent = 'Play'
       vi.spyOn(detailPlay, 'click').mockImplementation(() => {
         detailPlayClicks += 1
+        window.history.replaceState({}, '', '/watch/delayed')
+        document.body.innerHTML = '<video></video>'
       })
       modal.append(detailPlay)
       document.body.append(modal)
@@ -657,8 +671,12 @@ describe('Netflix DOM control runtime', () => {
   setRect(lower.querySelector('button')!, 80, 80)
   setRect(top, 100, 100, 500, 400)
   setRect(topClose, 140, 140)
-  const closeClick = vi.spyOn(topClose, 'click')
-  const historyBack = vi.spyOn(window.history, 'back').mockImplementation(() => undefined)
+  const closeClick = vi.spyOn(topClose, 'click').mockImplementation(() => {
+    top.remove()
+  })
+  const historyBack = vi.spyOn(window.history, 'back').mockImplementation(() => {
+    window.history.replaceState({}, '', '/browse')
+  })
   expect((await runtime().run('BACK', null)).status).toBe('closed')
   expect(closeClick).toHaveBeenCalledOnce()
   expect(historyBack).not.toHaveBeenCalled()
@@ -750,6 +768,7 @@ describe('Netflix DOM control runtime', () => {
   it('requires a ready video and uses history back from watch', async () => {
     window.history.replaceState({}, '', '/watch/123')
     document.body.innerHTML = '<video></video>'
+
     const video = document.querySelector('video') as HTMLVideoElement
     setRect(video, 20, 20, 640, 360)
     Object.defineProperty(video, 'paused', { configurable: true, value: true })
@@ -764,8 +783,146 @@ describe('Netflix DOM control runtime', () => {
     expect((await runtime().run('PLAY_PAUSE', null)).status).toBe('playing')
     expect(play).toHaveBeenCalledOnce()
 
-    const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined)
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {
+      window.history.replaceState({}, '', '/browse')
+      document.body.innerHTML =
+        '<div class="lolomoRow"><div class="title-card" tabindex="0">Browse</div></div>'
+      setRect(document.querySelector('.title-card')!, 20, 80)
+    })
     expect((await runtime().run('BACK', null)).status).toBe('history')
     expect(back).toHaveBeenCalledOnce()
+  })
+  it('returns fixed errors without repeating route-changing clicks on timeout', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML =
+      '<form><input type="email"><button id="submit">開始使用</button></form>'
+    const email = document.querySelector('input') as HTMLInputElement
+    const submit = document.querySelector('#submit') as HTMLButtonElement
+    setRect(email, 20, 20)
+    setRect(submit, 180, 20)
+    email.focus()
+    const submitClick = vi.spyOn(submit, 'click').mockImplementation(() => undefined)
+    const submitPending = runtime().run('SUBMIT_PRIMARY', null)
+    await vi.runAllTimersAsync()
+    await expect(submitPending).resolves.toMatchObject({
+      ok: false,
+      code: 'netflix_submit_unavailable',
+    })
+    expect(submitClick).toHaveBeenCalledOnce()
+
+    window.history.replaceState({}, '', '/watch/timeout')
+    document.body.innerHTML =
+      '<button data-uia="player-back-to-browsing">Back</button>'
+    const back = document.querySelector('button') as HTMLButtonElement
+    setRect(back, 20, 20)
+    const backClick = vi.spyOn(back, 'click')
+    const backPending = runtime().run('BACK', null)
+    await vi.runAllTimersAsync()
+    await expect(backPending).resolves.toMatchObject({
+      ok: false,
+      code: 'netflix_back_unavailable',
+    })
+    expect(backClick).toHaveBeenCalledOnce()
+    vi.useRealTimers()
+  })
+
+  it('scopes submit to the active login form and supports zh-TW start copy', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = `
+      <header><button id="header-login">登入</button></header>
+      <main class="login-panel">
+        <form id="landing-form">
+          <input id="email" type="email">
+          <button id="start">開始使用</button>
+        </form>
+      </main>
+    `
+    const headerLogin = document.querySelector('#header-login') as HTMLButtonElement
+    const email = document.querySelector('#email') as HTMLInputElement
+    const start = document.querySelector('#start') as HTMLButtonElement
+    setRect(headerLogin, 20, 20)
+    setRect(email, 20, 100)
+    setRect(start, 180, 100)
+    email.focus()
+    const headerClick = vi.spyOn(headerLogin, 'click')
+    const startClick = vi.spyOn(start, 'click').mockImplementation(() => {
+      setTimeout(() => {
+        document.body.innerHTML =
+          '<div class="lolomoRow"><div class="title-card" tabindex="0">Browse</div></div>'
+        setRect(document.querySelector('.title-card')!, 20, 80)
+      }, 20)
+    })
+
+    const pending = runtime().run('SUBMIT_PRIMARY', null)
+    await vi.runAllTimersAsync()
+    const result = await pending
+    vi.useRealTimers()
+
+    expect(headerClick).not.toHaveBeenCalled()
+    expect(startClick).toHaveBeenCalledOnce()
+    expect(result.context).toMatchObject({ stage: 'browse', input_kind: 'none' })
+  })
+
+  it('waits for the watch transition after a card-contained Play click', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = `
+      <div class="lolomoRow">
+        <div class="title-card" tabindex="0">
+          Example <button id="play">Play</button>
+        </div>
+      </div>
+    `
+    const card = document.querySelector('.title-card') as HTMLElement
+    const play = document.querySelector('#play') as HTMLButtonElement
+    setRect(card, 20, 80)
+    setRect(play, 40, 90)
+    card.focus()
+    const click = vi.spyOn(play, 'click').mockImplementation(() => {
+      setTimeout(() => {
+        window.history.replaceState({}, '', '/watch/next')
+        document.body.innerHTML = '<video></video>'
+      }, 20)
+    })
+
+    const pending = runtime().run('OK', null)
+    await vi.runAllTimersAsync()
+    const result = await pending
+    vi.useRealTimers()
+
+    expect(click).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({
+      ok: true,
+      status: 'playing',
+      context: { stage: 'watch', focused_title: null },
+    })
+  })
+
+  it('waits for browse context after the player back control click', async () => {
+    vi.useFakeTimers()
+    window.history.replaceState({}, '', '/watch/current')
+    document.body.innerHTML =
+      '<button data-uia="player-back-to-browsing">Back to browsing</button>'
+    const back = document.querySelector('button') as HTMLButtonElement
+    setRect(back, 20, 20)
+    const click = vi.spyOn(back, 'click').mockImplementation(() => {
+      setTimeout(() => {
+        window.history.replaceState({}, '', '/browse')
+        document.body.innerHTML =
+          '<div class="lolomoRow"><div class="title-card" tabindex="0">Browse</div></div>'
+        setRect(document.querySelector('.title-card')!, 20, 80)
+      }, 20)
+    })
+
+    const pending = runtime().run('BACK', null)
+    await vi.runAllTimersAsync()
+    const result = await pending
+    vi.useRealTimers()
+
+    expect(click).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({
+      ok: true,
+      status: 'history',
+      context: { stage: 'browse' },
+    })
   })
 })

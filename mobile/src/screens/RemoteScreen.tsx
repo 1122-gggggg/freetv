@@ -115,12 +115,19 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
       : null
   const knownNetflixContext =
     netflixContext !== null && netflixContext.stage !== 'unknown'
+  const netflixSemanticKey = JSON.stringify([
+    controllerState?.active_app ?? null,
+    netflixContext?.stage ?? null,
+    netflixContext?.input_kind ?? null,
+    netflixContext?.focused_title ?? null,
+    netflixContext?.has_error ?? null,
+  ])
 
   useEffect(() => {
     setWaitingForNetflix(false)
     setNetflixSendFailed(false)
     setTextInputSource(null)
-  }, [controllerState?.active_app, netflixContext])
+  }, [netflixSemanticKey])
 
   const handleCommand = async (command: Command) => {
     if (!socket || status !== 'authenticated') {

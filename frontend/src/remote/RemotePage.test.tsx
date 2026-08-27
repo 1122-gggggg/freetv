@@ -296,6 +296,44 @@ describe('RemotePage', () => {
     expect(screen.queryByLabelText('Netflix 情境輸入')).toBeNull()
   })
 
+  it('preserves unsent and pending text across semantically identical state frames', () => {
+    const context: NetflixContext = {
+      stage: 'login',
+      input_kind: 'password',
+      has_error: false,
+      can_submit: true,
+      focused_title: null,
+    }
+    socketMock.state = netflixState(context)
+    const view = render(remoteElement())
+    const input = screen.getByLabelText('Netflix 情境輸入') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'secret' } })
+
+    socketMock.state = {
+      ...netflixState({ ...context, can_submit: false }),
+      volume: 55,
+    }
+    view.rerender(remoteElement())
+    expect(input.value).toBe('secret')
+
+    socketMock.state = netflixState({ ...context, can_submit: true })
+    view.rerender(remoteElement())
+    fireEvent.click(screen.getByRole('button', { name: '送出 Netflix 輸入' }))
+    expect(screen.getByText('等待電視端回應...')).toBeTruthy()
+
+    socketMock.state = {
+      ...netflixState({ ...context, can_submit: false }),
+      muted: true,
+    }
+    view.rerender(remoteElement())
+    expect(screen.getByText('等待電視端回應...')).toBeTruthy()
+
+    socketMock.status = 'disconnected'
+    view.rerender(remoteElement())
+    expect(input.value).toBe('')
+    expect(screen.queryByText('等待電視端回應...')).toBeNull()
+  })
+
   it('stops waiting on acknowledgement failure without restoring the secret', () => {
     socketMock.state = netflixState({
       stage: 'login',

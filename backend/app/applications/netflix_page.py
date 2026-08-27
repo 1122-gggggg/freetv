@@ -25,6 +25,7 @@ ERROR_MESSAGES = {
     "netflix_video_unavailable": "目前沒有可播放或暫停的 Netflix 影片。",
     "netflix_direct_play_unavailable": "找不到可播放的 Netflix 項目，請稍後再試。",
     "netflix_submit_unavailable": "Netflix 目前無法送出，請確認電視畫面後再試。",
+    "netflix_back_unavailable": "Netflix 目前無法返回，請確認電視畫面後再試。",
 }
 RUNTIME_ERROR_CODES = {
     "netflix_focus_unavailable",
@@ -32,6 +33,7 @@ RUNTIME_ERROR_CODES = {
     "netflix_video_unavailable",
     "netflix_direct_play_unavailable",
     "netflix_submit_unavailable",
+    "netflix_back_unavailable",
 }
 FINGERPRINT_STRING_FIELDS = ("role", "label", "uia", "text", "pathKind", "rail")
 FINGERPRINT_FIELDS = (*FINGERPRINT_STRING_FIELDS, "index")

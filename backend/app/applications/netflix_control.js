@@ -413,25 +413,31 @@
           /^(play|resume|播放|繼續播放)$/i.test(safeText(element))),
     ) || null
 
-  const visibleSubmitButton = () =>
-    [...document.querySelectorAll('button,[role="button"]')].find(
+  const visibleSubmitButton = (scope) =>
+    [...scope.querySelectorAll('button,[role="button"]')].find(
       (element) =>
         element instanceof HTMLElement &&
         visible(element) &&
-        !element.closest('header,.previewModal--wrapper,.preview-popover') &&
-        /next|continue|sign in|verify|下一步|繼續|登入|驗證/i.test(safeText(element)),
+        /next|continue|sign in|verify|get started|start|下一步|繼續|登入|驗證|開始使用/i.test(
+          safeText(element),
+        ),
     ) || null
 
   const pageSignature = () => {
     const context = netflixContext()
     return JSON.stringify({
+      href: globalThis.location.href,
       stage: context.stage,
       input_kind: context.input_kind,
       has_error: context.has_error,
       can_submit: context.can_submit,
+      focused_title: context.focused_title,
       rows: document.querySelectorAll('.lolomoRow,.rowContainer').length,
-      dialogs: document.querySelectorAll('.detail-modal,.previewModal--wrapper,[role="dialog"]')
-        .length,
+      overlays: visibleOverlays().map((overlay) => ({
+        id: overlay.id,
+        role: overlay.getAttribute('role'),
+        uia: overlay.getAttribute('data-uia'),
+      })),
     })
   }
 
@@ -675,6 +681,7 @@
     if (action === 'READ_CONTEXT') return success('context')
 
     if (action === 'BACK') {
+      const before = pageSignature()
       if (globalThis.location.pathname.includes('/watch/')) {
         const playerBack = [
           ...document.querySelectorAll(
@@ -683,12 +690,17 @@
         ].find((element) => element instanceof HTMLElement && visible(element))
         if (playerBack instanceof HTMLElement) {
           playerBack.click()
-          return success('history')
+          const changed = await settle(() => pageSignature() !== before, 1200)
+          return changed ? success('history') : error('netflix_back_unavailable')
         }
       }
-      if (closeTopOverlay()) return success('closed')
+      if (closeTopOverlay()) {
+        const changed = await settle(() => pageSignature() !== before, 1200)
+        return changed ? success('closed') : error('netflix_back_unavailable')
+      }
       globalThis.history.back()
-      return success('history')
+      const changed = await settle(() => pageSignature() !== before, 1200)
+      return changed ? success('history') : error('netflix_back_unavailable')
     }
 
     if (action === 'PLAY_PAUSE') {
@@ -711,7 +723,12 @@
     }
 
     if (action === 'SUBMIT_PRIMARY') {
-      const button = visibleSubmitButton()
+      const field = activeEditable()
+      const scope =
+        field?.closest('form') ||
+        field?.closest('.login-panel,[data-uia*="login" i],[data-uia*="registration" i]')
+      if (!(scope instanceof HTMLElement)) return error('netflix_submit_unavailable')
+      const button = visibleSubmitButton(scope)
       if (!(button instanceof HTMLElement)) return error('netflix_submit_unavailable')
       const before = pageSignature()
       button.click()
@@ -757,8 +774,12 @@
         const currentFocus = fingerprint(activeCard, elements)
         const existingPlay = visiblePlayButton(activeCard)
         if (existingPlay instanceof HTMLElement) {
+          const before = pageSignature()
           existingPlay.click()
-          return success('playing', { focus: currentFocus })
+          const changed = await settle(() => pageSignature() !== before, 1200)
+          return changed
+            ? success('playing', { focus: currentFocus })
+            : error('netflix_direct_play_unavailable')
         }
         const previousOverlays = new Set(visibleOverlays())
         activeCard.click()
@@ -771,8 +792,12 @@
         if (!(detailPlay instanceof HTMLElement)) {
           return error('netflix_direct_play_unavailable')
         }
+        const before = pageSignature()
         detailPlay.click()
-        return success('playing', { focus: currentFocus })
+        const changed = await settle(() => pageSignature() !== before, 1200)
+        return changed
+          ? success('playing', { focus: currentFocus })
+          : error('netflix_direct_play_unavailable')
       }
       if (!current) return recoverFocus(elements, previousFocus)
       if (editable(current)) return focusResult(current, 'focused', elements)

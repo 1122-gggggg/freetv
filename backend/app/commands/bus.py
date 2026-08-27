@@ -170,6 +170,27 @@ class CommandBus:
     async def state_snapshot(self) -> ControllerState:
         return await self._state.snapshot()
 
+    async def handle_application_exit(self, app: ActiveApp) -> CommandOutcome:
+        async with self._command_lock:
+            current = await self._state.snapshot()
+            if current.active_app is not app:
+                return CommandOutcome(True, current, state_changed=False)
+            labels = {
+                ActiveApp.YOUTUBE: "YouTube",
+                ActiveApp.NETFLIX: "Netflix",
+                ActiveApp.BROWSER: "瀏覽器",
+                ActiveApp.NEWS: "新聞",
+            }
+            state = await self._state.update(
+                active_app=ActiveApp.LAUNCHER,
+                channel_number=None,
+                channel_name=None,
+                netflix_context=None,
+                error_message=f"{labels.get(app, '應用程式')} 已意外關閉。",
+                status_message=None,
+            )
+            return CommandOutcome(True, state)
+
     async def _dispatch_command(self, command: Command) -> CommandOutcome:
         current = await self._state.snapshot()
         if command is Command.HOME:
