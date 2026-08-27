@@ -357,6 +357,47 @@ describe('Netflix DOM control runtime', () => {
     expect(historyPush).not.toHaveBeenCalled()
   })
 
+  it('plays from a current details modal play-button anchor', async () => {
+    window.history.replaceState({}, '', '/browse')
+    document.body.innerHTML = `
+      <div class="lolomoRow">
+        <a data-uia="standard-card" href="/title/one" aria-label="陽光女子合唱團"><img alt=""></a>
+      </div>
+      <div class="previewModal--wrapper detail-modal">
+        <h1>陽光女子合唱團</h1>
+        <a data-uia="play-button" aria-label="播放" href="/watch/one">播放</a>
+      </div>
+    `
+    const card = document.querySelector('[data-uia="standard-card"]') as HTMLAnchorElement
+    const play = document.querySelector('[data-uia="play-button"]') as HTMLAnchorElement
+    const modal = document.querySelector('.previewModal--wrapper') as HTMLElement
+
+    setRect(card, 20, 100, 160, 90)
+    setRect(card.querySelector('img') as HTMLElement, 20, 100, 160, 90)
+    setRect(modal, 0, 0, 800, 600)
+    setRect(play, 40, 40, 118, 45)
+
+    card.tabIndex = 0
+    card.focus()
+    expect(document.activeElement).toBe(card)
+    const cardClick = vi.spyOn(card, 'click')
+    const playClick = vi.spyOn(play, 'click').mockImplementation(() => {
+      window.history.replaceState({}, '', '/watch/one')
+      document.body.innerHTML = '<video></video>'
+      setReadyVideo()
+    })
+    const result = await runtime().run('OK', null)
+    expect(playClick).toHaveBeenCalledOnce()
+    expect(cardClick).not.toHaveBeenCalled()
+    expect(result).toMatchObject({
+      ok: true,
+      status: 'playing',
+      context: { stage: 'watch' },
+    })
+  })
+
+
+
   it('direct-play timeout clicks the card once and returns a fixed error', async () => {
     vi.useFakeTimers()
     document.body.innerHTML =
@@ -1376,6 +1417,59 @@ describe('Netflix DOM control runtime', () => {
     })
   })
 
+  it('uses aria-label as browse focused_title when current cards have empty text', async () => {
+    window.history.replaceState({}, '', '/browse')
+    document.body.innerHTML = `
+      <div class="lolomoRow">
+        <a data-uia="standard-card" href="/watch/one" aria-label="陽光女子合唱團"><img alt=""></a>
+        <a data-uia="standard-card" href="/watch/two" aria-label="毛骨悚然的戀愛"><img alt=""></a>
+      </div>
+    `
+    const cards = [...document.querySelectorAll('[data-uia="standard-card"]')] as HTMLAnchorElement[]
+    cards.forEach((card, index) => {
+      setRect(card, 20 + index * 180, 100, 160, 90)
+      setRect(card.querySelector('img') as HTMLElement, 20 + index * 180, 100, 160, 90)
+    })
+
+
+    const primary = await runtime().run('FOCUS_PRIMARY', null)
+    expect(document.activeElement).toBe(cards[0])
+    expect(primary.context).toMatchObject({
+      stage: 'browse',
+      focused_title: '陽光女子合唱團',
+    })
+
+    await runtime().run('NAV_RIGHT', null)
+    expect(document.activeElement).toBe(cards[1])
+    expect((await runtime().run('READ_CONTEXT', null)).context).toMatchObject({
+      stage: 'browse',
+      focused_title: '毛骨悚然的戀愛',
+    })
+  })
+
+  it('focuses a current card that is only partially onscreen', async () => {
+    window.history.replaceState({}, '', '/browse')
+    document.body.innerHTML = `
+      <div class="lolomoRow">
+        <a data-uia="standard-card" href="/watch/one" aria-label="陽光女子合唱團"><img alt=""></a>
+      </div>
+    `
+    const card = document.querySelector('[data-uia="standard-card"]') as HTMLAnchorElement
+    const image = card.querySelector('img') as HTMLElement
+    setRect(card, 48, 680, 279, 80)
+    setRect(image, 48, 680, 279, 80)
+
+    const result = await runtime().run('FOCUS_PRIMARY', null)
+    expect(document.activeElement).toBe(card)
+    expect(result).toMatchObject({
+      ok: true,
+      status: 'focused',
+      context: { stage: 'browse', focused_title: '陽光女子合唱團' },
+    })
+  })
+
+
+
 
   it('focuses a profile choice on the /browse profile gate instead of navigation', async () => {
     window.history.replaceState({}, '', '/browse')
@@ -1400,11 +1494,68 @@ describe('Netflix DOM control runtime', () => {
     expect(result).toMatchObject({
       ok: true,
       status: 'focused',
-      context: { focused_title: '洪靖倫' },
+      context: {
+        stage: 'browse',
+        input_kind: 'none',
+        has_error: false,
+        can_submit: false,
+        focused_title: '洪靖倫',
+      },
+    })
+  })
+
+  it('selects a profile gate choice then focuses the first ready browse card', async () => {
+    vi.useFakeTimers()
+    window.history.replaceState({}, '', '/browse')
+    document.body.innerHTML = `
+      <nav data-uia="navigation"><a href="/">Netflix</a></nav>
+      <div data-uia="profile-choices-page">
+        <a data-uia="action-select-profile+primary" class="profile-link" href="/SwitchProfile?tkn=one">洪靖倫</a>
+      </div>
+    `
+    const navigation = document.querySelector('nav') as HTMLElement
+    const navLink = navigation.querySelector('a') as HTMLAnchorElement
+    const primary = document.querySelector('[data-uia="action-select-profile+primary"]') as HTMLAnchorElement
+    setRect(navigation, 20, 20, 200, 40)
+    setRect(navLink, 20, 20, 80, 40)
+    setRect(primary, 80, 160, 120, 120)
+    await runtime().run('FOCUS_PRIMARY', null)
+
+    primary.addEventListener('click', (event) => {
+      event.preventDefault()
+      window.setTimeout(() => {
+        document.body.innerHTML = `
+          <div class="lolomoRow">
+            <div data-uia="standard-card"><a href="/title/ready">Ready Title</a><button>Play</button></div>
+            <div data-uia="standard-card"><a href="/title/next">Next Title</a><button>Play</button></div>
+          </div>
+        `
+        const row = document.querySelector('.lolomoRow') as HTMLElement
+        const cards = [...document.querySelectorAll('[data-uia="standard-card"]')] as HTMLElement[]
+        const anchors = [...document.querySelectorAll('a')] as HTMLAnchorElement[]
+        const buttons = [...document.querySelectorAll('button')] as HTMLButtonElement[]
+        setRect(row, 0, 80, 1200, 120)
+        cards.forEach((card, index) => setRect(card, 20 + index * 180, 100))
+        anchors.forEach((card, index) => setRect(card, 25 + index * 180, 100, 70, 60))
+        buttons.forEach((card, index) => setRect(card, 110 + index * 180, 100, 20, 60))
+      }, 400)
+    })
+
+    const pending = runtime().run('OK', null)
+    await vi.runAllTimersAsync()
+    const result = await pending
+    vi.useRealTimers()
+
+    expect(document.activeElement?.getAttribute('href')).toBe('/title/ready')
+    expect(result).toMatchObject({
+      ok: true,
+      status: 'focused',
+      context: { stage: 'browse', focused_title: 'Ready Title' },
     })
   })
 
   it('retries browse primary focus until a logical card is ready', async () => {
+    vi.useFakeTimers()
     window.history.replaceState({}, '', '/browse')
     document.body.innerHTML =
       '<nav data-uia="navigation"><a href="/browse">首頁</a></nav>'
@@ -1413,31 +1564,39 @@ describe('Netflix DOM control runtime', () => {
     setRect(navigation, 20, 20, 200, 40)
     setRect(navLink, 20, 20, 100, 40)
 
-    expect(await runtime().run('FOCUS_PRIMARY', null)).toEqual({
+    const unavailable = runtime().run('FOCUS_PRIMARY', null)
+    await vi.runAllTimersAsync()
+    expect(await unavailable).toEqual({
       ok: false,
       status: 'error',
       code: 'netflix_focus_unavailable',
     })
 
-    const row = document.createElement('div')
-    row.className = 'lolomoRow'
-    row.innerHTML =
-      '<div data-uia="standard-card"><a href="/title/ready">Ready Title</a><button>Play</button></div>'
-    document.body.append(row)
-    const wrapper = row.firstElementChild as HTMLElement
-    const anchor = wrapper.querySelector('a') as HTMLAnchorElement
-    const play = wrapper.querySelector('button') as HTMLButtonElement
-    setRect(wrapper, 20, 100)
-    setRect(anchor, 25, 100, 70, 60)
-    setRect(play, 110, 100, 20, 60)
+    window.setTimeout(() => {
+      const row = document.createElement('div')
+      row.className = 'lolomoRow'
+      row.innerHTML =
+        '<div data-uia="standard-card"><a href="/title/ready">Ready Title</a><button>Play</button></div>'
+      document.body.append(row)
+      const wrapper = row.firstElementChild as HTMLElement
+      const anchor = wrapper.querySelector('a') as HTMLAnchorElement
+      const play = wrapper.querySelector('button') as HTMLButtonElement
+      setRect(wrapper, 20, 100)
+      setRect(anchor, 25, 100, 70, 60)
+      setRect(play, 110, 100, 20, 60)
+    }, 400)
 
-    const result = await runtime().run('FOCUS_PRIMARY', null)
+    const pending = runtime().run('FOCUS_PRIMARY', null)
+    await vi.runAllTimersAsync()
+    const result = await pending
+    vi.useRealTimers()
 
-    expect(document.activeElement).toBe(anchor)
+    expect(document.activeElement?.getAttribute('href')).toBe('/title/ready')
     expect(result).toMatchObject({
       ok: true,
       status: 'focused',
       context: { stage: 'browse', focused_title: 'Ready Title' },
     })
   })
+
 })

@@ -132,23 +132,21 @@
 
     const rect = element.getBoundingClientRect()
     if (rect.width <= 0 || rect.height <= 0) return false
-    const center = rectCenter(rect)
-    if (
-      rect.right <= 0 ||
-      rect.bottom <= 0 ||
-      rect.left >= globalThis.innerWidth ||
-      rect.top >= globalThis.innerHeight ||
-      center.x < 0 ||
-      center.y < 0 ||
-      center.x >= globalThis.innerWidth ||
-      center.y >= globalThis.innerHeight
-    ) {
+    const visibleLeft = Math.max(rect.left, 0)
+    const visibleTop = Math.max(rect.top, 0)
+    const visibleRight = Math.min(rect.right, globalThis.innerWidth)
+    const visibleBottom = Math.min(rect.bottom, globalThis.innerHeight)
+    if (visibleRight - visibleLeft <= 0 || visibleBottom - visibleTop <= 0) {
       return false
     }
 
     if (typeof document.elementFromPoint !== 'function') return true
-    const hit = document.elementFromPoint(center.x, center.y)
+    const hit = document.elementFromPoint(
+      (visibleLeft + visibleRight) / 2,
+      (visibleTop + visibleBottom) / 2,
+    )
     return hit === element || (hit instanceof Node && element.contains(hit))
+
   }
 
   const actionableUia = (element) => {
@@ -302,6 +300,18 @@
   const safeText = (element) =>
     normalizeText(element?.textContent).replace(/<[^>]*>/g, '').slice(0, 120)
 
+  const cardTitle = (element) => {
+    if (!(element instanceof HTMLElement)) return ''
+    return (
+      normalizeText(element.getAttribute('aria-label')) ||
+      labelledText(element) ||
+      normalizeText(element.getAttribute('alt')) ||
+      normalizeText(element.getAttribute('title')) ||
+      safeText(element)
+    ).slice(0, 120)
+  }
+
+
   const activeEditable = () => {
     const active = document.activeElement
     if (active instanceof HTMLElement && editable(active) && visible(active)) {
@@ -329,18 +339,25 @@
     const field = activeEditable()
     const kind = inputKind(field)
     const path = globalThis.location.pathname
+    const profileGate = Boolean(
+      document.querySelector(
+        '[data-uia*="action-select-profile" i],[data-uia="profile-choices-page"]',
+      ),
+    )
     const stage = path.includes('/watch/')
       ? 'watch'
-      : visibleOverlays().length > 0
-        ? 'details'
-        : kind === 'code'
-          ? 'verification'
-          : kind !== 'none'
-            ? 'login'
-            : document.querySelector('.lolomoRow,.rowContainer,[data-uia*="row" i]') ||
-                document.querySelector(CARD_SELECTOR)
-              ? 'browse'
-              : 'unknown'
+      : profileGate
+        ? 'browse'
+        : visibleOverlays().length > 0
+          ? 'details'
+          : kind === 'code'
+            ? 'verification'
+            : kind !== 'none'
+              ? 'login'
+              : document.querySelector('.lolomoRow,.rowContainer,[data-uia*="row" i]') ||
+                  document.querySelector(CARD_SELECTOR)
+                ? 'browse'
+                : 'unknown'
     const focused = canonicalCard(document.activeElement) ||
       (isProfileChoice(document.activeElement) ? document.activeElement : null)
     const submit = [...document.querySelectorAll('button,[role="button"]')].find(
@@ -358,9 +375,10 @@
       can_submit: Boolean(submit),
       focused_title:
         focused instanceof HTMLElement && (stage === 'browse' || isProfileChoice(focused))
-          ? safeText(focused)
+          ? cardTitle(focused) || null
           : null,
     }
+
   }
 
   const success = (status, extra = {}, context = netflixContext()) => ({
@@ -465,7 +483,8 @@
           Math.abs(existingRect.bottom - rect.bottom) <= 1
         )
       })
-      if (!duplicate) entries.push({ root, representative })
+      if (duplicate) continue
+      entries.push({ root, representative, rect })
     }
     return entries
   }
@@ -481,16 +500,30 @@
   }
 
   const visiblePlayButton = (scope) =>
-    [...scope.querySelectorAll('button,[role="button"]')].find(
+    [...scope.querySelectorAll(
+      'button,[role="button"],a[data-uia*="play" i],[data-uia="play-button"],[data-uia="play-video-button"]',
+    )].find(
       (element) =>
         element instanceof HTMLElement &&
         visible(element) &&
         !element.closest(
-          'header,.handle-prev,.handle-next,.previewModal--wrapper,.preview-popover',
+          'header,.handle-prev,.handle-next,.preview-popover',
         ) &&
         (uiaIncludes(element, ['play', 'resume']) ||
           /^(play|resume|播放|繼續播放)$/i.test(safeText(element))),
     ) || null
+
+  const overlayWithPlay = () => {
+    const overlays = visibleOverlays()
+    for (let index = overlays.length - 1; index >= 0; index -= 1) {
+      const overlay = overlays[index]
+      const play = visiblePlayButton(overlay)
+      if (play instanceof HTMLElement) return { overlay, play }
+    }
+    return null
+  }
+
+
 
   const overlaySignature = (overlay) =>
     JSON.stringify({
@@ -965,8 +998,17 @@
     if (action === 'FOCUS_PRIMARY') {
       const restored = restoreTarget(elements, previousFocus)
       if (restored) return focusResult(restored, 'restored', elements)
-      const primary = primaryTarget(elements)
-      return primary ? focusResult(primary, 'focused', elements) : error('netflix_focus_unavailable')
+      let primary = primaryTarget(elements)
+      const browseRoute =
+        globalThis.location.pathname === '/browse' ||
+        globalThis.location.pathname.startsWith('/browse/')
+      if (!primary && browseRoute) {
+        primary = await settle(() => primaryTarget(interactiveElements()), 6000)
+
+      }
+      return primary
+        ? focusResult(primary, 'focused', interactiveElements())
+        : error('netflix_focus_unavailable')
     }
 
     if (action === 'FOCUS_EDITABLE') {
@@ -983,6 +1025,25 @@
     }
 
     if (action === 'OK') {
+      if (current instanceof HTMLElement && isProfileChoice(current)) {
+        current.click()
+        const firstCard = await settle(
+          () => cardEntries()[0]?.representative || null,
+          5000,
+        )
+        if (!(firstCard instanceof HTMLElement)) {
+          return error('netflix_focus_unavailable')
+        }
+        return focusResult(firstCard, 'focused', interactiveElements())
+      }
+      const matchedOverlay = overlayWithPlay()
+      if (!(activeCard instanceof HTMLElement) && matchedOverlay?.play) {
+        matchedOverlay.play.click()
+        const context = await settlePlayingWatchContext()
+        return context
+          ? success('playing', {}, context)
+          : error('netflix_direct_play_unavailable')
+      }
       if (
         activeCard instanceof HTMLElement &&
         activeCardRoot instanceof HTMLElement
@@ -996,22 +1057,28 @@
             ? success('playing', { focus: currentFocus }, context)
             : error('netflix_direct_play_unavailable')
         }
-        const previousOverlay = visibleOverlays().at(-1)
-        const previousOverlaySignature = previousOverlay
-          ? overlaySignature(previousOverlay)
-          : null
+        const selectedTitle = cardTitle(activeCard)
+        const overlayText = matchedOverlay?.overlay
+          ? `${normalizeText(matchedOverlay.overlay.getAttribute('aria-label'))} ${safeText(matchedOverlay.overlay)}`
+          : ''
+        if (
+          matchedOverlay?.play &&
+          selectedTitle &&
+          overlayText.includes(selectedTitle)
+        ) {
+          matchedOverlay.play.click()
+          const context = await settlePlayingWatchContext()
+          return context
+            ? success('playing', { focus: currentFocus }, context)
+            : error('netflix_direct_play_unavailable')
+        }
+        const previousPlay = matchedOverlay?.play || null
         activeCard.click()
         const detailPlay = await settle(() => {
-          const overlay = visibleOverlays().at(-1)
-          if (!overlay) return null
-          if (
-            overlay === previousOverlay &&
-            overlaySignature(overlay) === previousOverlaySignature
-          ) {
-            return null
-          }
-          return visiblePlayButton(overlay)
-        }, 1200)
+          const found = overlayWithPlay()?.play
+          if (!found || found === previousPlay) return null
+          return found
+        }, 2500)
         if (!(detailPlay instanceof HTMLElement)) {
           return error('netflix_direct_play_unavailable')
         }
@@ -1021,6 +1088,8 @@
           ? success('playing', { focus: currentFocus }, context)
           : error('netflix_direct_play_unavailable')
       }
+
+
       if (!current) return recoverFocus(elements, previousFocus)
       if (editable(current)) return focusResult(current, 'focused', elements)
       const currentFocus = fingerprint(current, elements)

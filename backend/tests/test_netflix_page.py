@@ -944,6 +944,76 @@ def test_non_browse_runtime_title_and_extra_fields_are_rejected_safely(
     assert "secret" not in str(caught.value)
 
 
+def test_live_profile_gate_unknown_title_is_controller_unavailable(
+    tmp_path: Path,
+) -> None:
+    controller = make_controller(tmp_path)
+    with pytest.raises(CommandExecutionError) as caught:
+        controller._accept_runtime_result(
+            {
+                "ok": True,
+                "status": "focused",
+                "focus": {
+                    "role": "link",
+                    "label": "Profile",
+                    "uia": "action-select-profile+primary",
+                    "text": "Profile",
+                    "pathKind": "switchprofile",
+                    "rail": "",
+                    "index": 3,
+                },
+                "context": {
+                    "stage": "unknown",
+                    "input_kind": "none",
+                    "has_error": False,
+                    "can_submit": False,
+                    "focused_title": "Profile",
+                },
+            }
+        )
+    assert caught.value.code == "netflix_controller_unavailable"
+    assert caught.value.message == "無法載入 Netflix 遙控控制，請稍後再試。"
+
+
+def test_initialize_accepts_profile_gate_browse_title(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    socket = FakeSocket(
+        runtime_result={
+            "ok": True,
+            "status": "focused",
+            "focus": {
+                "role": "link",
+                "label": "Profile",
+                "uia": "action-select-profile+primary",
+                "text": "Profile",
+                "pathKind": "switchprofile",
+                "rail": "",
+                "index": 0,
+            },
+            "context": {
+                "stage": "browse",
+                "input_kind": "none",
+                "has_error": False,
+                "can_submit": False,
+                "focused_title": "Profile",
+            },
+        }
+    )
+    install_transport(monkeypatch, controller, [socket])
+
+    context = asyncio.run(controller.initialize())
+
+    assert context == NetflixContext(
+        stage=NetflixStage.BROWSE,
+        input_kind=NetflixInputKind.NONE,
+        focused_title="Profile",
+    )
+    assert socket.closed
+
+
+
 def test_type_submit_runs_once_in_one_short_transaction_and_returns_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

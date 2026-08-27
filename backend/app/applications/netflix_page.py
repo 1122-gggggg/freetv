@@ -177,7 +177,7 @@ class NetflixPageController:
     def __init__(
         self,
         port: int,
-        timeout: float = 8.0,
+        timeout: float = 10.0,
         runtime_path: Path | None = None,
     ) -> None:
         if type(port) is not int or not 1 <= port <= 65535:
@@ -189,6 +189,7 @@ class NetflixPageController:
         ).read_text(encoding="utf-8")
         self._focus: FocusFingerprint | None = None
         self._command_id = 0
+
 
     async def initialize(self) -> NetflixContext:
         async def operation(socket: Any) -> NetflixContext:
