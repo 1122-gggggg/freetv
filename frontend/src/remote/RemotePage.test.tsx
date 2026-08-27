@@ -1,21 +1,29 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { ControllerState, NetflixContext } from '../types/protocol'
 import { RemotePage } from './RemotePage'
 
 const socketMock = vi.hoisted(() => ({
   status: 'connected' as 'connecting' | 'authenticating' | 'connected' | 'disconnected' | 'error',
+  state: null as ControllerState | null,
+  lastAcknowledgement: null as {
+    request_id: string
+    success: boolean
+    error_code: string | null
+    message: string | null
+  } | null,
   sendCommand: vi.fn<(command: string) => string>(() => 'request-id'),
   sendPointer: vi.fn(() => 'request-id'),
-  sendText: vi.fn<(text: string) => string>(() => 'request-id'),
+  sendText: vi.fn<(text: string, submit?: boolean) => string>(() => 'request-id'),
   sendSearch: vi.fn(() => 'request-id'),
 }))
 
 vi.mock('../api/useControllerSocket', () => ({
   useControllerSocket: () => ({
     status: socketMock.status,
-    state: null,
-    lastAcknowledgement: null,
+    state: socketMock.state,
+    lastAcknowledgement: socketMock.lastAcknowledgement,
     lastError: null,
     sendCommand: socketMock.sendCommand,
     sendPointer: socketMock.sendPointer,
@@ -24,9 +32,34 @@ vi.mock('../api/useControllerSocket', () => ({
   }),
 }))
 
+const remoteElement = () => (
+  <RemotePage
+    token="paired-token-value-that-is-long-enough"
+    onPaired={vi.fn()}
+    onForget={vi.fn()}
+    onAuthenticationFailed={vi.fn()}
+  />
+)
+
+const netflixState = (context: NetflixContext | null): ControllerState => ({
+  version: 1,
+  type: 'state',
+  active_app: 'netflix',
+  focused_tile: 'netflix',
+  volume: 50,
+  muted: false,
+  channel_number: null,
+  channel_name: null,
+  status_message: null,
+  error_message: null,
+  netflix_context: context,
+})
+
 describe('RemotePage', () => {
   beforeEach(() => {
     socketMock.status = 'connected'
+    socketMock.state = null
+    socketMock.lastAcknowledgement = null
     socketMock.sendCommand.mockClear()
     socketMock.sendPointer.mockClear()
     socketMock.sendText.mockClear()
@@ -114,7 +147,7 @@ describe('RemotePage', () => {
       'BACK',
       'PLAY_PAUSE',
     ])
-    expect(socketMock.sendText).toHaveBeenCalledWith(text)
+    expect(socketMock.sendText).toHaveBeenCalledWith(text, false)
   })
 
   it('sends search_video for 搜片', () => {
@@ -144,12 +177,213 @@ describe('RemotePage', () => {
 
     fireEvent.change(screen.getByLabelText('遙控輸入'), { target: { value: 'user@example.com' } })
     fireEvent.click(screen.getByRole('button', { name: '送出' }))
-    expect(socketMock.sendText).toHaveBeenCalledWith('user@example.com')
+    expect(socketMock.sendText).toHaveBeenCalledWith('user@example.com', false)
 
     fireEvent.click(screen.getByRole('button', { name: '下一欄' }))
     expect(socketMock.sendCommand).toHaveBeenCalledWith('TAB')
   })
 
+
+  it.each([
+    {
+      inputKind: 'email',
+      stage: 'login',
+      type: 'email',
+      inputMode: 'email',
+      autoComplete: 'username',
+      placeholder: '請輸入 Netflix 電子郵件或手機號碼',
+    },
+    {
+      inputKind: 'password',
+      stage: 'login',
+      type: 'password',
+      inputMode: 'text',
+      autoComplete: 'current-password',
+      placeholder: '請輸入 Netflix 密碼',
+    },
+    {
+      inputKind: 'code',
+      stage: 'verification',
+      type: 'text',
+      inputMode: 'numeric',
+      autoComplete: 'one-time-code',
+      placeholder: '請輸入驗證碼 (OTP)',
+    },
+  ] as const)(
+    'renders a safe Netflix $inputKind context input',
+    ({ inputKind, stage, type, inputMode, autoComplete, placeholder }) => {
+      socketMock.state = netflixState({
+        stage,
+        input_kind: inputKind,
+        has_error: false,
+        can_submit: true,
+        focused_title: null,
+      })
+
+      render(remoteElement())
+
+      const input = screen.getByLabelText('Netflix 情境輸入')
+      expect(input.getAttribute('type')).toBe(type)
+      expect(input.getAttribute('inputmode')).toBe(inputMode)
+      expect(input.getAttribute('autocapitalize')).toBe('none')
+      expect(input.getAttribute('autocomplete')).toBe(autoComplete)
+      expect(input.getAttribute('placeholder')).toBe(placeholder)
+      expect(input.getAttribute('maxlength')).toBe('256')
+      expect(screen.queryByLabelText('遙控輸入')).toBeNull()
+    },
+  )
+
+  it('submits once, clears immediately, and waits only until context changes', () => {
+    const passwordContext: NetflixContext = {
+      stage: 'login',
+      input_kind: 'password',
+      has_error: false,
+      can_submit: true,
+      focused_title: null,
+    }
+    socketMock.state = netflixState(passwordContext)
+    const view = render(remoteElement())
+    const input = screen.getByLabelText('Netflix 情境輸入') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'secret' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '送出 Netflix 輸入' }))
+
+    expect(socketMock.sendText).toHaveBeenCalledOnce()
+    expect(socketMock.sendText).toHaveBeenCalledWith('secret', true)
+    expect(input.value).toBe('')
+    expect(screen.getByText('等待電視端回應...')).toBeTruthy()
+
+    socketMock.state = netflixState({
+      stage: 'browse',
+      input_kind: 'none',
+      has_error: false,
+      can_submit: false,
+      focused_title: 'Example',
+    })
+    view.rerender(remoteElement())
+    expect(screen.queryByText('等待電視端回應...')).toBeNull()
+    expect(screen.queryByLabelText('Netflix 情境輸入')).toBeNull()
+  })
+
+  it('stops waiting on acknowledgement failure without restoring the secret', () => {
+    socketMock.state = netflixState({
+      stage: 'login',
+      input_kind: 'password',
+      has_error: false,
+      can_submit: true,
+      focused_title: null,
+    })
+    const view = render(remoteElement())
+    const input = screen.getByLabelText('Netflix 情境輸入') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'secret' } })
+    fireEvent.click(screen.getByRole('button', { name: '送出 Netflix 輸入' }))
+    expect(screen.getByText('等待電視端回應...')).toBeTruthy()
+
+    socketMock.lastAcknowledgement = {
+      request_id: 'request-id',
+      success: false,
+      error_code: 'netflix_controller_unavailable',
+      message: 'failed',
+    }
+    view.rerender(remoteElement())
+
+    expect(screen.queryByText('等待電視端回應...')).toBeNull()
+    expect(input.value).toBe('')
+    expect(screen.getByText('無法送出，請重試')).toBeTruthy()
+    expect(input.disabled).toBe(false)
+    expect(document.body.textContent).not.toContain('secret')
+    fireEvent.change(input, { target: { value: 'retry' } })
+    fireEvent.click(screen.getByRole('button', { name: '送出 Netflix 輸入' }))
+    expect(socketMock.sendText).toHaveBeenLastCalledWith('retry', true)
+  })
+
+  it('shows only generic Netflix errors and browse-safe navigation context', () => {
+    socketMock.state = netflixState({
+      stage: 'login',
+      input_kind: 'password',
+      has_error: true,
+      can_submit: true,
+      focused_title: null,
+    })
+    const view = render(remoteElement())
+    expect(
+      screen.getByText('登入或驗證失敗，請檢查電視畫面後重試'),
+    ).toBeTruthy()
+    expect(document.body.textContent).not.toContain('password')
+
+    socketMock.state = netflixState({
+      stage: 'browse',
+      input_kind: 'none',
+      has_error: false,
+      can_submit: false,
+      focused_title: 'Example',
+    })
+    view.rerender(remoteElement())
+    expect(screen.getByText('目前選取：Example')).toBeTruthy()
+    expect(screen.getByText('左右換片、上下換列，按確定播放。')).toBeTruthy()
+    expect(screen.queryByLabelText('Netflix 情境輸入')).toBeNull()
+    expect(screen.queryByLabelText('遙控輸入')).toBeNull()
+  })
+
+  it.each(['details', 'watch'] as const)(
+    'does not expose browse title or an input during %s',
+    (stage) => {
+      socketMock.state = netflixState({
+        stage,
+        input_kind: 'none',
+        has_error: false,
+        can_submit: false,
+        focused_title: null,
+      })
+
+      render(remoteElement())
+
+      expect(screen.queryByText(/目前選取：/)).toBeNull()
+      expect(screen.queryByLabelText('Netflix 情境輸入')).toBeNull()
+      expect(screen.queryByLabelText('遙控輸入')).toBeNull()
+    },
+  )
+
+  it('unmounts on null, clears secrets, and leaves unknown on general controls', () => {
+    socketMock.state = netflixState({
+      stage: 'login',
+      input_kind: 'password',
+      has_error: false,
+      can_submit: true,
+      focused_title: null,
+    })
+    const view = render(remoteElement())
+    fireEvent.change(screen.getByLabelText('Netflix 情境輸入'), {
+      target: { value: 'secret' },
+    })
+
+    socketMock.state = netflixState(null)
+    view.rerender(remoteElement())
+    expect(screen.queryByLabelText('Netflix 情境輸入')).toBeNull()
+    expect(screen.getByLabelText('遙控輸入')).toBeTruthy()
+
+    socketMock.state = netflixState({
+      stage: 'unknown',
+      input_kind: 'none',
+      has_error: false,
+      can_submit: false,
+      focused_title: null,
+    })
+    view.rerender(remoteElement())
+    expect(screen.queryByLabelText('Netflix 情境輸入')).toBeNull()
+    expect(screen.getByLabelText('遙控輸入')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '確定' })).toBeTruthy()
+
+    socketMock.state = netflixState({
+      stage: 'login',
+      input_kind: 'password',
+      has_error: false,
+      can_submit: true,
+      focused_title: null,
+    })
+    view.rerender(remoteElement())
+    expect((screen.getByLabelText('Netflix 情境輸入') as HTMLInputElement).value).toBe('')
+  })
 
   it('uses speech recognition when 語音 is clicked', async () => {
     interface FakeSpeechRecognitionEvent {

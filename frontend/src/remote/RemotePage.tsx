@@ -2,7 +2,7 @@ import { type FormEvent, type ReactElement, useEffect, useRef, useState } from '
 
 import { useControllerSocket } from '../api/useControllerSocket'
 import { CommandButton } from '../components/CommandButton'
-import type { Command } from '../types/protocol'
+import type { Command, NetflixInputKind } from '../types/protocol'
 import { rememberRemoteToken } from './tokenStorage'
 
 interface SpeechRecognitionResultItem {
@@ -155,10 +155,43 @@ function PairingScreen({ onPaired }: Pick<RemotePageProps, 'onPaired'>): ReactEl
   )
 }
 
+const NETFLIX_INPUT_PRESENTATION: Partial<
+  Record<
+    NetflixInputKind,
+    {
+      type: 'email' | 'password' | 'text'
+      inputMode: 'email' | 'text' | 'numeric'
+      autoComplete: 'username' | 'current-password' | 'one-time-code'
+      placeholder: string
+    }
+  >
+> = {
+  email: {
+    type: 'email',
+    inputMode: 'email',
+    autoComplete: 'username',
+    placeholder: '請輸入 Netflix 電子郵件或手機號碼',
+  },
+  password: {
+    type: 'password',
+    inputMode: 'text',
+    autoComplete: 'current-password',
+    placeholder: '請輸入 Netflix 密碼',
+  },
+  code: {
+    type: 'text',
+    inputMode: 'numeric',
+    autoComplete: 'one-time-code',
+    placeholder: '請輸入驗證碼 (OTP)',
+  },
+}
+
 function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteControlProps): ReactElement {
   const { status, state, lastAcknowledgement, lastError, sendCommand, sendSearch, sendText } = useControllerSocket('/ws/remote', token)
   const [query, setQuery] = useState('')
   const [typed, setTyped] = useState('')
+  const [netflixTyped, setNetflixTyped] = useState('')
+  const [pendingNetflixRequest, setPendingNetflixRequest] = useState<string | null>(null)
   const [hideSecret, setHideSecret] = useState(false)
   const [forgetError, setForgetError] = useState<string | null>(null)
   const [forgetting, setForgetting] = useState(false)
@@ -170,6 +203,23 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     state?.active_app === 'netflix' ||
     state?.active_app === 'browser' ||
     state?.active_app === 'news'
+  const netflixContext =
+    state?.active_app === 'netflix' ? (state.netflix_context ?? null) : null
+  const netflixInput = netflixContext
+    ? NETFLIX_INPUT_PRESENTATION[netflixContext.input_kind]
+    : undefined
+  const [previousNetflixContext, setPreviousNetflixContext] = useState(netflixContext)
+  if (previousNetflixContext !== netflixContext) {
+    setPreviousNetflixContext(netflixContext)
+    setNetflixTyped('')
+    setPendingNetflixRequest(null)
+  }
+  const netflixAcknowledgementFailed =
+    pendingNetflixRequest !== null &&
+    lastAcknowledgement?.request_id === pendingNetflixRequest &&
+    !lastAcknowledgement.success
+  const waitingForNetflix =
+    pendingNetflixRequest !== null && !netflixAcknowledgementFailed
 
 
 
@@ -179,6 +229,8 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   useEffect(() => {
     if (lastError?.code === 'authentication_failed') onAuthenticationFailed()
   }, [lastError, onAuthenticationFailed])
+
+
 
   useEffect(() => () => {
     if (recognitionRef.current) {
@@ -235,7 +287,23 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   const submitTyped = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (controlsDisabled || typed.length === 0) return
-    if (sendText(typed)) setTyped('')
+    if (sendText(typed, false)) setTyped('')
+  }
+
+  const submitNetflix = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (
+      controlsDisabled ||
+      waitingForNetflix ||
+      netflixTyped.length === 0 ||
+      !netflixContext?.can_submit
+    ) {
+      return
+    }
+    const text = netflixTyped
+    setNetflixTyped('')
+    const requestId = sendText(text, true)
+    if (requestId) setPendingNetflixRequest(requestId)
   }
 
 
@@ -278,6 +346,75 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         <CommandButton command="OPEN_NEWS" label="新聞" onCommand={command} disabled={controlsDisabled} />
       </section>
 
+      {netflixContext && netflixContext.stage !== 'unknown' ? (
+        <section
+          className={`netflix-context-card ${netflixContext.has_error ? 'is-error' : ''}`}
+          aria-labelledby="netflix-context-title"
+        >
+          <p className="eyebrow">Netflix 電視情境</p>
+          <h2 id="netflix-context-title">
+            {netflixContext.stage === 'browse' ? 'Netflix 片單' : 'Netflix 輸入'}
+          </h2>
+          {netflixContext.has_error ? (
+            <p className="netflix-context-error" role="status" aria-live="polite">
+              登入或驗證失敗，請檢查電視畫面後重試
+            </p>
+          ) : null}
+          {netflixInput ? (
+            <form onSubmit={submitNetflix}>
+              <input
+                aria-label="Netflix 情境輸入"
+                type={netflixInput.type}
+                inputMode={netflixInput.inputMode}
+                autoCapitalize="none"
+                autoCorrect="off"
+                autoComplete={netflixInput.autoComplete}
+                spellCheck={false}
+                maxLength={256}
+                placeholder={netflixInput.placeholder}
+                disabled={controlsDisabled || waitingForNetflix}
+                value={netflixTyped}
+                onChange={(event) => setNetflixTyped(event.target.value.slice(0, 256))}
+              />
+              <button
+                className="remote-button netflix-context-submit"
+                type="submit"
+                aria-label="送出 Netflix 輸入"
+                disabled={
+                  controlsDisabled ||
+                  waitingForNetflix ||
+                  netflixTyped.length === 0 ||
+                  !netflixContext.can_submit
+                }
+              >
+                送到電視並繼續
+              </button>
+            </form>
+          ) : netflixContext.stage === 'browse' ? (
+            <div className="netflix-browse-context">
+              {netflixContext.focused_title ? (
+                <p className="netflix-focused-title">
+                  目前選取：{netflixContext.focused_title}
+                </p>
+              ) : null}
+              <p>左右換片、上下換列，按確定播放。</p>
+            </div>
+          ) : (
+            <p>使用方向鍵與確定鍵操作目前 Netflix 畫面。</p>
+          )}
+          {waitingForNetflix ? (
+            <p className="netflix-context-waiting" role="status" aria-live="polite">
+              等待電視端回應...
+            </p>
+          ) : null}
+          {netflixAcknowledgementFailed ? (
+            <p className="netflix-context-error" role="status" aria-live="polite">
+              無法送出，請重試
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       <section className="remote-direction-pad" aria-label="方向鍵">
         <CommandButton command="NAV_UP" label="上" onCommand={command} className="direction-up" disabled={controlsDisabled} repeatOnHold />
         <CommandButton command="NAV_LEFT" label="左" onCommand={command} className="direction-left" disabled={controlsDisabled} repeatOnHold />
@@ -308,6 +445,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         </button>
       </section>
 
+      {!netflixContext || netflixContext.stage === 'unknown' ? (
       <section className="search-card" aria-labelledby="keyboard-title">
         <p className="eyebrow">鍵盤</p>
         <h2 id="keyboard-title">輸入帳號或密碼</h2>
@@ -346,6 +484,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
           <CommandButton command="TAB" label="下一欄" onCommand={command} disabled={controlsDisabled} />
         </div>
       </section>
+      ) : null}
 
       <section className="search-card" aria-labelledby="search-title">
         <p className="eyebrow">影片搜尋</p>

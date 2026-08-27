@@ -49,7 +49,7 @@ export interface ControllerState {
   channel_name: string | null
   status_message: string | null
   error_message: string | null
-  netflix_context: NetflixContext | null
+  netflix_context?: NetflixContext | null
 }
 
 export interface Acknowledgement {
