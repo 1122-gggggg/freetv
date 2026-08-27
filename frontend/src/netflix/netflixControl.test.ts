@@ -60,6 +60,12 @@ function setRect(element: Element, left: number, top: number, width = 120, heigh
   })
 }
 
+function setReadyVideo(): void {
+  const video = document.querySelector('video') as HTMLVideoElement
+  setRect(video, 20, 20, 640, 360)
+  Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+}
+
 function setSequentialRects(selector = 'button,a,input,textarea,[tabindex],video'): void {
   document.querySelectorAll(selector).forEach((element, index) => {
     setRect(element, 40 + index * 160, 80)
@@ -203,6 +209,7 @@ describe('Netflix DOM control runtime', () => {
       play.addEventListener('click', () => {
         window.history.replaceState({}, '', '/watch/focused')
         document.body.innerHTML = '<video></video>'
+        setReadyVideo()
       })
     })
 
@@ -312,6 +319,7 @@ describe('Netflix DOM control runtime', () => {
     const playClick = vi.spyOn(play, 'click').mockImplementation(() => {
       window.history.replaceState({}, '', '/watch/immediate')
       document.body.innerHTML = '<video></video>'
+      setReadyVideo()
     })
     expect((await runtime().run('OK', null)).status).toBe('playing')
     expect(playClick).toHaveBeenCalledOnce()
@@ -333,6 +341,7 @@ describe('Netflix DOM control runtime', () => {
         detailPlayClicks += 1
         window.history.replaceState({}, '', '/watch/delayed')
         document.body.innerHTML = '<video></video>'
+        setReadyVideo()
       })
       modal.append(detailPlay)
       document.body.append(modal)
@@ -847,13 +856,26 @@ describe('Netflix DOM control runtime', () => {
     const headerClick = vi.spyOn(headerLogin, 'click')
     const startClick = vi.spyOn(start, 'click').mockImplementation(() => {
       setTimeout(() => {
+        const loading = document.createElement('div')
+        loading.className = 'detail-modal'
+        loading.id = 'loading'
+        document.body.append(loading)
+        setRect(loading, 20, 20, 800, 600)
+      }, 20)
+      setTimeout(() => {
         document.body.innerHTML =
           '<div class="lolomoRow"><div class="title-card" tabindex="0">Browse</div></div>'
         setRect(document.querySelector('.title-card')!, 20, 80)
-      }, 20)
+      }, 80)
     })
 
-    const pending = runtime().run('SUBMIT_PRIMARY', null)
+    let settled = false
+    const pending = runtime().run('SUBMIT_PRIMARY', null).then((result) => {
+      settled = true
+      return result
+    })
+    await vi.advanceTimersByTimeAsync(30)
+    expect(settled).toBe(false)
     await vi.runAllTimersAsync()
     const result = await pending
     vi.useRealTimers()
@@ -879,12 +901,28 @@ describe('Netflix DOM control runtime', () => {
     card.focus()
     const click = vi.spyOn(play, 'click').mockImplementation(() => {
       setTimeout(() => {
+        const loading = document.createElement('div')
+        loading.className = 'detail-modal'
+        loading.id = 'loading'
+        document.body.append(loading)
+        setRect(loading, 20, 20, 800, 600)
+      }, 20)
+      setTimeout(() => {
         window.history.replaceState({}, '', '/watch/next')
         document.body.innerHTML = '<video></video>'
-      }, 20)
+        const video = document.querySelector('video') as HTMLVideoElement
+        setRect(video, 20, 20, 640, 360)
+        Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+      }, 80)
     })
 
-    const pending = runtime().run('OK', null)
+    let settled = false
+    const pending = runtime().run('OK', null).then((result) => {
+      settled = true
+      return result
+    })
+    await vi.advanceTimersByTimeAsync(30)
+    expect(settled).toBe(false)
     await vi.runAllTimersAsync()
     const result = await pending
     vi.useRealTimers()
@@ -906,14 +944,27 @@ describe('Netflix DOM control runtime', () => {
     setRect(back, 20, 20)
     const click = vi.spyOn(back, 'click').mockImplementation(() => {
       setTimeout(() => {
+        const loading = document.createElement('div')
+        loading.className = 'detail-modal'
+        loading.id = 'loading'
+        document.body.append(loading)
+        setRect(loading, 20, 20, 800, 600)
+      }, 20)
+      setTimeout(() => {
         window.history.replaceState({}, '', '/browse')
         document.body.innerHTML =
           '<div class="lolomoRow"><div class="title-card" tabindex="0">Browse</div></div>'
         setRect(document.querySelector('.title-card')!, 20, 80)
-      }, 20)
+      }, 80)
     })
 
-    const pending = runtime().run('BACK', null)
+    let settled = false
+    const pending = runtime().run('BACK', null).then((result) => {
+      settled = true
+      return result
+    })
+    await vi.advanceTimersByTimeAsync(30)
+    expect(settled).toBe(false)
     await vi.runAllTimersAsync()
     const result = await pending
     vi.useRealTimers()

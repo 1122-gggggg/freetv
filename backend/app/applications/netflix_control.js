@@ -359,11 +359,11 @@
     }
   }
 
-  const success = (status, extra = {}) => ({
+  const success = (status, extra = {}, context = netflixContext()) => ({
     ok: true,
     status,
     ...extra,
-    context: netflixContext(),
+    context,
   })
 
   const CARD_SELECTOR = [
@@ -439,6 +439,23 @@
         uia: overlay.getAttribute('data-uia'),
       })),
     })
+  }
+
+  const contextSemanticsChanged = (before, after) =>
+    before.stage !== after.stage ||
+    before.input_kind !== after.input_kind ||
+    before.has_error !== after.has_error
+
+  const readyWatchContext = () => {
+    const context = netflixContext()
+    if (context.stage !== 'watch') return null
+    const video = [...document.querySelectorAll('video')].find(
+      (element) =>
+        element instanceof HTMLVideoElement &&
+        visible(element) &&
+        element.readyState >= 2,
+    )
+    return video ? context : null
   }
 
   const focusResult = (target, status, elements) => {
@@ -681,8 +698,9 @@
     if (action === 'READ_CONTEXT') return success('context')
 
     if (action === 'BACK') {
-      const before = pageSignature()
-      if (globalThis.location.pathname.includes('/watch/')) {
+      const beforeContext = netflixContext()
+      const beforePath = globalThis.location.pathname
+      if (beforeContext.stage === 'watch') {
         const playerBack = [
           ...document.querySelectorAll(
             '[data-uia="player-back-to-browsing"],.button-nfplayerBack',
@@ -690,17 +708,32 @@
         ].find((element) => element instanceof HTMLElement && visible(element))
         if (playerBack instanceof HTMLElement) {
           playerBack.click()
-          const changed = await settle(() => pageSignature() !== before, 1200)
-          return changed ? success('history') : error('netflix_back_unavailable')
+          const context = await settle(() => {
+            const current = netflixContext()
+            return current.stage !== 'watch' ? current : null
+          }, 1200)
+          return context
+            ? success('history', {}, context)
+            : error('netflix_back_unavailable')
         }
       }
-      if (closeTopOverlay()) {
-        const changed = await settle(() => pageSignature() !== before, 1200)
-        return changed ? success('closed') : error('netflix_back_unavailable')
+      const topOverlay = visibleOverlays().at(-1)
+      if (topOverlay && closeTopOverlay()) {
+        const context = await settle(
+          () => (!topOverlay.isConnected || !visible(topOverlay) ? netflixContext() : null),
+          1200,
+        )
+        return context ? success('closed', {}, context) : error('netflix_back_unavailable')
       }
       globalThis.history.back()
-      const changed = await settle(() => pageSignature() !== before, 1200)
-      return changed ? success('history') : error('netflix_back_unavailable')
+      const context = await settle(() => {
+        const current = netflixContext()
+        const pathChanged = globalThis.location.pathname !== beforePath
+        const meaningfulStageChanged =
+          current.stage !== beforeContext.stage && current.stage !== 'details'
+        return pathChanged || meaningfulStageChanged ? current : null
+      }, 1200)
+      return context ? success('history', {}, context) : error('netflix_back_unavailable')
     }
 
     if (action === 'PLAY_PAUSE') {
@@ -730,10 +763,15 @@
       if (!(scope instanceof HTMLElement)) return error('netflix_submit_unavailable')
       const button = visibleSubmitButton(scope)
       if (!(button instanceof HTMLElement)) return error('netflix_submit_unavailable')
-      const before = pageSignature()
+      const before = netflixContext()
       button.click()
-      const changed = await settle(() => pageSignature() !== before, 1200)
-      return changed ? success('submitted') : error('netflix_submit_unavailable')
+      const context = await settle(() => {
+        const current = netflixContext()
+        return current.stage !== 'details' && contextSemanticsChanged(before, current)
+          ? current
+          : null
+      }, 1200)
+      return context ? success('submitted', {}, context) : error('netflix_submit_unavailable')
     }
 
     const elements = interactiveElements()
@@ -774,11 +812,10 @@
         const currentFocus = fingerprint(activeCard, elements)
         const existingPlay = visiblePlayButton(activeCard)
         if (existingPlay instanceof HTMLElement) {
-          const before = pageSignature()
           existingPlay.click()
-          const changed = await settle(() => pageSignature() !== before, 1200)
-          return changed
-            ? success('playing', { focus: currentFocus })
+          const context = await settle(() => readyWatchContext(), 1200)
+          return context
+            ? success('playing', { focus: currentFocus }, context)
             : error('netflix_direct_play_unavailable')
         }
         const previousOverlays = new Set(visibleOverlays())
@@ -792,11 +829,10 @@
         if (!(detailPlay instanceof HTMLElement)) {
           return error('netflix_direct_play_unavailable')
         }
-        const before = pageSignature()
         detailPlay.click()
-        const changed = await settle(() => pageSignature() !== before, 1200)
-        return changed
-          ? success('playing', { focus: currentFocus })
+        const context = await settle(() => readyWatchContext(), 1200)
+        return context
+          ? success('playing', { focus: currentFocus }, context)
           : error('netflix_direct_play_unavailable')
       }
       if (!current) return recoverFocus(elements, previousFocus)
