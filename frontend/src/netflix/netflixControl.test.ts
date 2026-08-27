@@ -417,7 +417,8 @@ describe('Netflix DOM control runtime', () => {
     expect(click).toHaveBeenCalledOnce()
     vi.useRealTimers()
   })
-  it('exposes only the fixed global version and run interface and re-enumerates every run', async () => { expect(runtime().version).toBe('1')
+  it('exposes only the fixed global version and run interface and re-enumerates every run', async () => { expect(runtime().version).toBe('2')
+
   expect(Object.keys(runtime()).sort()).toEqual(['run', 'version'])
   document.body.innerHTML = '<button id="first">First</button>'
   const first = document.querySelector('#first') as HTMLButtonElement
@@ -1038,6 +1039,27 @@ describe('Netflix DOM control runtime', () => {
       context: { stage: 'watch' },
     })
   })
+
+  it('requests fullscreen on a ready watch video even when player chrome covers it', async () => {
+    window.history.replaceState({}, '', '/watch/covered')
+    document.body.innerHTML = '<video></video><div id="cover"></div>'
+    const video = document.querySelector('video') as HTMLVideoElement
+    const cover = document.querySelector('#cover') as HTMLElement
+    setRect(video, 0, 0, 640, 360)
+    setRect(cover, 0, 0, 640, 360)
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 4 })
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(video, 'requestFullscreen', {
+      configurable: true,
+      value: requestFullscreen,
+    })
+
+    const result = await runtime().run('FULLSCREEN', null)
+
+    expect(requestFullscreen).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({ ok: true, status: 'fullscreen' })
+  })
+
 
   it('falls back to the visible Netflix player container for fullscreen', async () => {
     document.body.innerHTML = '<div id="movie_player"></div>'

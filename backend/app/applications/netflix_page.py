@@ -13,9 +13,9 @@ import websockets
 from pydantic import ValidationError
 
 from app.commands.ports import CommandExecutionError
-from app.protocol import Command, NetflixContext
+from app.protocol import Command, NetflixContext, NetflixStage
 
-RUNTIME_VERSION = "1"
+RUNTIME_VERSION = "2"
 ERROR_MESSAGES = {
     "netflix_page_unavailable": "無法連到 Netflix 控制頁面，請稍後再試。",
     "netflix_controller_unavailable": "無法載入 Netflix 遙控控制，請稍後再試。",
@@ -211,11 +211,19 @@ class NetflixPageController:
         async def operation(socket: Any) -> NetflixContext:
             result = await self._run_runtime(socket, action)
             try:
-                return self._accept_runtime_result(result)
+                context = self._accept_runtime_result(result)
             except _RetryableControllerError:
                 if action not in IDEMPOTENT_ACTIONS:
                     raise _OutcomeUnknownError from None
                 raise
+            if action is NetflixAction.OK and context.stage is NetflixStage.WATCH:
+                fullscreen = await self._run_action(socket, NetflixAction.FULLSCREEN)
+                try:
+                    self._accept_runtime_result(fullscreen)
+                except _RetryableControllerError:
+                    raise _OutcomeUnknownError from None
+            return context
+
 
         return await self._run_transaction(operation)
 

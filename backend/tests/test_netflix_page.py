@@ -11,6 +11,7 @@ import pytest
 
 import app.applications.netflix_page as netflix_page_module
 from app.applications.netflix_page import (
+    RUNTIME_VERSION,
     NetflixAction,
     NetflixPageController,
     select_netflix_target,
@@ -19,6 +20,7 @@ from app.commands.ports import CommandExecutionError
 from app.protocol import Command, NetflixContext, NetflixInputKind, NetflixStage
 
 RUNTIME_SOURCE = "globalThis.__fixtureNetflixRuntime = true"
+
 VALID_FOCUS = {
     "role": "button",
     "label": "Play Alpha",
@@ -42,11 +44,28 @@ BROWSE_CONTEXT = {
     "can_submit": False,
     "focused_title": "Alpha",
 }
+WATCH_CONTEXT = {
+    "stage": "watch",
+    "input_kind": "none",
+    "has_error": False,
+    "can_submit": False,
+    "focused_title": None,
+}
 VALID_RESULT = {
     "ok": True,
     "status": "focused",
     "focus": VALID_FOCUS,
     "context": BROWSE_CONTEXT,
+}
+PLAYING_WATCH_RESULT = {
+    "ok": True,
+    "status": "playing",
+    "context": WATCH_CONTEXT,
+}
+FULLSCREEN_WATCH_RESULT = {
+    "ok": True,
+    "status": "fullscreen",
+    "context": WATCH_CONTEXT,
 }
 NETFLIX_PAGE = {
     "type": "page",
@@ -55,11 +74,13 @@ NETFLIX_PAGE = {
 }
 
 
+
 class FakeSocket:
     def __init__(
         self,
         *,
         runtime_present: bool = True,
+        runtime_version: str | None = None,
         runtime_result: Any = None,
         runtime_results: list[Any] | None = None,
         fail_injection: bool = False,
@@ -73,6 +94,7 @@ class FakeSocket:
         secret_in_error: str = "",
     ) -> None:
         self.runtime_present = runtime_present
+        self.reported_version = runtime_version
         self.runtime_results = runtime_results
         self.runtime_result = VALID_RESULT if runtime_result is None else runtime_result
         self.fail_injection = fail_injection
@@ -90,6 +112,7 @@ class FakeSocket:
         self._replies: list[str] = []
         self.entered = 0
         self.closed = False
+
 
     async def send(self, raw: str) -> None:
         payload = json.loads(raw)
@@ -114,6 +137,7 @@ class FakeSocket:
                 self._error(command_id)
             else:
                 self.runtime_present = True
+                self.reported_version = RUNTIME_VERSION
                 self._remote_value(command_id, None)
         elif ".run(" in expression:
             self.run_calls += 1
@@ -132,7 +156,14 @@ class FakeSocket:
             self.version_calls += 1
             if self.drop_version_ack or self.drop_version_ack_at == self.version_calls:
                 return
-            self._remote_value(command_id, "1" if self.runtime_present else None)
+            if not self.runtime_present:
+                self._remote_value(command_id, None)
+            else:
+                self._remote_value(
+                    command_id,
+                    self.reported_version if self.reported_version is not None else RUNTIME_VERSION,
+                )
+
 
     async def recv(self) -> str:
         return self._replies.pop(0)
@@ -438,6 +469,46 @@ def test_execute_injects_runtime_only_when_version_is_missing(
         runtime_expressions(socket)[0],
     ]
     assert socket.closed
+
+
+def test_stale_v1_runtime_is_replaced_with_current_source_before_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    socket = FakeSocket(runtime_version="1")
+    install_transport(monkeypatch, controller, [socket])
+
+    asyncio.run(controller.initialize())
+
+    expressions = [payload["params"]["expression"] for payload in socket.sent]
+    assert RUNTIME_VERSION != "1"
+    assert expressions == [
+        NetflixPageController.VERSION_EXPRESSION,
+        RUNTIME_SOURCE,
+        NetflixPageController.VERSION_EXPRESSION,
+        runtime_expressions(socket)[0],
+    ]
+    assert socket.closed
+
+
+def test_current_runtime_version_is_not_reinjected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    socket = FakeSocket(runtime_version=RUNTIME_VERSION)
+    install_transport(monkeypatch, controller, [socket])
+
+    asyncio.run(controller.initialize())
+
+    expressions = [payload["params"]["expression"] for payload in socket.sent]
+    assert expressions == [
+        NetflixPageController.VERSION_EXPRESSION,
+        runtime_expressions(socket)[0],
+    ]
+    assert RUNTIME_SOURCE not in expressions
+    assert socket.closed
+
+
 
 
 def test_http_failure_retries_with_fresh_page_discovery(
@@ -1234,3 +1305,66 @@ def test_side_effect_runtime_actions_use_user_gesture(
         and f'"{command.value}"' in message["params"]["expression"]
     )
     assert request["params"]["userGesture"] is True
+
+
+def test_ok_watch_sends_one_fullscreen_evaluate_in_the_same_transaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    socket = FakeSocket(
+        runtime_results=[PLAYING_WATCH_RESULT, FULLSCREEN_WATCH_RESULT]
+    )
+    connect, page_calls = install_transport(monkeypatch, controller, [socket])
+
+    context = asyncio.run(controller.execute(Command.OK))
+
+    runs = runtime_expressions(socket)
+    assert len(runs) == 2
+    assert '"OK"' in runs[0]
+    assert '"FULLSCREEN"' in runs[1]
+    fullscreen = next(
+        message
+        for message in socket.sent
+        if message["method"] == "Runtime.evaluate"
+        and '"FULLSCREEN"' in message["params"]["expression"]
+    )
+    assert fullscreen["params"]["userGesture"] is True
+    assert context == NetflixContext(
+        stage=NetflixStage.WATCH,
+        input_kind=NetflixInputKind.NONE,
+    )
+    assert page_calls == [9222]
+    assert len(connect.calls) == 1
+    assert socket.closed
+
+
+def test_ok_fullscreen_reject_does_not_replay_play(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    socket = FakeSocket(
+        runtime_results=[
+            PLAYING_WATCH_RESULT,
+            {
+                "ok": False,
+                "status": "error",
+                "code": "netflix_fullscreen_unavailable",
+            },
+        ]
+    )
+    connect, page_calls = install_transport(monkeypatch, controller, [socket, FakeSocket()])
+
+    with pytest.raises(CommandExecutionError) as caught:
+        asyncio.run(controller.execute(Command.OK))
+
+    assert caught.value.code == "netflix_fullscreen_unavailable"
+    runs = runtime_expressions(socket)
+    assert len(runs) == 2
+    assert '"OK"' in runs[0]
+    assert '"FULLSCREEN"' in runs[1]
+    assert sum('"OK"' in expression for expression in runs) == 1
+    assert page_calls == [9222]
+    assert len(connect.calls) == 1
+    assert socket.closed
+
+

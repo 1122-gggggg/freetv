@@ -1,7 +1,8 @@
 (() => {
   'use strict'
 
-  const VERSION = '1'
+  const VERSION = '2'
+
   const ACTIONS = new Set([
     'FOCUS_PRIMARY',
     'FOCUS_EDITABLE',
@@ -920,12 +921,12 @@
     }
 
     if (action === 'FULLSCREEN') {
-      const video = [...document.querySelectorAll('video')].find(
-        (element) =>
-          element instanceof HTMLVideoElement &&
-          visible(element) &&
-          element.readyState >= 2,
-      )
+      const video = [...document.querySelectorAll('video')].find((element) => {
+        if (!(element instanceof HTMLVideoElement) || !element.isConnected) return false
+        if (element.readyState < 2) return false
+        const rect = element.getBoundingClientRect()
+        return rect.width > 0 && rect.height > 0
+      })
       const player = document.querySelector('#movie_player')
       const target =
         video ||
