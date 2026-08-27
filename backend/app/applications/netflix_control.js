@@ -93,6 +93,10 @@
   ].join(',')
 
   const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim()
+  const isProfileChoice = (element) =>
+    element instanceof HTMLElement &&
+    /action-select-profile/i.test(element.getAttribute('data-uia') || '')
+
 
   const rectCenter = (rect) => ({
     x: rect.left + rect.width / 2,
@@ -333,15 +337,12 @@
           ? 'verification'
           : kind !== 'none'
             ? 'login'
-            : document.querySelector('.lolomoRow,.rowContainer,[data-uia*="row" i]')
+            : document.querySelector('.lolomoRow,.rowContainer,[data-uia*="row" i]') ||
+                document.querySelector(CARD_SELECTOR)
               ? 'browse'
               : 'unknown'
-    const focused =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement.closest(
-            '.title-card,.slider-item,[data-uia*="title-card" i],[data-uia*="slider-item" i]',
-          )
-        : null
+    const focused = canonicalCard(document.activeElement) ||
+      (isProfileChoice(document.activeElement) ? document.activeElement : null)
     const submit = [...document.querySelectorAll('button,[role="button"]')].find(
       (button) =>
         button instanceof HTMLElement &&
@@ -356,7 +357,9 @@
       )].some((element) => element instanceof HTMLElement && visible(element)),
       can_submit: Boolean(submit),
       focused_title:
-        stage === 'browse' && focused instanceof HTMLElement ? safeText(focused) : null,
+        focused instanceof HTMLElement && (stage === 'browse' || isProfileChoice(focused))
+          ? safeText(focused)
+          : null,
     }
   }
 
@@ -373,6 +376,9 @@
     '[data-uia*="title-card" i]',
     '[data-uia*="slider-item" i]',
     '[data-uia*="search-result" i]',
+    '[data-uia="standard-card" i]',
+    '[data-uia="progress-card" i]',
+    '[data-uia="ranked-card" i]',
   ].join(',')
   const CARD_EXCLUSION_SELECTOR = [
     'header',
@@ -656,8 +662,13 @@
       if (firstInOverlay) return firstInOverlay
     }
 
-    const profile = elements.find((element) => uiaIncludes(element, ['profile-link', 'profile-gate']))
+    const profile = elements.find(
+      (element) =>
+        isProfileChoice(element) ||
+        uiaIncludes(element, ['profile-gate', 'profile-link']),
+    )
     if (profile) return profile
+
 
     const visibleVideo = [...document.querySelectorAll('video')].some(
       (element) => element instanceof HTMLVideoElement && visible(element),
@@ -680,14 +691,19 @@
       if (field) return field
     }
 
+    const context = netflixContext()
+    const browseRoute =
+      context.stage === 'browse' ||
+      globalThis.location.pathname === '/browse' ||
+      globalThis.location.pathname.startsWith('/browse/')
+    if (browseRoute) return cardEntries()[0]?.representative || null
+
     const navigation = elements.find((element) =>
       uiaIncludes(element, ['navigation', 'main-nav', 'menu-home', 'nav-']),
     )
     if (navigation) return navigation
 
-    const card = elements.find((element) =>
-      uiaIncludes(element, ['title-card', 'slider-item', 'search-result']),
-    )
+    const card = cardEntries()[0]?.representative
     if (card) return card
 
     return elements.find((element) => editable(element)) || elements[0] || null
