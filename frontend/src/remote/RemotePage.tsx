@@ -449,6 +449,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         <CommandButton command="VOLUME_DOWN" label="音量 −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
         <CommandButton command="MUTE" label="靜音" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="PLAY_PAUSE" label="播放／暫停" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="FULLSCREEN" label="全螢幕" onCommand={command} disabled={controlsDisabled} />
       </section>
 
       <section className="remote-voice-row" aria-label="語音搜尋">

@@ -13,6 +13,7 @@ from app.applications.youtube_fullscreen import (
     YoutubeFullscreenController,
     extract_video_identity,
 )
+from app.commands.ports import CommandExecutionError
 
 
 @pytest.mark.parametrize(
@@ -96,6 +97,58 @@ def test_marks_video_before_send_and_never_retries_unknown_outcome() -> None:
         with pytest.raises(TimeoutError):
             await controller.probe_once(9222)
         assert await controller.probe_once(9222) is False
+        return probe.fullscreen_calls
+
+    assert asyncio.run(scenario()) == [(9222, "watch:alpha", True)]
+
+
+def test_force_fullscreen_ignores_last_identity_once_and_updates_it() -> None:
+    async def scenario() -> tuple[bool, bool, list[tuple[int, str, bool]]]:
+        probe = FakeProbe(
+            inspections=[
+                ("watch:alpha", True, False),
+                ("watch:alpha", True, False),
+            ]
+        )
+        controller = YoutubeFullscreenController(probe=probe)
+        assert await controller.probe_once(9222)
+
+        forced = await controller.force_fullscreen(9222)
+        automatic_after_force = await controller.probe_once(9222)
+        return forced, automatic_after_force, probe.fullscreen_calls
+
+    assert asyncio.run(scenario()) == (
+        True,
+        False,
+        [
+            (9222, "watch:alpha", True),
+            (9222, "watch:alpha", True),
+        ],
+    )
+
+
+def test_force_fullscreen_rejects_missing_or_unready_video() -> None:
+    async def scenario(inspection: tuple[str | None, bool, bool]) -> str:
+        controller = YoutubeFullscreenController(
+            probe=FakeProbe(inspections=[inspection])
+        )
+        with pytest.raises(CommandExecutionError) as caught:
+            await controller.force_fullscreen(9222)
+        return caught.value.code
+
+    assert asyncio.run(scenario((None, True, False))) == "youtube_video_unavailable"
+    assert (
+        asyncio.run(scenario(("watch:alpha", False, False)))
+        == "youtube_video_unavailable"
+    )
+
+
+def test_force_fullscreen_unknown_outcome_sends_only_once() -> None:
+    async def scenario() -> list[tuple[int, str, bool]]:
+        probe = FakeProbe(fail_after_send=True)
+        controller = YoutubeFullscreenController(probe=probe)
+        with pytest.raises(TimeoutError):
+            await controller.force_fullscreen(9222)
         return probe.fullscreen_calls
 
     assert asyncio.run(scenario()) == [(9222, "watch:alpha", True)]

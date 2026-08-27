@@ -112,7 +112,7 @@ Pop-Location
 - Home: minimize/stop the project-owned active application and return to 我的電視.
 - Space: Play/Pause.
 
-The PWA and Expo Remotes expose three app keys (YouTube, Netflix, 新聞), D-pad navigation, Back/Home, TAB/下一欄, Channel Up/Down, Volume/Mute, voice search, bounded text input, and a constrained touchpad:
+The PWA and Expo Remotes expose three app keys (YouTube, Netflix, 新聞), D-pad navigation, Back/Home, Fullscreen, TAB/下一欄, Channel Up/Down, Volume/Mute, voice search, bounded text input, and a constrained touchpad:
 
 - One-finger drag: bounded relative mouse motion.
 - One tap / double tap: left click / double click.
@@ -130,7 +130,7 @@ The Remote never offers raw key sequences, shell commands, PowerShell commands, 
 - All TV Chrome launches include `--disable-notifications` and `--deny-permission-prompts`; these flags affect only controller-owned TV/Netflix processes and do not write a global Chrome permission policy.
 - **Browser** opens the configured browser start URL in its normal browser window.
 
-Netflix navigation enumerates visible title cards by rail: Left/Right stays within a rail, Up/Down chooses the nearest card in the adjacent rail, OK clicks one visible card/detail Play or Resume action, BACK prefers Netflix's player back control, and PLAY_PAUSE requires a ready video. Each operation uses a fresh localhost target lookup and a short CDP WebSocket that closes after the result. Non-idempotent sends, clicks, playback, and submit operations are never replayed when their outcome is unknown.
+Netflix navigation enumerates visible title cards by rail: Left/Right stays within a rail, Up/Down chooses the nearest card in the adjacent rail, OK clicks one visible card/detail Play or Resume action, BACK prefers Netflix's player back control, PLAY_PAUSE requires a ready video, and FULLSCREEN requests fullscreen with an explicit user gesture. Each operation uses a fresh localhost target lookup and a short CDP WebSocket that closes after the result. Non-idempotent sends, clicks, playback, fullscreen, and submit operations are never replayed when their outcome is unknown.
 
 `NetflixContext` broadcasts only `stage`, `input_kind`, `has_error`, `can_submit`, and an optional browse-only `focused_title` (maximum 120 characters). It never contains a field value, length, email, password, verification code, cookie, token, or session secret. `CommandBus` is the sole state owner: it stores returned Netflix context and clears it on HOME, another app, rollback, or failure. The PWA and Expo clients render inline email/password/code or browse guidance and fall back to their ordinary D-pad/keyboard when context is null or unknown.
 

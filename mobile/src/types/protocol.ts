@@ -10,6 +10,7 @@ export type Command =
   | 'TAB'
   | 'HOME'
   | 'PLAY_PAUSE'
+  | 'FULLSCREEN'
   | 'NEXT'
   | 'PREVIOUS'
   | 'VOLUME_UP'

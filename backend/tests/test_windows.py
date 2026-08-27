@@ -8,6 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.protocol import Command
+from app.system.input import _COMMAND_KEYS, VK_F11
 from app.system.windows import SW_RESTORE, WindowsWindowController
 
 
@@ -78,3 +80,7 @@ def test_is_foreground_preserves_pointer_sized_window_handles(monkeypatch) -> No
     assert WindowsWindowController().is_foreground(handle)
     assert get_foreground_window.restype is wintypes.HWND
     assert get_foreground_window.argtypes == ()
+
+
+def test_fullscreen_maps_to_windows_f11() -> None:
+    assert _COMMAND_KEYS[Command.FULLSCREEN] == VK_F11

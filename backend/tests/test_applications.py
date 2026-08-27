@@ -197,6 +197,8 @@ class FakeAdFilter:
 class FakeYoutubeFullscreen:
     events: list[str] = field(default_factory=list)
     fail_start: bool = False
+    force_ports: list[int] = field(default_factory=list)
+    force_failure: CommandExecutionError | None = None
 
     async def start(self, port: int) -> None:
         self.events.append(f"start:{port}")
@@ -205,6 +207,12 @@ class FakeYoutubeFullscreen:
 
     async def stop(self) -> None:
         self.events.append("stop")
+
+    async def force_fullscreen(self, port: int) -> bool:
+        self.force_ports.append(port)
+        if self.force_failure is not None:
+            raise self.force_failure
+        return True
 
 
 def _ready_adblock(tmp_path: Path) -> Path:
@@ -716,6 +724,54 @@ def test_watcher_rebinds_replacement_window_without_false_exit() -> None:
         assert manager._current is not None
         assert manager._current.window_handle == 901
         assert exited == []
+        await manager.shutdown()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("app", [ActiveApp.YOUTUBE, ActiveApp.NEWS])
+def test_fullscreen_uses_youtube_controller_for_youtube_and_news(
+    app: ActiveApp,
+) -> None:
+    async def scenario() -> None:
+        fullscreen = FakeYoutubeFullscreen()
+        manager, _, _, input_controller = make_manager(
+            youtube_fullscreen=fullscreen,
+            debug_port=9222,
+        )
+        if app is ActiveApp.YOUTUBE:
+            await manager.open(app)
+        else:
+            await manager.open_news("https://www.youtube.com/watch?v=live")
+
+        result = await manager.forward_command(Command.FULLSCREEN)
+
+        assert result is None
+        assert fullscreen.force_ports == [9222]
+        assert input_controller.commands == []
+        await manager.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_fullscreen_routes_to_netflix_runtime_and_browser_f11() -> None:
+    async def scenario() -> None:
+        manager, _, _, input_controller = make_manager()
+        await manager.open(ActiveApp.NETFLIX)
+        manager._netflix_page.actions.clear()
+
+        netflix_context = await manager.forward_command(Command.FULLSCREEN)
+
+        assert netflix_context == manager._netflix_page.context
+        assert manager._netflix_page.actions == [Command.FULLSCREEN]
+        assert input_controller.commands == []
+        await manager.return_home()
+
+        await manager.open(ActiveApp.BROWSER)
+        browser_context = await manager.forward_command(Command.FULLSCREEN)
+
+        assert browser_context is None
+        assert input_controller.commands == [Command.FULLSCREEN]
         await manager.shutdown()
 
     asyncio.run(scenario())

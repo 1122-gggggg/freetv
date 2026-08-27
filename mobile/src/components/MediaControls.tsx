@@ -56,6 +56,18 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
         >
           <Text style={styles.btnText}>⏯ 播放</Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.btn, styles.fullscreenBtn, disabled && styles.disabledControl]}
+          onPress={() => trigger('FULLSCREEN')}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="全螢幕"
+          accessibilityHint="將目前影片或瀏覽器切換為全螢幕。"
+          accessibilityState={{ disabled: Boolean(disabled) }}
+        >
+          <Text style={styles.btnText}>⛶ 全螢幕</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Volume & Channel Row */}
@@ -176,6 +188,9 @@ const styles = StyleSheet.create({
     borderColor: '#4d6994',
   },
   playBtn: {
+    backgroundColor: '#202a3c',
+  },
+  fullscreenBtn: {
     backgroundColor: '#202a3c',
   },
   volBtn: {

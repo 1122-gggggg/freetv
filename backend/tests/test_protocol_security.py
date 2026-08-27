@@ -297,3 +297,15 @@ def test_authenticated_remote_session_becomes_invalid_at_token_expiry(tmp_path) 
 
     assert session is not None
     assert not pairing.session_is_valid(session)
+
+
+def test_fullscreen_is_a_typed_version_one_command() -> None:
+    message = CommandMessage.model_validate(
+        {
+            "version": 1,
+            "type": "command",
+            "request_id": "fullscreen-1",
+            "command": "FULLSCREEN",
+        }
+    )
+    assert message.command is Command.FULLSCREEN

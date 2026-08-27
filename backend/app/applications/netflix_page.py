@@ -26,6 +26,7 @@ ERROR_MESSAGES = {
     "netflix_direct_play_unavailable": "找不到可播放的 Netflix 項目，請稍後再試。",
     "netflix_submit_unavailable": "Netflix 目前無法送出，請確認電視畫面後再試。",
     "netflix_back_unavailable": "Netflix 目前無法返回，請確認電視畫面後再試。",
+    "netflix_fullscreen_unavailable": "Netflix 目前沒有可切換為全螢幕的影片。",
 }
 RUNTIME_ERROR_CODES = {
     "netflix_focus_unavailable",
@@ -34,6 +35,7 @@ RUNTIME_ERROR_CODES = {
     "netflix_direct_play_unavailable",
     "netflix_submit_unavailable",
     "netflix_back_unavailable",
+    "netflix_fullscreen_unavailable",
 }
 FINGERPRINT_STRING_FIELDS = ("role", "label", "uia", "text", "pathKind", "rail")
 FINGERPRINT_FIELDS = (*FINGERPRINT_STRING_FIELDS, "index")
@@ -48,6 +50,7 @@ RUNTIME_STATUSES = {
     "history",
     "playing",
     "paused",
+    "fullscreen",
     "context",
     "submitted",
     "error",
@@ -74,6 +77,7 @@ class NetflixAction(StrEnum):
     OK = "OK"
     BACK = "BACK"
     PLAY_PAUSE = "PLAY_PAUSE"
+    FULLSCREEN = "FULLSCREEN"
     READ_CONTEXT = "READ_CONTEXT"
     SUBMIT_PRIMARY = "SUBMIT_PRIMARY"
 IDEMPOTENT_ACTIONS = {
@@ -90,6 +94,7 @@ COMMAND_ACTIONS: dict[Command, NetflixAction] = {
     Command.OK: NetflixAction.OK,
     Command.BACK: NetflixAction.BACK,
     Command.PLAY_PAUSE: NetflixAction.PLAY_PAUSE,
+    Command.FULLSCREEN: NetflixAction.FULLSCREEN,
     Command.TAB: NetflixAction.FOCUS_NEXT,
 }
 
@@ -289,15 +294,19 @@ class NetflixPageController:
         expression: str,
         *,
         outcome_unknown_on_failure: bool = False,
+        user_gesture: bool = False,
     ) -> Any:
+        params: dict[str, Any] = {
+            "expression": expression,
+            "returnByValue": True,
+            "awaitPromise": True,
+        }
+        if user_gesture:
+            params["userGesture"] = True
         response = await self._call(
             socket,
             "Runtime.evaluate",
-            {
-                "expression": expression,
-                "returnByValue": True,
-                "awaitPromise": True,
-            },
+            params,
             outcome_unknown_on_failure=outcome_unknown_on_failure,
         )
         if response.get("exceptionDetails") is not None:
@@ -343,6 +352,7 @@ class NetflixPageController:
             socket,
             expression,
             outcome_unknown_on_failure=action not in IDEMPOTENT_ACTIONS,
+            user_gesture=action is NetflixAction.FULLSCREEN,
         )
 
     def _accept_runtime_result(self, result: Any) -> NetflixContext:

@@ -228,6 +228,7 @@ def test_netflix_actions_exactly_match_runtime_actions() -> None:
         "OK",
         "BACK",
         "PLAY_PAUSE",
+        "FULLSCREEN",
         "READ_CONTEXT",
         "SUBMIT_PRIMARY",
     ]
@@ -527,6 +528,7 @@ def test_idempotent_action_cdp_failure_retries_with_a_new_socket(
         Command.OK,
         Command.BACK,
         Command.PLAY_PAUSE,
+        Command.FULLSCREEN,
     ],
 )
 def test_non_idempotent_action_ack_loss_is_not_retried(
@@ -633,6 +635,7 @@ def test_each_action_uses_enum_and_sends_only_whitelisted_previous_focus(
         (Command.OK, "OK"),
         (Command.BACK, "BACK"),
         (Command.PLAY_PAUSE, "PLAY_PAUSE"),
+        (Command.FULLSCREEN, "FULLSCREEN"),
         (Command.TAB, "FOCUS_NEXT"),
     ]
     remaining = [
@@ -782,6 +785,7 @@ def test_type_text_does_not_expose_secret_in_error_log_or_state(
         ("netflix_direct_play_unavailable", "找不到可播放的 Netflix 項目，請稍後再試。"),
         ("netflix_submit_unavailable", "Netflix 目前無法送出，請確認電視畫面後再試。"),
         ("netflix_back_unavailable", "Netflix 目前無法返回，請確認電視畫面後再試。"),
+        ("netflix_fullscreen_unavailable", "Netflix 目前沒有可切換為全螢幕的影片。"),
     ],
 )
 def test_runtime_codes_map_to_fixed_local_chinese_messages_without_retry(
@@ -1084,3 +1088,36 @@ def test_submit_after_insert_skips_revalidation_and_never_repeats_insert(
     assert second.sent == []
     assert first.closed
     assert not second.closed
+
+
+def test_fullscreen_runtime_evaluate_uses_user_gesture_and_returns_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    socket = FakeSocket(
+        runtime_result={
+            "ok": True,
+            "status": "fullscreen",
+            "context": {
+                "stage": "watch",
+                "input_kind": "none",
+                "has_error": False,
+                "can_submit": False,
+                "focused_title": None,
+            },
+        }
+    )
+    connect, _ = install_transport(monkeypatch, controller, [socket])
+
+    context = asyncio.run(controller.execute(Command.FULLSCREEN))
+
+    request = next(
+        message
+        for message in socket.sent
+        if message["method"] == "Runtime.evaluate"
+        and '"FULLSCREEN"' in message["params"]["expression"]
+    )
+    assert request["params"]["userGesture"] is True
+    assert context.stage is NetflixStage.WATCH
+    assert len(connect.calls) == 1
+    assert socket.closed

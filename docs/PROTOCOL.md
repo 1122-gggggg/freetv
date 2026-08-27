@@ -82,12 +82,14 @@ The controller verifies and removes the token's persisted salted hash, closes an
 Allowed command values:
 
 - `NAV_UP`, `NAV_DOWN`, `NAV_LEFT`, `NAV_RIGHT`, `OK`, `BACK`, `TAB`, `HOME`
-- `PLAY_PAUSE`, `NEXT`, `PREVIOUS`
+- `PLAY_PAUSE`, `FULLSCREEN`, `NEXT`, `PREVIOUS`
 - `VOLUME_UP`, `VOLUME_DOWN`, `MUTE`
 - `CHANNEL_UP`, `CHANNEL_DOWN`
 - `OPEN_YOUTUBE`, `OPEN_NETFLIX`, `OPEN_NEWS`, `OPEN_LIVE_TV`, `OPEN_BROWSER`, `POWER_SLEEP`
 
 There is no raw keyboard, shell, script, URL, process, path, or arbitrary command message.
+
+`FULLSCREEN` is a typed application command, not a raw key. Netflix sends one user-gesture CDP fullscreen action to its ready video/player container; YouTube/News sends one forced fullscreen action for the current ready video identity; Browser maps it to Windows F11. Launcher and non-browser applications reject it with a fixed unsupported-command error.
 
 ## Bounded pointer action
 

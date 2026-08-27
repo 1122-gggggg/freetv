@@ -423,6 +423,12 @@ class ApplicationManager:
         self.require_input_target(self._active_app)
         if self._active_app is ActiveApp.NETFLIX:
             return await self._netflix_page.execute(command)
+        if command is Command.FULLSCREEN and self._active_app in {
+            ActiveApp.YOUTUBE,
+            ActiveApp.NEWS,
+        }:
+            await self._youtube_fullscreen.force_fullscreen(self._debug_port)
+            return None
         if command is Command.BACK and self._active_app is ActiveApp.BROWSER:
             self._input.send_browser_back()
             return None

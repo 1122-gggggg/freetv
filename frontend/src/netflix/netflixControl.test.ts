@@ -976,4 +976,63 @@ describe('Netflix DOM control runtime', () => {
       context: { stage: 'browse' },
     })
   })
+
+  it('requests fullscreen once on a visible ready Netflix video', async () => {
+    window.history.replaceState({}, '', '/watch/fullscreen')
+    document.body.innerHTML = '<video></video>'
+    const video = document.querySelector('video') as HTMLVideoElement
+    setRect(video, 20, 20, 640, 360)
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(video, 'requestFullscreen', {
+      configurable: true,
+      value: requestFullscreen,
+    })
+
+    const result = await runtime().run('FULLSCREEN', null)
+
+    expect(requestFullscreen).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({
+      ok: true,
+      status: 'fullscreen',
+      context: { stage: 'watch' },
+    })
+  })
+
+  it('falls back to the visible Netflix player container for fullscreen', async () => {
+    document.body.innerHTML = '<div id="movie_player"></div>'
+    const player = document.querySelector('#movie_player') as HTMLElement
+    setRect(player, 20, 20, 640, 360)
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(player, 'requestFullscreen', {
+      configurable: true,
+      value: requestFullscreen,
+    })
+
+    const result = await runtime().run('FULLSCREEN', null)
+
+    expect(requestFullscreen).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({ ok: true, status: 'fullscreen' })
+  })
+
+  it('returns a fixed fullscreen error when no visible target is ready', async () => {
+    document.body.innerHTML = '<video></video>'
+    const video = document.querySelector('video') as HTMLVideoElement
+    setRect(video, 20, 20, 640, 360)
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 1 })
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(video, 'requestFullscreen', {
+      configurable: true,
+      value: requestFullscreen,
+    })
+
+    const result = await runtime().run('FULLSCREEN', null)
+
+    expect(result).toEqual({
+      ok: false,
+      status: 'error',
+      code: 'netflix_fullscreen_unavailable',
+    })
+    expect(requestFullscreen).not.toHaveBeenCalled()
+  })
 })

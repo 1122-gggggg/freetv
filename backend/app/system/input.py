@@ -28,6 +28,7 @@ VK_MENU = 0x12
 VK_SPACE = 0x20
 VK_MEDIA_NEXT_TRACK = 0xB0
 VK_MEDIA_PREV_TRACK = 0xB1
+VK_F11 = 0x7A
 
 _COMMAND_KEYS: dict[Command, int] = {
     Command.NAV_UP: VK_UP,
@@ -38,6 +39,7 @@ _COMMAND_KEYS: dict[Command, int] = {
     Command.BACK: VK_ESCAPE,
     Command.TAB: VK_TAB,
     Command.PLAY_PAUSE: VK_SPACE,
+    Command.FULLSCREEN: VK_F11,
     Command.NEXT: VK_MEDIA_NEXT_TRACK,
     Command.PREVIOUS: VK_MEDIA_PREV_TRACK,
 }

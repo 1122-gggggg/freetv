@@ -107,6 +107,7 @@ describe('RemotePage', () => {
     expect(screen.getByRole('button', { name: '新聞' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '返回' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '主畫面' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '全螢幕' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '頻道 +' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '音量 +' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '語音' })).toBeTruthy()
@@ -131,7 +132,7 @@ describe('RemotePage', () => {
       />,
     )
 
-    for (const label of ['上', '下', '左', '右', '確定', '返回', '播放／暫停']) {
+    for (const label of ['上', '下', '左', '右', '確定', '返回', '播放／暫停', '全螢幕']) {
       fireEvent.click(screen.getByRole('button', { name: label }))
     }
     const text = 'x'.repeat(256)
@@ -146,6 +147,7 @@ describe('RemotePage', () => {
       'OK',
       'BACK',
       'PLAY_PAUSE',
+      'FULLSCREEN',
     ])
     expect(socketMock.sendText).toHaveBeenCalledWith(text, false)
   })

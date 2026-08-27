@@ -24,6 +24,7 @@ class Command(StrEnum):
     TAB = "TAB"
     HOME = "HOME"
     PLAY_PAUSE = "PLAY_PAUSE"
+    FULLSCREEN = "FULLSCREEN"
     NEXT = "NEXT"
     PREVIOUS = "PREVIOUS"
     VOLUME_UP = "VOLUME_UP"

@@ -938,3 +938,18 @@ def test_application_exit_ignores_inactive_app() -> None:
         assert outcome.state.active_app is ActiveApp.BROWSER
 
     asyncio.run(scenario())
+
+
+def test_fullscreen_is_rejected_for_non_browser_application() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus(
+            initial=ControllerState(active_app=ActiveApp.LIVE_TV)
+        )
+
+        outcome = await bus.dispatch_command(Command.FULLSCREEN)
+
+        assert not outcome.success
+        assert outcome.error_code == "command_not_supported"
+        assert applications.forwarded == []
+
+    asyncio.run(scenario())

@@ -13,6 +13,7 @@
     'OK',
     'BACK',
     'PLAY_PAUSE',
+    'FULLSCREEN',
     'READ_CONTEXT',
     'SUBMIT_PRIMARY',
   ])
@@ -734,6 +735,27 @@
         return pathChanged || meaningfulStageChanged ? current : null
       }, 1200)
       return context ? success('history', {}, context) : error('netflix_back_unavailable')
+    }
+
+    if (action === 'FULLSCREEN') {
+      const video = [...document.querySelectorAll('video')].find(
+        (element) =>
+          element instanceof HTMLVideoElement &&
+          visible(element) &&
+          element.readyState >= 2,
+      )
+      const player = document.querySelector('#movie_player')
+      const target =
+        video ||
+        (player instanceof HTMLElement && visible(player) ? player : null)
+      if (
+        !(target instanceof HTMLElement) ||
+        typeof target.requestFullscreen !== 'function'
+      ) {
+        return error('netflix_fullscreen_unavailable')
+      }
+      await target.requestFullscreen()
+      return success('fullscreen')
     }
 
     if (action === 'PLAY_PAUSE') {

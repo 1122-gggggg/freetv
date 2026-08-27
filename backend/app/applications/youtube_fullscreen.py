@@ -8,6 +8,8 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import websockets
 
+from app.commands.ports import CommandExecutionError
+
 _INSPECT_EXPRESSION = """(() => {
   const video = document.querySelector('video');
   return {
@@ -191,6 +193,19 @@ class YoutubeFullscreenController:
         if video_id == self._last_fullscreen_video_id:
             return False
         self._last_fullscreen_video_id = video_id
+        await self._probe.fullscreen(port, video_id, True)
+        return True
+
+    async def force_fullscreen(self, port: int) -> bool:
+        video_id, ready, fullscreen = await self._probe.inspect(port)
+        if video_id is None or not ready:
+            raise CommandExecutionError(
+                "youtube_video_unavailable",
+                "目前沒有可切換為全螢幕的 YouTube 影片。",
+            )
+        self._last_fullscreen_video_id = video_id
+        if fullscreen:
+            return False
         await self._probe.fullscreen(port, video_id, True)
         return True
 
