@@ -1,7 +1,7 @@
 (() => {
   'use strict'
 
-  const VERSION = '3'
+  const VERSION = '4'
 
   const ACTIONS = new Set([
     'FOCUS_PRIMARY',
@@ -586,7 +586,7 @@
     return video ? { context, video } : null
   }
 
-  const settlePlayingWatchContext = async (timeoutMs = 8000) => {
+  const settlePlayingWatchContext = async (timeoutMs) => {
     const deadline = performance.now() + timeoutMs
     let playRequested = false
     while (performance.now() < deadline) {
@@ -1037,13 +1037,19 @@
         }
         return focusResult(firstCard, 'focused', interactiveElements())
       }
+      const directPlayDeadline = performance.now() + 8000
+      const remainingDirectPlay = () => Math.max(0, directPlayDeadline - performance.now())
+      const finishDirectPlay = async (focus = null) => {
+        const context = await settlePlayingWatchContext(remainingDirectPlay())
+        if (!context) return error('netflix_direct_play_unavailable')
+        return focus
+          ? success('playing', { focus }, context)
+          : success('playing', {}, context)
+      }
       const matchedOverlay = overlayWithPlay()
       if (!(activeCard instanceof HTMLElement) && matchedOverlay?.play) {
         matchedOverlay.play.click()
-        const context = await settlePlayingWatchContext()
-        return context
-          ? success('playing', {}, context)
-          : error('netflix_direct_play_unavailable')
+        return finishDirectPlay()
       }
       if (
         activeCard instanceof HTMLElement &&
@@ -1053,10 +1059,7 @@
         const existingPlay = visiblePlayButton(activeCardRoot)
         if (existingPlay instanceof HTMLElement) {
           existingPlay.click()
-          const context = await settlePlayingWatchContext()
-          return context
-            ? success('playing', { focus: currentFocus }, context)
-            : error('netflix_direct_play_unavailable')
+          return finishDirectPlay(currentFocus)
         }
         const selectedTitle = cardTitle(activeCard)
         const overlayText = matchedOverlay?.overlay
@@ -1068,10 +1071,7 @@
           overlayText.includes(selectedTitle)
         ) {
           matchedOverlay.play.click()
-          const context = await settlePlayingWatchContext()
-          return context
-            ? success('playing', { focus: currentFocus }, context)
-            : error('netflix_direct_play_unavailable')
+          return finishDirectPlay(currentFocus)
         }
         const previousPlay = matchedOverlay?.play || null
         activeCard.click()
@@ -1079,16 +1079,15 @@
           const found = overlayWithPlay()?.play
           if (!found || found === previousPlay) return null
           return found
-        }, 2500)
+        }, remainingDirectPlay())
         if (!(detailPlay instanceof HTMLElement)) {
           return error('netflix_direct_play_unavailable')
         }
         detailPlay.click()
-        const context = await settlePlayingWatchContext()
-        return context
-          ? success('playing', { focus: currentFocus }, context)
-          : error('netflix_direct_play_unavailable')
+        return finishDirectPlay(currentFocus)
       }
+
+
 
 
       if (!current) return recoverFocus(elements, previousFocus)

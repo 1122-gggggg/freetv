@@ -453,7 +453,114 @@ describe('Netflix DOM control runtime', () => {
     expect(click).toHaveBeenCalledOnce()
     vi.useRealTimers()
   })
-  it('exposes only the fixed global version and run interface and re-enumerates every run', async () => { expect(runtime().version).toBe('3')
+
+  it('keeps delayed detail play and late watch video inside one 8s budget', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML =
+      '<div class="lolomoRow"><div id="card" class="title-card" tabindex="0">Selected</div></div>'
+    const card = document.querySelector('#card') as HTMLElement
+    setRect(card, 20, 80)
+    card.focus()
+    let detailPlayClicks = 0
+    const cardClick = vi.spyOn(card, 'click').mockImplementation(() => {
+      setTimeout(() => {
+        const modal = document.createElement('div')
+        modal.className = 'detail-modal'
+        const detailPlay = document.createElement('button')
+        detailPlay.id = 'detail-play'
+        detailPlay.textContent = 'Play'
+        vi.spyOn(detailPlay, 'click').mockImplementation(() => {
+          detailPlayClicks += 1
+          window.history.replaceState({}, '', '/watch/late')
+          document.body.innerHTML = '<video></video>'
+          const video = document.querySelector('video') as HTMLVideoElement
+          setRect(video, 20, 20, 640, 360)
+          Object.defineProperty(video, 'readyState', { configurable: true, value: 1 })
+          Object.defineProperty(video, 'paused', { configurable: true, value: true })
+          setTimeout(() => {
+            Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+            Object.defineProperty(video, 'paused', { configurable: true, value: false })
+          }, 5700)
+        })
+        modal.append(detailPlay)
+        document.body.append(modal)
+        setRect(modal, 20, 20, 800, 600)
+        setRect(detailPlay, 40, 40)
+      }, 2000)
+    })
+
+    let settled = false
+    const pending = runtime().run('OK', null).then((result) => {
+      settled = true
+      return result
+    })
+    await vi.advanceTimersByTimeAsync(7690)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(200)
+    const result = await pending
+    vi.useRealTimers()
+
+    expect(cardClick).toHaveBeenCalledOnce()
+    expect(detailPlayClicks).toBe(1)
+    expect(result).toMatchObject({
+      ok: true,
+      status: 'playing',
+      context: { stage: 'watch' },
+    })
+  })
+
+  it('returns a fixed direct-play error before the backend CDP timeout after delayed detail play', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML =
+      '<div class="lolomoRow"><div id="card" class="title-card" tabindex="0">Selected</div></div>'
+    const card = document.querySelector('#card') as HTMLElement
+    setRect(card, 20, 80)
+    card.focus()
+    let detailPlayClicks = 0
+    const cardClick = vi.spyOn(card, 'click').mockImplementation(() => {
+      setTimeout(() => {
+        const modal = document.createElement('div')
+        modal.className = 'detail-modal'
+        const detailPlay = document.createElement('button')
+        detailPlay.id = 'detail-play'
+        detailPlay.textContent = 'Play'
+        vi.spyOn(detailPlay, 'click').mockImplementation(() => {
+          detailPlayClicks += 1
+          window.history.replaceState({}, '', '/watch/never-ready')
+          document.body.innerHTML = '<video></video>'
+          const video = document.querySelector('video') as HTMLVideoElement
+          setRect(video, 20, 20, 640, 360)
+          Object.defineProperty(video, 'readyState', { configurable: true, value: 1 })
+          Object.defineProperty(video, 'paused', { configurable: true, value: true })
+        })
+        modal.append(detailPlay)
+        document.body.append(modal)
+        setRect(modal, 20, 20, 800, 600)
+        setRect(detailPlay, 40, 40)
+      }, 2000)
+    })
+
+    let settled = false
+    const pending = runtime().run('OK', null).then((result) => {
+      settled = true
+      return result
+    })
+    await vi.advanceTimersByTimeAsync(8010)
+    expect(settled).toBe(true)
+    const result = await pending
+    vi.useRealTimers()
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 'error',
+      code: 'netflix_direct_play_unavailable',
+    })
+    expect(cardClick).toHaveBeenCalledOnce()
+    expect(detailPlayClicks).toBeLessThanOrEqual(1)
+    expect(detailPlayClicks).toBe(1)
+  })
+
+  it('exposes only the fixed global version and run interface and re-enumerates every run', async () => { expect(runtime().version).toBe('4')
 
   expect(Object.keys(runtime()).sort()).toEqual(['run', 'version'])
   document.body.innerHTML = '<button id="first">First</button>'
