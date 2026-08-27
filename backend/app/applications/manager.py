@@ -13,6 +13,7 @@ from urllib.parse import quote_plus
 from app.applications.chrome_policy import TV_CHROME_NOTIFICATION_FLAGS
 from app.applications.netflix_page import NetflixAction, NetflixPageController
 from app.applications.youtube_adfilter import YoutubeAdFilter, reserve_localhost_port
+from app.applications.youtube_fullscreen import YoutubeFullscreenController
 from app.commands.ports import CommandExecutionError
 from app.config import Settings, project_root
 from app.logging import log_event
@@ -128,6 +129,7 @@ class ApplicationManager:
         profile_dir: Path | None = None,
         netflix_profile_dir: Path | None = None,
         adfilter: YoutubeAdFilter | None = None,
+        youtube_fullscreen: YoutubeFullscreenController | None = None,
         netflix_page: NetflixPageController | None = None,
         debug_port: int | None = None,
         netflix_debug_port: int | None = None,
@@ -146,6 +148,7 @@ class ApplicationManager:
             project_root() / "config" / "chrome-netflix-profile"
         )
         self._adfilter = adfilter or YoutubeAdFilter()
+        self._youtube_fullscreen = youtube_fullscreen or YoutubeFullscreenController()
         self._netflix_page = netflix_page or NetflixPageController()
         self._debug_port = debug_port if debug_port is not None else reserve_localhost_port()
         self._netflix_debug_port = (
@@ -286,17 +289,23 @@ class ApplicationManager:
                 "application_window_unavailable",
                 f"控制器管理的{app_name}視窗在就緒前已關閉。",
             )
-        self._minimize_current_window()
-        self._children.append(tracked)
-        self._current = tracked
-        self._active_app = app
-        log_event(logger, "application_launched", app=app.value, process_id=process.pid)
         if app in {ActiveApp.YOUTUBE, ActiveApp.NEWS}:
             try:
                 await self._adfilter.attach(self._debug_port)
             except Exception:
                 log_event(logger, "youtube_adfilter_failed", port=self._debug_port)
-
+            try:
+                await self._youtube_fullscreen.start(self._debug_port)
+            except Exception:
+                await self._youtube_fullscreen.stop()
+                if not await self._stop_tracked(tracked):
+                    self._children.append(tracked)
+                raise
+        self._minimize_current_window()
+        self._children.append(tracked)
+        self._current = tracked
+        self._active_app = app
+        log_event(logger, "application_launched", app=app.value, process_id=process.pid)
     async def return_home(self) -> None:
         await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
         self._minimize_current_window()
@@ -329,8 +338,15 @@ class ApplicationManager:
         return False
 
     async def _close_apps(self, *apps: ActiveApp) -> None:
-        kept: list[TrackedApplication] = []
         current = self._current
+        youtube_apps = (ActiveApp.YOUTUBE, ActiveApp.NEWS)
+        closes_youtube = any(app in youtube_apps for app in apps)
+        has_youtube = (
+            current is not None and current.app in youtube_apps
+        ) or any(tracked.app in youtube_apps for tracked in self._children)
+        if closes_youtube and has_youtube:
+            await self._youtube_fullscreen.stop()
+        kept: list[TrackedApplication] = []
         for tracked in self._children:
             if tracked.app in apps:
                 await self._stop_tracked(tracked)
@@ -458,6 +474,7 @@ class ApplicationManager:
             )
 
     async def shutdown(self) -> None:
+        await self._youtube_fullscreen.stop()
         remaining: list[TrackedApplication] = []
         for tracked in self._children:
             if not await self._stop_tracked(tracked):

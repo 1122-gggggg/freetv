@@ -177,6 +177,20 @@ class FakeAdFilter:
         self.ports.append(port)
 
 
+@dataclass
+class FakeYoutubeFullscreen:
+    events: list[str] = field(default_factory=list)
+    fail_start: bool = False
+
+    async def start(self, port: int) -> None:
+        self.events.append(f"start:{port}")
+        if self.fail_start:
+            raise RuntimeError("fullscreen start failed")
+
+    async def stop(self) -> None:
+        self.events.append("stop")
+
+
 def _ready_adblock(tmp_path: Path) -> Path:
     adblock = tmp_path / "adblock"
     adblock.mkdir()
@@ -193,6 +207,8 @@ def make_manager(
     adblock_dir: Path | None = None,
     adblock_youtube_dir: Path | None = None,
     netflix_page: FakeNetflixPageController | None = None,
+    youtube_fullscreen: FakeYoutubeFullscreen | None = None,
+    debug_port: int = 9333,
 ) -> tuple[ApplicationManager, FakeLauncher, FakeWindows, FakeInput]:
     launcher = FakeLauncher()
     windows = FakeWindows()
@@ -216,7 +232,8 @@ def make_manager(
         adblock_youtube_dir=adblock_youtube_dir,
         adfilter=FakeAdFilter(),
         netflix_page=netflix_page or FakeNetflixPageController(),
-        debug_port=9333,
+        youtube_fullscreen=youtube_fullscreen or FakeYoutubeFullscreen(),
+        debug_port=debug_port,
         netflix_debug_port=9444,
     )
     return manager, launcher, windows, input_controller
@@ -438,6 +455,110 @@ def test_open_news_opens_kiosk_chrome_with_live_url(tmp_path: Path) -> None:
     assert "--start-fullscreen" in argv
     assert argv[-1] == news_url
     assert manager.active_app is ActiveApp.NEWS
+
+
+def test_youtube_fullscreen_starts_after_youtube_open_and_stops_on_home() -> None:
+    async def scenario() -> None:
+        fullscreen = FakeYoutubeFullscreen()
+        manager, _, _, _ = make_manager(
+            youtube_fullscreen=fullscreen,
+            debug_port=9222,
+        )
+
+        await manager.open(ActiveApp.YOUTUBE)
+        assert fullscreen.events == ["start:9222"]
+
+        await manager.return_home()
+        assert fullscreen.events == ["start:9222", "stop"]
+
+    asyncio.run(scenario())
+
+
+def test_youtube_fullscreen_starts_for_news_and_restarts_on_replacement() -> None:
+    async def scenario() -> None:
+        fullscreen = FakeYoutubeFullscreen()
+        manager, _, _, _ = make_manager(
+            youtube_fullscreen=fullscreen,
+            debug_port=9222,
+        )
+
+        await manager.open_news("https://www.youtube.com/watch?v=first")
+        await manager.open_news("https://www.youtube.com/watch?v=second")
+
+        assert fullscreen.events == ["start:9222", "stop", "start:9222"]
+
+    asyncio.run(scenario())
+
+
+def test_youtube_fullscreen_stops_before_switching_to_netflix() -> None:
+    async def scenario() -> None:
+        fullscreen = FakeYoutubeFullscreen()
+        manager, _, _, _ = make_manager(youtube_fullscreen=fullscreen)
+
+        await manager.open(ActiveApp.YOUTUBE)
+        await manager.open(ActiveApp.NETFLIX)
+
+        assert fullscreen.events == ["start:9333", "stop"]
+        assert manager.active_app is ActiveApp.NETFLIX
+
+    asyncio.run(scenario())
+
+
+def test_youtube_fullscreen_stops_when_leaving_to_desktop() -> None:
+    async def scenario() -> None:
+        fullscreen = FakeYoutubeFullscreen()
+        manager, _, _, _ = make_manager(youtube_fullscreen=fullscreen)
+
+        await manager.open(ActiveApp.YOUTUBE)
+        await manager.leave_to_desktop()
+
+        assert fullscreen.events == ["start:9333", "stop"]
+
+    asyncio.run(scenario())
+
+
+def test_youtube_fullscreen_stops_during_shutdown() -> None:
+    async def scenario() -> None:
+        fullscreen = FakeYoutubeFullscreen()
+        manager, _, _, _ = make_manager(youtube_fullscreen=fullscreen)
+
+        await manager.open(ActiveApp.YOUTUBE)
+        await manager.shutdown()
+
+        assert fullscreen.events == ["start:9333", "stop"]
+
+    asyncio.run(scenario())
+
+
+def test_youtube_replacement_launch_failure_leaves_fullscreen_stopped() -> None:
+    async def scenario() -> None:
+        fullscreen = FakeYoutubeFullscreen()
+        manager, launcher, _, _ = make_manager(youtube_fullscreen=fullscreen)
+        await manager.open(ActiveApp.YOUTUBE)
+        launcher.fail_next_launch = True
+
+        with pytest.raises(CommandExecutionError, match="無法開啟新聞"):
+            await manager.open_news("https://www.youtube.com/watch?v=replacement")
+
+        assert fullscreen.events == ["start:9333", "stop"]
+
+    asyncio.run(scenario())
+
+
+def test_youtube_fullscreen_start_failure_rolls_back_new_process() -> None:
+    async def scenario() -> None:
+        fullscreen = FakeYoutubeFullscreen(fail_start=True)
+        manager, launcher, _, _ = make_manager(youtube_fullscreen=fullscreen)
+
+        with pytest.raises(RuntimeError, match="fullscreen start failed"):
+            await manager.open(ActiveApp.YOUTUBE)
+
+        assert fullscreen.events == ["start:9333", "stop"]
+        assert launcher.process.poll() is not None
+        assert manager.active_app is ActiveApp.LAUNCHER
+        assert manager._children == []
+
+    asyncio.run(scenario())
 
 
 
