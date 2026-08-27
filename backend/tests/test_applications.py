@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+
 from app.applications import manager as manager_module
 from app.applications.manager import ApplicationManager
 from app.applications.netflix_page import NetflixAction
@@ -261,6 +262,19 @@ def test_netflix_opens_desktop_chrome_fullscreen() -> None:
     assert "--hide-crash-restore-bubble" in argv
     assert manager._adfilter.ports == []
     assert manager._netflix_page.actions == [(9444, NetflixAction.FOCUS_PRIMARY)]
+
+
+@pytest.mark.parametrize("app", [ActiveApp.YOUTUBE, ActiveApp.NETFLIX])
+def test_tv_chrome_denies_notification_and_permission_prompts(app: ActiveApp) -> None:
+    manager, launcher, _, _ = make_manager()
+    asyncio.run(manager.open(app))
+    argv = launcher.calls[0]
+    assert argv.count("--disable-notifications") == 1
+    assert argv.count("--deny-permission-prompts") == 1
+    expected_profile = "chrome-netflix-profile" if app is ActiveApp.NETFLIX else "chrome-tv-profile"
+    profile_arg = next(argument for argument in argv if argument.startswith("--user-data-dir="))
+    assert expected_profile in profile_arg
+    assert "Google/Chrome/User Data" not in profile_arg.replace("\\", "/")
 
 
 def test_netflix_text_and_tab_use_page_controller_without_windows_input(

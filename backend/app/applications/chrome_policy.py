@@ -8,6 +8,11 @@ from app.applications.adblock import ADBLOCK_EXTENSION_ID, ADBLOCK_YOUTUBE_EXTEN
 STORE_UPDATE_URL = "https://clients2.google.com/service/update2/crx"
 POLICY_KEY = r"Software\Policies\Google\Chrome\ExtensionInstallForcelist"
 
+TV_CHROME_NOTIFICATION_FLAGS = [
+    "--disable-notifications",
+    "--deny-permission-prompts",
+]
+
 FORCE_INSTALL_EXTENSIONS: tuple[tuple[str, str], ...] = (
     (ADBLOCK_EXTENSION_ID, STORE_UPDATE_URL),
     (ADBLOCK_YOUTUBE_EXTENSION_ID, STORE_UPDATE_URL),
@@ -40,7 +45,9 @@ def _write_hkcu_string(name: str, value: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="為這個 Windows 使用者強制安裝電視盒用的商店 AdBlock。")
+    parser = argparse.ArgumentParser(
+        description="為這個 Windows 使用者強制安裝電視盒用的商店 AdBlock。"
+    )
     parser.parse_args()
     installed = apply_force_install()
     for name, value in installed:

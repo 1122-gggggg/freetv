@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote_plus
 
+from app.applications.chrome_policy import TV_CHROME_NOTIFICATION_FLAGS
 from app.applications.netflix_page import NetflixAction, NetflixPageController
 from app.applications.youtube_adfilter import YoutubeAdFilter, reserve_localhost_port
 from app.commands.ports import CommandExecutionError
@@ -178,6 +179,7 @@ class ApplicationManager:
             "--no-default-browser-check",
             "--autoplay-policy=no-user-gesture-required",
             *CHROME_RESTORE_SUPPRESS_ARGS,
+            *TV_CHROME_NOTIFICATION_FLAGS,
             url,
         ]
 
@@ -199,6 +201,7 @@ class ApplicationManager:
             "--no-default-browser-check",
             "--disable-extensions",
             *CHROME_RESTORE_SUPPRESS_ARGS,
+            *TV_CHROME_NOTIFICATION_FLAGS,
             url,
         ]
 

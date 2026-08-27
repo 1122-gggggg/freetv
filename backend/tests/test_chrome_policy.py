@@ -1,7 +1,18 @@
 from __future__ import annotations
 
 from app.applications.adblock import ADBLOCK_EXTENSION_ID, ADBLOCK_YOUTUBE_EXTENSION_ID
-from app.applications.chrome_policy import apply_force_install, force_install_entries
+from app.applications.chrome_policy import (
+    TV_CHROME_NOTIFICATION_FLAGS,
+    apply_force_install,
+    force_install_entries,
+)
+
+
+def test_tv_notification_flags_are_fixed_and_minimal() -> None:
+    assert TV_CHROME_NOTIFICATION_FLAGS == [
+        "--disable-notifications",
+        "--deny-permission-prompts",
+    ]
 
 
 def test_force_install_entries_cover_both_store_ids() -> None:
