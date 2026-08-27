@@ -259,6 +259,12 @@ button:focus-visible, input:focus-visible {
   margin-top: 0.65rem;
 }
 
+.keyboard-description {
+  margin: 0.65rem 0 0;
+  color: #aab8ce;
+  line-height: 1.45;
+}
+
 .search-submit:disabled { opacity: 0.6; }
 .remote-feedback { min-height: 2.2rem; padding: 1.25rem 0; color: #cbd6e4; text-align: center; }
 

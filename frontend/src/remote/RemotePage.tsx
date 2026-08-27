@@ -192,6 +192,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   const [typed, setTyped] = useState('')
   const [netflixTyped, setNetflixTyped] = useState('')
   const [pendingNetflixRequest, setPendingNetflixRequest] = useState<string | null>(null)
+  const [netflixLocalSendFailed, setNetflixLocalSendFailed] = useState(false)
   const [hideSecret, setHideSecret] = useState(false)
   const [forgetError, setForgetError] = useState<string | null>(null)
   const [forgetting, setForgetting] = useState(false)
@@ -213,6 +214,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     setPreviousNetflixContext(netflixContext)
     setNetflixTyped('')
     setPendingNetflixRequest(null)
+    setNetflixLocalSendFailed(false)
   }
   const netflixAcknowledgementFailed =
     pendingNetflixRequest !== null &&
@@ -300,10 +302,14 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     ) {
       return
     }
-    const text = netflixTyped
+    setNetflixLocalSendFailed(false)
+    const requestId = sendText(netflixTyped, true)
+    if (!requestId) {
+      setNetflixLocalSendFailed(true)
+      return
+    }
     setNetflixTyped('')
-    const requestId = sendText(text, true)
-    if (requestId) setPendingNetflixRequest(requestId)
+    setPendingNetflixRequest(requestId)
   }
 
 
@@ -374,7 +380,10 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
                 placeholder={netflixInput.placeholder}
                 disabled={controlsDisabled || waitingForNetflix}
                 value={netflixTyped}
-                onChange={(event) => setNetflixTyped(event.target.value.slice(0, 256))}
+                onChange={(event) => {
+                  setNetflixTyped(event.target.value.slice(0, 256))
+                  if (netflixLocalSendFailed) setNetflixLocalSendFailed(false)
+                }}
               />
               <button
                 className="remote-button netflix-context-submit"
@@ -407,7 +416,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
               等待電視端回應...
             </p>
           ) : null}
-          {netflixAcknowledgementFailed ? (
+          {netflixAcknowledgementFailed || netflixLocalSendFailed ? (
             <p className="netflix-context-error" role="status" aria-live="polite">
               無法送出，請重試
             </p>
@@ -449,7 +458,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       <section className="search-card" aria-labelledby="keyboard-title">
         <p className="eyebrow">鍵盤</p>
         <h2 id="keyboard-title">輸入帳號或密碼</h2>
-        <p className="remote-connection-note">
+        <p className="keyboard-description">
           {canTypeIntoApp
             ? '先點電視上的輸入欄，再從這裡打字送出。密碼不會被記住。'
             : '先開啟 Netflix 或 YouTube，點選輸入欄，再從這裡輸入。'}

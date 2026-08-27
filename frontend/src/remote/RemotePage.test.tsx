@@ -15,7 +15,7 @@ const socketMock = vi.hoisted(() => ({
   } | null,
   sendCommand: vi.fn<(command: string) => string>(() => 'request-id'),
   sendPointer: vi.fn(() => 'request-id'),
-  sendText: vi.fn<(text: string, submit?: boolean) => string>(() => 'request-id'),
+  sendText: vi.fn<(text: string, submit?: boolean) => string | null>(() => 'request-id'),
   sendSearch: vi.fn(() => 'request-id'),
 }))
 
@@ -232,6 +232,37 @@ describe('RemotePage', () => {
       expect(screen.queryByLabelText('遙控輸入')).toBeNull()
     },
   )
+  it('keeps sensitive context text when socket send returns null and shows retry', () => {
+    socketMock.state = netflixState({
+      stage: 'login',
+      input_kind: 'password',
+      has_error: false,
+      can_submit: true,
+      focused_title: null,
+    })
+    socketMock.sendText.mockReturnValueOnce(null)
+    render(remoteElement())
+    const input = screen.getByLabelText('Netflix 情境輸入') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'secret' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '送出 Netflix 輸入' }))
+
+    expect(socketMock.sendText).toHaveBeenCalledWith('secret', true)
+    expect(input.value).toBe('secret')
+    expect(screen.getByText('無法送出，請重試')).toBeTruthy()
+    expect(screen.queryByText('等待電視端回應...')).toBeNull()
+  })
+
+  it('uses a keyboard-specific description without connection-note overlap styles', () => {
+    render(remoteElement())
+
+    const description = screen.getByText(
+      '先開啟 Netflix 或 YouTube，點選輸入欄，再從這裡輸入。',
+    )
+    expect(description.className).toBe('keyboard-description')
+    expect(description.className).not.toContain('remote-connection-note')
+  })
+
 
   it('submits once, clears immediately, and waits only until context changes', () => {
     const passwordContext: NetflixContext = {

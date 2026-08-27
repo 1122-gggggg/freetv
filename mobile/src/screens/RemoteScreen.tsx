@@ -19,6 +19,7 @@ import { TextInputModal } from '../components/TextInputModal'
 import { Trackpad } from '../components/Trackpad'
 import { forgetCurrentDevice, type SavedDevice } from '../storage/tokenStorage'
 import type {
+  Acknowledgement,
   Command,
   ControllerState,
   NetflixInputKind,
@@ -150,7 +151,17 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
       setWaitingForNetflix(true)
       setNetflixSendFailed(false)
     }
-    const ack = await socket.sendTextInput(text, submit)
+    let ack: Acknowledgement
+    try {
+      ack = await socket.sendTextInput(text, submit)
+    } catch {
+      if (submit) {
+        setWaitingForNetflix(false)
+        setNetflixSendFailed(true)
+        throw new Error('無法送出，請重試')
+      }
+      throw new Error('無法送出文字')
+    }
     if (!ack.success) {
       if (submit) {
         setWaitingForNetflix(false)
@@ -281,7 +292,11 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
         >
           <Text style={styles.netflixContextEyebrow}>Netflix 電視情境</Text>
           {netflixContext.has_error ? (
-            <Text style={styles.netflixErrorText}>
+            <Text
+              style={styles.netflixErrorText}
+              accessibilityRole="alert"
+              accessibilityLiveRegion="assertive"
+            >
               登入或驗證失敗，請檢查電視畫面後重試
             </Text>
           ) : null}
@@ -295,16 +310,21 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
                     : '請輸入驗證碼 (OTP)'}
               </Text>
               <TouchableOpacity
-                style={[styles.netflixInputButton, waitingForNetflix && styles.disabledBtn]}
+                style={[
+                  styles.netflixInputButton,
+                  (waitingForNetflix || !netflixContext.can_submit) &&
+                    styles.disabledBtn,
+                ]}
                 accessibilityRole="button"
                 accessibilityLabel="開啟 Netflix 情境輸入"
-                disabled={waitingForNetflix}
-                onPress={() =>
+                disabled={waitingForNetflix || !netflixContext.can_submit}
+                onPress={() => {
+                  if (!netflixContext.can_submit) return
                   setTextInputSource({
                     inputKind: netflixContext.input_kind,
                     submit: true,
                   })
-                }
+                }}
               >
                 <Text style={styles.netflixInputButtonText}>輸入並繼續</Text>
               </TouchableOpacity>

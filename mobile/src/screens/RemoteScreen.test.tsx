@@ -574,6 +574,104 @@ describe('RemoteScreen', () => {
     expect(JSON.stringify(renderer!.toJSON())).not.toContain('raw sensitive failure')
   })
 
+  it('clears waiting and enables retry when context send rejects', async () => {
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+      )
+    })
+    const root = renderer!.root
+    act(() => {
+      latestMockSocket!.simulateStatusChange('authenticated')
+      latestMockSocket!.simulateStateChange(
+        netflixState({
+          stage: 'login',
+          input_kind: 'password',
+          has_error: false,
+          can_submit: true,
+          focused_title: null,
+        }),
+      )
+    })
+    act(() => {
+      root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' }).props.onPress()
+    })
+    latestMockSocket!.sendTextInput.mockRejectedValueOnce(
+      new Error('raw transport timeout'),
+    )
+    const input = root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' })
+    act(() => input.props.onChangeText('secret'))
+
+    await act(async () => {
+      await root.findByProps({ accessibilityLabel: '送出 Netflix 輸入' }).props.onPress()
+    })
+
+    expect(root.findAllByProps({ accessibilityLabel: '等待電視端回應' })).toHaveLength(0)
+    expect(findTextNodes(root, '無法送出，請重試')).toHaveLength(1)
+    expect(
+      root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' }).props.disabled,
+    ).toBe(false)
+    expect(JSON.stringify(renderer!.toJSON())).not.toContain('secret')
+    expect(JSON.stringify(renderer!.toJSON())).not.toContain('raw transport timeout')
+  })
+
+  it('does not open or send when the known context cannot submit', async () => {
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+      )
+    })
+    const root = renderer!.root
+    act(() => {
+      latestMockSocket!.simulateStatusChange('authenticated')
+      latestMockSocket!.simulateStateChange(
+        netflixState({
+          stage: 'login',
+          input_kind: 'password',
+          has_error: false,
+          can_submit: false,
+          focused_title: null,
+        }),
+      )
+    })
+    const open = root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' })
+    expect(open.props.disabled).toBe(true)
+
+    act(() => open.props.onPress())
+
+    expect(root.findAllByType(TextInputModal)).toHaveLength(0)
+    expect(latestMockSocket!.sendTextInput).not.toHaveBeenCalled()
+  })
+
+  it('announces the generic Netflix context error assertively', async () => {
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+      )
+    })
+    const root = renderer!.root
+    act(() => {
+      latestMockSocket!.simulateStatusChange('authenticated')
+      latestMockSocket!.simulateStateChange(
+        netflixState({
+          stage: 'login',
+          input_kind: 'password',
+          has_error: true,
+          can_submit: true,
+          focused_title: null,
+        }),
+      )
+    })
+
+    const error = root
+      .findAllByType(Text)
+      .find((node) =>
+        findTextNodes(node, '登入或驗證失敗，請檢查電視畫面後重試').length > 0,
+      )
+    expect(error?.props.accessibilityLiveRegion).toBe('assertive')
+    expect(error?.props.accessibilityRole).toBe('alert')
+  })
+
   it('shows browse context and falls back to generic input for null or unknown', async () => {
     await act(async () => {
       renderer = ReactTestRenderer.create(
