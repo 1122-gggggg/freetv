@@ -13,6 +13,8 @@
     'OK',
     'BACK',
     'PLAY_PAUSE',
+    'READ_CONTEXT',
+    'SUBMIT_PRIMARY',
   ])
   const EXPLICIT_INTERACTIVE_SELECTOR = [
     'a[href]',
@@ -85,6 +87,8 @@
     '[data-uia*="modal" i]',
     '[data-uia*="dialog" i]',
     '[data-uia*="detail" i]',
+    '.detail-modal',
+    '.previewModal--wrapper',
   ].join(',')
 
   const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim()
@@ -232,7 +236,9 @@
   }
 
   const railContainer = (element) =>
-    element.closest('[data-rail-title],[data-rail],[role="row"],[data-uia*="row" i],section')
+    element.closest(
+      '.lolomoRow,.rowContainer,[data-rail-title],[data-rail],[role="row"],[data-uia*="row" i],section',
+    )
 
   const railOf = (element) => {
     const rail = railContainer(element)
@@ -288,6 +294,147 @@
     return ranked[0] && ranked[0].score >= 12 ? ranked[0].element : null
   }
 
+  const safeText = (element) =>
+    normalizeText(element?.textContent).replace(/<[^>]*>/g, '').slice(0, 120)
+
+  const activeEditable = () => {
+    const active = document.activeElement
+    if (active instanceof HTMLElement && editable(active) && visible(active)) {
+      return active
+    }
+    return interactiveElements().find((element) => editable(element)) || null
+  }
+
+  const inputKind = (element) => {
+    if (!(element instanceof HTMLElement)) return 'none'
+    const type = normalizeText(element.getAttribute('type')).toLowerCase()
+    const autocomplete = normalizeText(element.getAttribute('autocomplete')).toLowerCase()
+    const inputmode = normalizeText(element.getAttribute('inputmode')).toLowerCase()
+    const role = normalizeText(element.getAttribute('role')).toLowerCase()
+    if (type === 'password' || autocomplete.includes('password')) return 'password'
+    if (autocomplete === 'one-time-code' || inputmode === 'numeric') return 'code'
+    if (type === 'email' || autocomplete === 'email' || autocomplete === 'username') {
+      return 'email'
+    }
+    if (type === 'search' || role === 'searchbox') return 'search'
+    return 'none'
+  }
+
+  const netflixContext = () => {
+    const field = activeEditable()
+    const kind = inputKind(field)
+    const path = globalThis.location.pathname
+    const stage = path.includes('/watch/')
+      ? 'watch'
+      : visibleOverlays().length > 0
+        ? 'details'
+        : kind === 'code'
+          ? 'verification'
+          : kind !== 'none'
+            ? 'login'
+            : document.querySelector('.lolomoRow,.rowContainer,[data-uia*="row" i]')
+              ? 'browse'
+              : 'unknown'
+    const focused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement.closest(
+            '.title-card,.slider-item,[data-uia*="title-card" i],[data-uia*="slider-item" i]',
+          )
+        : null
+    const submit = [...document.querySelectorAll('button,[role="button"]')].find(
+      (button) =>
+        button instanceof HTMLElement &&
+        visible(button) &&
+        /next|continue|sign in|verify|下一步|繼續|登入|驗證/i.test(safeText(button)),
+    )
+    return {
+      stage,
+      input_kind: kind,
+      has_error: [...document.querySelectorAll(
+        '[role="alert"],[aria-live="assertive"],.ui-message-error,.inputError,[data-uia*="error" i]',
+      )].some((element) => element instanceof HTMLElement && visible(element)),
+      can_submit: Boolean(submit),
+      focused_title:
+        stage === 'browse' && focused instanceof HTMLElement ? safeText(focused) : null,
+    }
+  }
+
+  const success = (status, extra = {}) => ({
+    ok: true,
+    status,
+    ...extra,
+    context: netflixContext(),
+  })
+
+  const CARD_SELECTOR = [
+    '.title-card',
+    '.slider-item',
+    '[data-uia*="title-card" i]',
+    '[data-uia*="slider-item" i]',
+    '[data-uia*="search-result" i]',
+  ].join(',')
+  const CARD_EXCLUSION_SELECTOR = [
+    'header',
+    '.handle-prev',
+    '.handle-next',
+    '.previewModal--wrapper',
+    '.preview-popover',
+    '.detail-modal',
+    '[role="dialog"]',
+  ].join(',')
+
+  const cardElements = () =>
+    [...document.querySelectorAll(CARD_SELECTOR)].filter(
+      (element) =>
+        element instanceof HTMLElement &&
+        visible(element) &&
+        !element.closest(CARD_EXCLUSION_SELECTOR),
+    )
+
+  const settle = async (predicate, timeoutMs) => {
+    const deadline = performance.now() + timeoutMs
+    while (performance.now() < deadline) {
+      const result = predicate()
+      if (result) return result
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    return null
+  }
+
+  const visiblePlayButton = (scope) =>
+    [...scope.querySelectorAll('button,[role="button"]')].find(
+      (element) =>
+        element instanceof HTMLElement &&
+        visible(element) &&
+        !element.closest(
+          'header,.handle-prev,.handle-next,.previewModal--wrapper,.preview-popover',
+        ) &&
+        (uiaIncludes(element, ['play', 'resume']) ||
+          /^(play|resume|播放|繼續播放)$/i.test(safeText(element))),
+    ) || null
+
+  const visibleSubmitButton = () =>
+    [...document.querySelectorAll('button,[role="button"]')].find(
+      (element) =>
+        element instanceof HTMLElement &&
+        visible(element) &&
+        !element.closest('header,.previewModal--wrapper,.preview-popover') &&
+        /next|continue|sign in|verify|下一步|繼續|登入|驗證/i.test(safeText(element)),
+    ) || null
+
+  const pageSignature = () => {
+    const context = netflixContext()
+    return JSON.stringify({
+      stage: context.stage,
+      input_kind: context.input_kind,
+      has_error: context.has_error,
+      can_submit: context.can_submit,
+      rows: document.querySelectorAll('.lolomoRow,.rowContainer').length,
+      dialogs: document.querySelectorAll('.detail-modal,.previewModal--wrapper,[role="dialog"]')
+        .length,
+    })
+  }
+
   const focusResult = (target, status, elements) => {
     for (const oldTarget of document.querySelectorAll('[data-freetv-netflix-focus="true"]')) {
       if (oldTarget instanceof HTMLElement && oldTarget !== target) {
@@ -305,7 +452,7 @@
     if (typeof target.scrollIntoView === 'function') {
       target.scrollIntoView({ block: 'center', inline: 'center' })
     }
-    return { ok: true, status, focus: fingerprint(target, elements) }
+    return success(status, { focus: fingerprint(target, elements) })
   }
 
   const error = (code) => ({ ok: false, status: 'error', code })
@@ -417,36 +564,91 @@
   }
 
   const directionalTarget = (elements, current, action) => {
+    const currentCard = current.closest(CARD_SELECTOR)
+    if (currentCard instanceof HTMLElement) {
+      const cards = cardElements()
+      const currentRail = railContainer(currentCard)
+      const sourceCenter = rectCenter(currentCard.getBoundingClientRect())
+      const horizontal = action === 'NAV_LEFT' || action === 'NAV_RIGHT'
+      const positive = action === 'NAV_RIGHT' || action === 'NAV_DOWN'
+      if (horizontal) {
+        return (
+          cards
+            .filter(
+              (card) =>
+                card !== currentCard &&
+                railContainer(card) === currentRail &&
+                (positive
+                  ? rectCenter(card.getBoundingClientRect()).x > sourceCenter.x
+                  : rectCenter(card.getBoundingClientRect()).x < sourceCenter.x),
+            )
+            .sort((left, right) => {
+              const leftDelta = Math.abs(
+                rectCenter(left.getBoundingClientRect()).x - sourceCenter.x,
+              )
+              const rightDelta = Math.abs(
+                rectCenter(right.getBoundingClientRect()).x - sourceCenter.x,
+              )
+              return leftDelta - rightDelta
+            })[0] || null
+        )
+      }
+
+      const rails = [...new Set(cards.map((card) => railContainer(card)).filter(Boolean))]
+      const adjacentRail = rails
+        .filter((rail) => rail !== currentRail)
+        .map((rail) => {
+          const railCards = cards.filter((card) => railContainer(card) === rail)
+          const y =
+            railCards.reduce(
+              (sum, card) => sum + rectCenter(card.getBoundingClientRect()).y,
+              0,
+            ) / railCards.length
+          return { rail, railCards, delta: y - sourceCenter.y }
+        })
+        .filter(({ delta }) => (positive ? delta > 0 : delta < 0))
+        .sort((left, right) => Math.abs(left.delta) - Math.abs(right.delta))[0]
+      if (!adjacentRail) return null
+      return (
+        adjacentRail.railCards.sort(
+          (left, right) =>
+            Math.abs(rectCenter(left.getBoundingClientRect()).x - sourceCenter.x) -
+            Math.abs(rectCenter(right.getBoundingClientRect()).x - sourceCenter.x),
+        )[0] || null
+      )
+    }
+
     const sourceRect = current.getBoundingClientRect()
     const sourceCenter = rectCenter(sourceRect)
     const horizontal = action === 'NAV_LEFT' || action === 'NAV_RIGHT'
     const positive = action === 'NAV_RIGHT' || action === 'NAV_DOWN'
-
-    return elements
-      .filter((element) => element !== current)
-      .map((element, index) => {
-        const rect = element.getBoundingClientRect()
-        const center = rectCenter(rect)
-        const primaryDelta = horizontal ? center.x - sourceCenter.x : center.y - sourceCenter.y
-        return {
-          element,
-          index,
-          inDirection: positive ? primaryDelta > 0 : primaryDelta < 0,
-          overlap: axisOverlaps(sourceRect, rect, horizontal),
-          primary: Math.abs(primaryDelta),
-          perpendicular: horizontal
-            ? Math.abs(center.y - sourceCenter.y)
-            : Math.abs(center.x - sourceCenter.x),
-        }
-      })
-      .filter((candidate) => candidate.inDirection)
-      .sort(
-        (left, right) =>
-          Number(right.overlap) - Number(left.overlap) ||
-          left.primary - right.primary ||
-          left.perpendicular - right.perpendicular ||
-          left.index - right.index,
-      )[0]?.element || null
+    return (
+      elements
+        .filter((element) => element !== current)
+        .map((element, index) => {
+          const rect = element.getBoundingClientRect()
+          const center = rectCenter(rect)
+          const primaryDelta = horizontal ? center.x - sourceCenter.x : center.y - sourceCenter.y
+          return {
+            element,
+            index,
+            inDirection: positive ? primaryDelta > 0 : primaryDelta < 0,
+            overlap: axisOverlaps(sourceRect, rect, horizontal),
+            primary: Math.abs(primaryDelta),
+            perpendicular: horizontal
+              ? Math.abs(center.y - sourceCenter.y)
+              : Math.abs(center.x - sourceCenter.x),
+          }
+        })
+        .filter((candidate) => candidate.inDirection)
+        .sort(
+          (left, right) =>
+            Number(right.overlap) - Number(left.overlap) ||
+            left.primary - right.primary ||
+            left.perpendicular - right.perpendicular ||
+            left.index - right.index,
+        )[0]?.element || null
+    )
   }
 
   const closeTopOverlay = () => {
@@ -468,33 +670,61 @@
     return true
   }
 
-  const run = (action, previousFocus = null) => {
+  const run = async (action, previousFocus = null) => {
     if (!ACTIONS.has(action)) return error('netflix_focus_unavailable')
+    if (action === 'READ_CONTEXT') return success('context')
 
     if (action === 'BACK') {
-      if (closeTopOverlay()) return { ok: true, status: 'closed' }
+      if (globalThis.location.pathname.includes('/watch/')) {
+        const playerBack = [
+          ...document.querySelectorAll(
+            '[data-uia="player-back-to-browsing"],.button-nfplayerBack',
+          ),
+        ].find((element) => element instanceof HTMLElement && visible(element))
+        if (playerBack instanceof HTMLElement) {
+          playerBack.click()
+          return success('history')
+        }
+      }
+      if (closeTopOverlay()) return success('closed')
       globalThis.history.back()
-      return { ok: true, status: 'history' }
+      return success('history')
     }
 
     if (action === 'PLAY_PAUSE') {
       const video = [...document.querySelectorAll('video')].find(
-        (element) => element instanceof HTMLVideoElement && visible(element),
+        (element) =>
+          element instanceof HTMLVideoElement &&
+          visible(element) &&
+          element.readyState >= 2,
       )
       if (!(video instanceof HTMLVideoElement)) return error('netflix_video_unavailable')
       if (!video.paused && !video.ended) {
         video.pause()
-        return { ok: true, status: 'paused' }
+        return success('paused')
       }
       const playResult = video.play()
-      if (playResult && typeof playResult.catch === 'function') playResult.catch(() => undefined)
-      return { ok: true, status: 'playing' }
+      if (playResult && typeof playResult.catch === 'function') {
+        playResult.catch(() => undefined)
+      }
+      return success('playing')
+    }
+
+    if (action === 'SUBMIT_PRIMARY') {
+      const button = visibleSubmitButton()
+      if (!(button instanceof HTMLElement)) return error('netflix_submit_unavailable')
+      const before = pageSignature()
+      button.click()
+      const changed = await settle(() => pageSignature() !== before, 1200)
+      return changed ? success('submitted') : error('netflix_submit_unavailable')
     }
 
     const elements = interactiveElements()
     const errorField = loginErrorTarget(elements)
     const active = document.activeElement
     const current = active instanceof HTMLElement && elements.includes(active) ? active : null
+    const activeCard =
+      active instanceof HTMLElement ? active.closest(CARD_SELECTOR) : null
     if (
       errorField &&
       (!current || action === 'FOCUS_PRIMARY' || action === 'FOCUS_EDITABLE')
@@ -519,22 +749,43 @@
       const next = elements[elements.indexOf(current) + 1]
       return next
         ? focusResult(next, 'moved', elements)
-        : { ok: true, status: 'boundary', focus: fingerprint(current, elements) }
+        : success('boundary', { focus: fingerprint(current, elements) })
     }
 
     if (action === 'OK') {
+      if (activeCard instanceof HTMLElement) {
+        const currentFocus = fingerprint(activeCard, elements)
+        const existingPlay = visiblePlayButton(activeCard)
+        if (existingPlay instanceof HTMLElement) {
+          existingPlay.click()
+          return success('playing', { focus: currentFocus })
+        }
+        const previousOverlays = new Set(visibleOverlays())
+        activeCard.click()
+        const detailPlay = await settle(() => {
+          const overlay = visibleOverlays()
+            .filter((candidate) => !previousOverlays.has(candidate))
+            .at(-1)
+          return overlay ? visiblePlayButton(overlay) : null
+        }, 1200)
+        if (!(detailPlay instanceof HTMLElement)) {
+          return error('netflix_direct_play_unavailable')
+        }
+        detailPlay.click()
+        return success('playing', { focus: currentFocus })
+      }
       if (!current) return recoverFocus(elements, previousFocus)
       if (editable(current)) return focusResult(current, 'focused', elements)
       const currentFocus = fingerprint(current, elements)
       current.click()
-      return { ok: true, status: 'clicked', focus: currentFocus }
+      return success('clicked', { focus: currentFocus })
     }
 
     if (!current) return recoverFocus(elements, previousFocus)
     const target = directionalTarget(elements, current, action)
     return target
       ? focusResult(target, 'moved', elements)
-      : { ok: true, status: 'boundary', focus: fingerprint(current, elements) }
+      : success('boundary', { focus: fingerprint(current, elements) })
   }
 
   globalThis.__freeTvNetflixControl = { version: VERSION, run }

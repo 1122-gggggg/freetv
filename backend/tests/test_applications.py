@@ -10,7 +10,6 @@ import pytest
 
 from app.applications import manager as manager_module
 from app.applications.manager import ApplicationManager
-from app.applications.netflix_page import NetflixAction
 from app.commands.ports import CommandExecutionError
 from app.config import ApplicationSettings, Settings, UrlSettings
 from app.protocol import Command, NetflixContext, NetflixInputKind, NetflixStage
@@ -138,16 +137,23 @@ class FakeInput:
 
 @dataclass
 class FakeNetflixPageController:
-    actions: list[tuple[int, NetflixAction]] = field(default_factory=list)
-    attempts: list[tuple[int, NetflixAction]] = field(default_factory=list)
-    typed: list[tuple[int, str]] = field(default_factory=list)
+    actions: list[Command] = field(default_factory=list)
+    attempts: list[str] = field(default_factory=list)
+    typed: list[tuple[str, bool]] = field(default_factory=list)
+    context: NetflixContext = field(
+        default_factory=lambda: NetflixContext(
+            stage=NetflixStage.UNKNOWN,
+            input_kind=NetflixInputKind.NONE,
+        )
+    )
     failure: CommandExecutionError | None = None
     failures_remaining: int | None = None
     block_execute: bool = False
     cancellations: int = 0
+    initializations: int = 0
 
-    async def execute(self, port: int, action: NetflixAction) -> None:
-        self.attempts.append((port, action))
+    async def initialize(self) -> NetflixContext:
+        self.attempts.append("initialize")
         if self.block_execute:
             try:
                 await asyncio.Event().wait()
@@ -160,12 +166,22 @@ class FakeNetflixPageController:
             if self.failures_remaining is not None:
                 self.failures_remaining -= 1
             raise self.failure
-        self.actions.append((port, action))
+        self.initializations += 1
+        return self.context
 
-    async def type_text(self, port: int, text: str) -> None:
+    async def execute(self, command: Command) -> NetflixContext:
         if self.failure is not None:
             raise self.failure
-        self.typed.append((port, text))
+        self.actions.append(command)
+        return self.context
+
+    async def type_text(
+        self, text: str, submit: bool = False
+    ) -> NetflixContext:
+        if self.failure is not None:
+            raise self.failure
+        self.typed.append((text, submit))
+        return self.context
 
 
 
@@ -285,14 +301,18 @@ def test_netflix_chrome_launches_as_standalone_app_window_without_positional_url
     assert "--new-window" not in argv
     assert "--start-maximized" not in argv
     assert manager._adfilter.ports == []
-    assert manager._netflix_page.actions == [(9444, NetflixAction.FOCUS_PRIMARY)]
-def test_manager_returns_safe_unknown_netflix_context_until_runtime_support() -> None:
+    assert manager._netflix_page.initializations == 1
+
+
+def test_manager_returns_actual_context_and_forwards_submit() -> None:
     async def scenario() -> None:
         expected = NetflixContext(
-            stage=NetflixStage.UNKNOWN,
-            input_kind=NetflixInputKind.NONE,
+            stage=NetflixStage.LOGIN,
+            input_kind=NetflixInputKind.PASSWORD,
+            can_submit=True,
         )
-        manager, _, _, _ = make_manager()
+        page = FakeNetflixPageController(context=expected)
+        manager, _, _, _ = make_manager(netflix_page=page)
 
         opened = await manager.open(ActiveApp.NETFLIX)
         typed = await manager.type_text("secret", submit=True)
@@ -301,6 +321,7 @@ def test_manager_returns_safe_unknown_netflix_context_until_runtime_support() ->
         assert opened == expected
         assert typed == expected
         assert forwarded == expected
+        assert page.typed == [("secret", True)]
 
     asyncio.run(scenario())
 
@@ -342,11 +363,8 @@ def test_netflix_text_and_tab_use_page_controller_without_windows_input(
         await manager.open(ActiveApp.NETFLIX)
         await manager.type_text("user@example.com")
         await manager.forward_command(Command.TAB)
-        assert manager._netflix_page.typed == [(9444, "user@example.com")]
-        assert manager._netflix_page.actions == [
-            (9444, NetflixAction.FOCUS_PRIMARY),
-            (9444, NetflixAction.FOCUS_NEXT),
-        ]
+        assert manager._netflix_page.typed == [("user@example.com", False)]
+        assert manager._netflix_page.actions == [Command.TAB]
         assert input_controller.commands == []
         assert input_controller.browser_backs == 0
         assert "user@example.com" not in caplog.text
@@ -379,10 +397,7 @@ def test_opening_netflix_twice_reuses_the_same_window() -> None:
     assert windows.activated == [900]
     assert windows.maximized[-1] == 900
     assert manager.active_app is ActiveApp.NETFLIX
-    assert manager._netflix_page.actions == [
-        (9444, NetflixAction.FOCUS_PRIMARY),
-        (9444, NetflixAction.FOCUS_PRIMARY),
-    ]
+    assert manager._netflix_page.initializations == 2
 
 
 def test_home_then_netflix_restores_existing_app() -> None:
@@ -616,22 +631,23 @@ def test_home_minimizes_only_the_tracked_window_and_restores_launcher() -> None:
         assert manager.active_app is ActiveApp.LAUNCHER
 
     asyncio.run(scenario())
+
+
 @pytest.mark.parametrize(
-    ("command", "action"),
+    "command",
     [
-        (Command.NAV_UP, NetflixAction.NAV_UP),
-        (Command.NAV_DOWN, NetflixAction.NAV_DOWN),
-        (Command.NAV_LEFT, NetflixAction.NAV_LEFT),
-        (Command.NAV_RIGHT, NetflixAction.NAV_RIGHT),
-        (Command.OK, NetflixAction.OK),
-        (Command.BACK, NetflixAction.BACK),
-        (Command.PLAY_PAUSE, NetflixAction.PLAY_PAUSE),
-        (Command.TAB, NetflixAction.FOCUS_NEXT),
+        Command.NAV_UP,
+        Command.NAV_DOWN,
+        Command.NAV_LEFT,
+        Command.NAV_RIGHT,
+        Command.OK,
+        Command.BACK,
+        Command.PLAY_PAUSE,
+        Command.TAB,
     ],
 )
 def test_netflix_page_commands_use_controller_without_windows_input(
     command: Command,
-    action: NetflixAction,
 ) -> None:
     async def scenario() -> None:
         manager, _, windows, input_controller = make_manager()
@@ -640,7 +656,7 @@ def test_netflix_page_commands_use_controller_without_windows_input(
 
         await manager.forward_command(command)
 
-        assert manager._netflix_page.actions == [(9444, action)]
+        assert manager._netflix_page.actions == [command]
         assert input_controller.commands == []
         assert input_controller.browser_backs == 0
         assert windows.activated == [900]
@@ -648,17 +664,8 @@ def test_netflix_page_commands_use_controller_without_windows_input(
     asyncio.run(scenario())
 
 
-def test_netflix_action_mapping_is_fixed_and_complete() -> None:
-    assert manager_module.NETFLIX_ACTIONS == {
-        Command.NAV_UP: NetflixAction.NAV_UP,
-        Command.NAV_DOWN: NetflixAction.NAV_DOWN,
-        Command.NAV_LEFT: NetflixAction.NAV_LEFT,
-        Command.NAV_RIGHT: NetflixAction.NAV_RIGHT,
-        Command.OK: NetflixAction.OK,
-        Command.BACK: NetflixAction.BACK,
-        Command.PLAY_PAUSE: NetflixAction.PLAY_PAUSE,
-        Command.TAB: NetflixAction.FOCUS_NEXT,
-    }
+def test_manager_does_not_duplicate_netflix_action_mapping() -> None:
+    assert not hasattr(manager_module, "NETFLIX_ACTIONS")
 
 
 def test_netflix_controller_failure_never_falls_back_to_windows_input() -> None:
@@ -797,7 +804,7 @@ def test_new_netflix_initialization_has_a_wall_clock_timeout(
         assert asyncio.get_running_loop().time() - started < 0.5
         assert caught.value.code == "netflix_controller_unavailable"
         assert caught.value.message == "無法載入 Netflix 遙控控制，請稍後再試。"
-        assert page.attempts == [(9444, NetflixAction.FOCUS_PRIMARY)]
+        assert page.attempts == ["initialize"]
         assert page.cancellations == 1
         assert launcher.process.poll() is not None
         assert windows.closed_windows == [900]
@@ -831,7 +838,7 @@ def test_reused_netflix_initialization_timeout_reminimizes_without_closing(
         assert asyncio.get_running_loop().time() - started < 0.5
         assert caught.value.code == "netflix_controller_unavailable"
         assert caught.value.message == "無法載入 Netflix 遙控控制，請稍後再試。"
-        assert page.attempts == [(9444, NetflixAction.FOCUS_PRIMARY)]
+        assert page.attempts == ["initialize"]
         assert page.cancellations == 1
         assert launcher.process.poll() is None
         assert windows.closed_windows == []
@@ -862,11 +869,8 @@ def test_netflix_initial_focus_retries_until_page_dom_is_ready(
 
         await manager.open(ActiveApp.NETFLIX)
 
-        assert page.attempts == [
-            (9444, NetflixAction.FOCUS_PRIMARY),
-            (9444, NetflixAction.FOCUS_PRIMARY),
-        ]
-        assert page.actions == [(9444, NetflixAction.FOCUS_PRIMARY)]
+        assert page.attempts == ["initialize", "initialize"]
+        assert page.initializations == 1
         assert launcher.process.poll() is None
         assert windows.closed_windows == []
         assert manager.active_app is ActiveApp.NETFLIX
@@ -1004,7 +1008,7 @@ def test_netflix_cdp_accepts_an_owned_window_when_foreground_activation_is_denie
 
         await manager.forward_command(Command.TAB)
 
-        assert manager._netflix_page.actions == [(9444, NetflixAction.FOCUS_NEXT)]
+        assert manager._netflix_page.actions == [Command.TAB]
         assert input_controller.commands == []
 
     asyncio.run(scenario())
@@ -1039,7 +1043,7 @@ def test_forwarding_rebinds_a_replacement_window_from_the_same_owned_process() -
 
         await manager.forward_command(Command.TAB)
 
-        assert manager._netflix_page.actions == [(9444, NetflixAction.FOCUS_NEXT)]
+        assert manager._netflix_page.actions == [Command.TAB]
         assert windows.activated == [901]
         assert input_controller.commands == []
 

@@ -6,15 +6,17 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import app.applications.netflix_page as netflix_page_module
 import httpx
 import pytest
+
+import app.applications.netflix_page as netflix_page_module
 from app.applications.netflix_page import (
     NetflixAction,
     NetflixPageController,
     select_netflix_target,
 )
 from app.commands.ports import CommandExecutionError
+from app.protocol import Command, NetflixContext, NetflixInputKind, NetflixStage
 
 RUNTIME_SOURCE = "globalThis.__fixtureNetflixRuntime = true"
 VALID_FOCUS = {
@@ -26,7 +28,26 @@ VALID_FOCUS = {
     "rail": "Trending",
     "index": 0,
 }
-VALID_RESULT = {"ok": True, "status": "focused", "focus": VALID_FOCUS}
+LOGIN_PASSWORD_CONTEXT = {
+    "stage": "login",
+    "input_kind": "password",
+    "has_error": False,
+    "can_submit": True,
+    "focused_title": None,
+}
+BROWSE_CONTEXT = {
+    "stage": "browse",
+    "input_kind": "none",
+    "has_error": False,
+    "can_submit": False,
+    "focused_title": "Alpha",
+}
+VALID_RESULT = {
+    "ok": True,
+    "status": "focused",
+    "focus": VALID_FOCUS,
+    "context": BROWSE_CONTEXT,
+}
 NETFLIX_PAGE = {
     "type": "page",
     "url": "https://www.netflix.com/browse",
@@ -40,21 +61,29 @@ class FakeSocket:
         *,
         runtime_present: bool = True,
         runtime_result: Any = None,
+        runtime_results: list[Any] | None = None,
         fail_injection: bool = False,
         fail_run: bool = False,
         fail_insert: bool = False,
         drop_version_ack: bool = False,
+        drop_version_ack_at: int | None = None,
         drop_run_ack: bool = False,
+        drop_run_ack_at: int | None = None,
         drop_insert_ack: bool = False,
         secret_in_error: str = "",
     ) -> None:
         self.runtime_present = runtime_present
+        self.runtime_results = runtime_results
         self.runtime_result = VALID_RESULT if runtime_result is None else runtime_result
         self.fail_injection = fail_injection
         self.fail_run = fail_run
         self.fail_insert = fail_insert
         self.drop_version_ack = drop_version_ack
+        self.drop_version_ack_at = drop_version_ack_at
+        self.version_calls = 0
         self.drop_run_ack = drop_run_ack
+        self.drop_run_ack_at = drop_run_ack_at
+        self.run_calls = 0
         self.drop_insert_ack = drop_insert_ack
         self.secret_in_error = secret_in_error
         self.sent: list[dict[str, Any]] = []
@@ -87,14 +116,21 @@ class FakeSocket:
                 self.runtime_present = True
                 self._remote_value(command_id, None)
         elif ".run(" in expression:
-            if self.drop_run_ack:
+            self.run_calls += 1
+            if self.drop_run_ack or self.drop_run_ack_at == self.run_calls:
                 return
             if self.fail_run:
                 self._error(command_id)
             else:
-                self._remote_value(command_id, self.runtime_result)
+                runtime_result = (
+                    self.runtime_results.pop(0)
+                    if self.runtime_results
+                    else self.runtime_result
+                )
+                self._remote_value(command_id, runtime_result)
         else:
-            if self.drop_version_ack:
+            self.version_calls += 1
+            if self.drop_version_ack or self.drop_version_ack_at == self.version_calls:
                 return
             self._remote_value(command_id, "1" if self.runtime_present else None)
 
@@ -146,10 +182,10 @@ class FakeConnect:
         return FakeConnection(self._outcomes[len(self.calls) - 1])
 
 
-def make_controller(tmp_path: Path) -> NetflixPageController:
+def make_controller(tmp_path: Path, port: int = 9222) -> NetflixPageController:
     runtime_path = tmp_path / "netflix_control.js"
     runtime_path.write_text(RUNTIME_SOURCE, encoding="utf-8")
-    return NetflixPageController(timeout=0.2, runtime_path=runtime_path)
+    return NetflixPageController(port, timeout=0.2, runtime_path=runtime_path)
 
 
 def install_transport(
@@ -192,6 +228,8 @@ def test_netflix_actions_exactly_match_runtime_actions() -> None:
         "OK",
         "BACK",
         "PLAY_PAUSE",
+        "READ_CONTEXT",
+        "SUBMIT_PRIMARY",
     ]
 
 
@@ -305,7 +343,7 @@ def test_invalid_debugger_url_is_deterministic_and_does_not_retry(
     connect, page_calls = install_transport(monkeypatch, controller, [], pages)
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.execute(9222, NetflixAction.OK))
+        asyncio.run(controller.execute(Command.OK))
 
     assert caught.value.code == "netflix_target_unsupported"
     assert page_calls == [9222]
@@ -362,7 +400,11 @@ def test_execute_opens_one_socket_checks_version_runs_action_and_closes(
     socket = FakeSocket()
     connect, page_calls = install_transport(monkeypatch, controller, [socket])
 
-    assert asyncio.run(controller.execute(9222, NetflixAction.NAV_RIGHT)) is None
+    assert asyncio.run(controller.execute(Command.NAV_RIGHT)) == NetflixContext(
+        stage=NetflixStage.BROWSE,
+        input_kind=NetflixInputKind.NONE,
+        focused_title="Alpha",
+    )
 
     assert page_calls == [9222]
     assert len(connect.calls) == 1
@@ -385,7 +427,7 @@ def test_execute_injects_runtime_only_when_version_is_missing(
     socket = FakeSocket(runtime_present=False)
     install_transport(monkeypatch, controller, [socket])
 
-    asyncio.run(controller.execute(9222, NetflixAction.FOCUS_PRIMARY))
+    asyncio.run(controller.initialize())
 
     expressions = [payload["params"]["expression"] for payload in socket.sent]
     assert expressions == [
@@ -416,7 +458,7 @@ def test_http_failure_retries_with_fresh_page_discovery(
     connect = FakeConnect([socket])
     monkeypatch.setattr(netflix_page_module.websockets, "connect", connect)
 
-    asyncio.run(controller.execute(9222, NetflixAction.OK))
+    asyncio.run(controller.execute(Command.OK))
 
     assert calls == 2
     assert len(connect.calls) == 1
@@ -434,7 +476,7 @@ def test_socket_connection_failure_retries_once_then_returns_page_unavailable(
     )
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.execute(9222, NetflixAction.OK))
+        asyncio.run(controller.execute(Command.OK))
 
     assert caught.value.code == "netflix_page_unavailable"
     assert caught.value.message == "無法連到 Netflix 控制頁面，請稍後再試。"
@@ -449,7 +491,7 @@ def test_version_ack_loss_retries_before_any_action_is_sent(
     second = FakeSocket()
     connect, page_calls = install_transport(monkeypatch, controller, [first, second])
 
-    asyncio.run(controller.execute(9222, NetflixAction.OK))
+    asyncio.run(controller.execute(Command.OK))
 
     assert page_calls == [9222, 9222]
     assert len(connect.calls) == 2
@@ -467,7 +509,7 @@ def test_idempotent_action_cdp_failure_retries_with_a_new_socket(
     second = FakeSocket()
     connect, page_calls = install_transport(monkeypatch, controller, [first, second])
 
-    asyncio.run(controller.execute(9222, NetflixAction.FOCUS_PRIMARY))
+    asyncio.run(controller.initialize())
 
     assert page_calls == [9222, 9222]
     assert len(connect.calls) == 2
@@ -475,22 +517,22 @@ def test_idempotent_action_cdp_failure_retries_with_a_new_socket(
 
 
 @pytest.mark.parametrize(
-    "action",
+    "command",
     [
-        NetflixAction.FOCUS_NEXT,
-        NetflixAction.NAV_UP,
-        NetflixAction.NAV_DOWN,
-        NetflixAction.NAV_LEFT,
-        NetflixAction.NAV_RIGHT,
-        NetflixAction.OK,
-        NetflixAction.BACK,
-        NetflixAction.PLAY_PAUSE,
+        Command.TAB,
+        Command.NAV_UP,
+        Command.NAV_DOWN,
+        Command.NAV_LEFT,
+        Command.NAV_RIGHT,
+        Command.OK,
+        Command.BACK,
+        Command.PLAY_PAUSE,
     ],
 )
 def test_non_idempotent_action_ack_loss_is_not_retried(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    action: NetflixAction,
+    command: Command,
 ) -> None:
     controller = make_controller(tmp_path)
     first = FakeSocket(drop_run_ack=True)
@@ -498,7 +540,7 @@ def test_non_idempotent_action_ack_loss_is_not_retried(
     connect, page_calls = install_transport(monkeypatch, controller, [first, second])
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.execute(9222, action))
+        asyncio.run(controller.execute(command))
 
     assert caught.value.code == "netflix_controller_unavailable"
     assert page_calls == [9222]
@@ -518,7 +560,7 @@ def test_injection_failure_retries_once_then_returns_controller_unavailable(
     _, page_calls = install_transport(monkeypatch, controller, [first, second])
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.execute(9222, NetflixAction.FOCUS_PRIMARY))
+        asyncio.run(controller.initialize())
 
     assert caught.value.code == "netflix_controller_unavailable"
     assert caught.value.message == "無法載入 Netflix 遙控控制，請稍後再試。"
@@ -540,7 +582,7 @@ def test_deterministic_target_errors_do_not_retry(
     connect, page_calls = install_transport(monkeypatch, controller, [], pages)
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.execute(9222, NetflixAction.OK))
+        asyncio.run(controller.execute(Command.OK))
 
     assert caught.value.code == "netflix_target_unsupported"
     assert page_calls == [9222]
@@ -554,7 +596,7 @@ def test_missing_target_does_not_retry(
     connect, page_calls = install_transport(monkeypatch, controller, [], [])
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.execute(9222, NetflixAction.OK))
+        asyncio.run(controller.execute(Command.OK))
 
     assert caught.value.code == "netflix_page_unavailable"
     assert page_calls == [9222]
@@ -569,8 +611,8 @@ def test_next_command_reinjects_after_execution_context_replacement(
     replacement = FakeSocket(runtime_present=False)
     _, page_calls = install_transport(monkeypatch, controller, [first, replacement])
 
-    asyncio.run(controller.execute(9222, NetflixAction.NAV_LEFT))
-    asyncio.run(controller.execute(9222, NetflixAction.NAV_RIGHT))
+    asyncio.run(controller.execute(Command.NAV_LEFT))
+    asyncio.run(controller.execute(Command.NAV_RIGHT))
 
     assert page_calls == [9222, 9222]
     assert RUNTIME_SOURCE not in [payload["params"]["expression"] for payload in first.sent]
@@ -583,26 +625,37 @@ def test_each_action_uses_enum_and_sends_only_whitelisted_previous_focus(
 ) -> None:
     controller = make_controller(tmp_path)
     first = FakeSocket(runtime_result=VALID_RESULT)
+    commands = [
+        (Command.NAV_UP, "NAV_UP"),
+        (Command.NAV_DOWN, "NAV_DOWN"),
+        (Command.NAV_LEFT, "NAV_LEFT"),
+        (Command.NAV_RIGHT, "NAV_RIGHT"),
+        (Command.OK, "OK"),
+        (Command.BACK, "BACK"),
+        (Command.PLAY_PAUSE, "PLAY_PAUSE"),
+        (Command.TAB, "FOCUS_NEXT"),
+    ]
     remaining = [
         FakeSocket(
             runtime_result={
                 "ok": True,
                 "status": "boundary",
                 "focus": VALID_FOCUS,
+                "context": BROWSE_CONTEXT,
             }
         )
-        for _ in NetflixAction
+        for _ in commands
     ]
     install_transport(monkeypatch, controller, [first, *remaining])
 
-    asyncio.run(controller.execute(9222, NetflixAction.FOCUS_PRIMARY))
-    for action, socket in zip(NetflixAction, remaining, strict=True):
-        asyncio.run(controller.execute(9222, action))
+    asyncio.run(controller.initialize())
+    for (command, action), socket in zip(commands, remaining, strict=True):
+        asyncio.run(controller.execute(command))
         expression = runtime_expressions(socket)[0]
         prefix = "globalThis.__freeTvNetflixControl.run("
         assert expression.startswith(prefix)
         action_json, focus_json = expression[len(prefix) : -1].split(", ", 1)
-        assert json.loads(action_json) == action.value
+        assert json.loads(action_json) == action
         focus = json.loads(focus_json)
         assert focus == VALID_FOCUS
         assert set(focus) == {"role", "label", "uia", "text", "pathKind", "rail", "index"}
@@ -610,41 +663,56 @@ def test_each_action_uses_enum_and_sends_only_whitelisted_previous_focus(
         assert "innerHTML" not in expression
         assert "getBoundingClientRect" not in expression
 
-def test_no_focus_status_clears_stale_previous_focus(
+def test_back_preserves_previous_focus_for_browse_restore(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     controller = make_controller(tmp_path)
     focused = FakeSocket(runtime_result=VALID_RESULT)
-    closed = FakeSocket(runtime_result={"ok": True, "status": "closed"})
+    closed = FakeSocket(
+        runtime_result={"ok": True, "status": "closed", "context": BROWSE_CONTEXT}
+    )
     next_command = FakeSocket(runtime_result=VALID_RESULT)
     install_transport(monkeypatch, controller, [focused, closed, next_command])
 
-    asyncio.run(controller.execute(9222, NetflixAction.FOCUS_PRIMARY))
-    asyncio.run(controller.execute(9222, NetflixAction.BACK))
-    asyncio.run(controller.execute(9222, NetflixAction.FOCUS_PRIMARY))
+    asyncio.run(controller.initialize())
+    asyncio.run(controller.execute(Command.BACK))
+    asyncio.run(controller.initialize())
 
     assert runtime_expressions(closed)[0].endswith(
         f", {json.dumps(VALID_FOCUS, ensure_ascii=True)})"
     )
-    assert runtime_expressions(next_command)[0].endswith(", null)")
+    assert runtime_expressions(next_command)[0].endswith(
+        f", {json.dumps(VALID_FOCUS, ensure_ascii=True)})"
+    )
 
 
 
 def test_execute_rejects_non_enum_action_before_page_discovery(tmp_path: Path) -> None:
     controller = make_controller(tmp_path)
-    with pytest.raises(TypeError, match="NetflixAction"):
-        asyncio.run(controller.execute(9222, "OK"))  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="Command"):
+        asyncio.run(controller.execute("OK"))  # type: ignore[arg-type]
 
 
 def test_type_text_focuses_editable_then_uses_input_insert_text(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     controller = make_controller(tmp_path)
-    socket = FakeSocket(runtime_result={"ok": True, "status": "focused", "focus": VALID_FOCUS})
+    socket = FakeSocket(
+        runtime_result={
+            "ok": True,
+            "status": "focused",
+            "focus": VALID_FOCUS,
+            "context": LOGIN_PASSWORD_CONTEXT,
+        }
+    )
     install_transport(monkeypatch, controller, [socket])
     secret = "account-password-驗證碼"
 
-    assert asyncio.run(controller.type_text(9222, secret)) is None
+    assert asyncio.run(controller.type_text(secret)) == NetflixContext(
+        stage=NetflixStage.LOGIN,
+        input_kind=NetflixInputKind.PASSWORD,
+        can_submit=True,
+    )
 
     methods = [payload["method"] for payload in socket.sent]
     assert methods == ["Runtime.evaluate", "Runtime.evaluate", "Input.insertText"]
@@ -664,7 +732,7 @@ def test_input_insert_text_ack_loss_is_not_retried(
     secret = "send-once-secret"
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.type_text(9222, secret))
+        asyncio.run(controller.type_text(secret))
 
     insert_calls = [
         payload
@@ -692,7 +760,7 @@ def test_type_text_does_not_expose_secret_in_error_log_or_state(
     connect, page_calls = install_transport(monkeypatch, controller, [first, second])
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.type_text(9222, secret))
+        asyncio.run(controller.type_text(secret))
 
     assert caught.value.code == "netflix_controller_unavailable"
     assert secret not in str(caught.value)
@@ -711,6 +779,8 @@ def test_type_text_does_not_expose_secret_in_error_log_or_state(
         ("netflix_focus_unavailable", "找不到可操作的 Netflix 項目，請稍後再試。"),
         ("netflix_input_unavailable", "找不到可輸入的 Netflix 欄位，請先選取輸入欄。"),
         ("netflix_video_unavailable", "目前沒有可播放或暫停的 Netflix 影片。"),
+        ("netflix_direct_play_unavailable", "找不到可播放的 Netflix 項目，請稍後再試。"),
+        ("netflix_submit_unavailable", "Netflix 目前無法送出，請確認電視畫面後再試。"),
     ],
 )
 def test_runtime_codes_map_to_fixed_local_chinese_messages_without_retry(
@@ -724,7 +794,7 @@ def test_runtime_codes_map_to_fixed_local_chinese_messages_without_retry(
     connect, page_calls = install_transport(monkeypatch, controller, [socket])
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.execute(9222, NetflixAction.PLAY_PAUSE))
+        asyncio.run(controller.execute(Command.PLAY_PAUSE))
 
     assert caught.value.code == code
     assert caught.value.message == message
@@ -781,7 +851,7 @@ def test_malformed_runtime_results_are_rejected_and_retried_once(
     connect, page_calls = install_transport(monkeypatch, controller, [first, second])
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.execute(9222, NetflixAction.FOCUS_PRIMARY))
+        asyncio.run(controller.initialize())
 
     assert caught.value.code == "netflix_controller_unavailable"
     assert caught.value.message == "無法載入 Netflix 遙控控制，請稍後再試。"
@@ -791,19 +861,24 @@ def test_malformed_runtime_results_are_rejected_and_retried_once(
 
 
 @pytest.mark.parametrize(
-    ("action", "runtime_result"),
+    ("command", "runtime_result"),
     [
-        (NetflixAction.OK, {"ok": True, "status": "clicked"}),
+        (Command.OK, {"ok": True, "status": "clicked"}),
         (
-            NetflixAction.BACK,
-            {"ok": True, "status": "closed", "focus": VALID_FOCUS},
+            Command.BACK,
+            {
+                "ok": True,
+                "status": "closed",
+                "focus": VALID_FOCUS,
+                "context": BROWSE_CONTEXT,
+            },
         ),
     ],
 )
 def test_non_idempotent_action_schema_failure_is_not_retried(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    action: NetflixAction,
+    command: Command,
     runtime_result: dict[str, Any],
 ) -> None:
     controller = make_controller(tmp_path)
@@ -812,12 +887,199 @@ def test_non_idempotent_action_schema_failure_is_not_retried(
     connect, page_calls = install_transport(monkeypatch, controller, [first, second])
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.execute(9222, action))
+        asyncio.run(controller.execute(command))
 
     assert caught.value.code == "netflix_controller_unavailable"
     assert page_calls == [9222]
     assert len(connect.calls) == 1
     assert len(runtime_expressions(first)) == 1
     assert runtime_expressions(second) == []
+    assert first.closed
+    assert not second.closed
+
+
+def test_execute_returns_a_strict_safe_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    socket = FakeSocket()
+    connect, page_calls = install_transport(monkeypatch, controller, [socket])
+
+    context = asyncio.run(controller.execute(Command.NAV_RIGHT))
+
+    assert context == NetflixContext(
+        stage=NetflixStage.BROWSE,
+        input_kind=NetflixInputKind.NONE,
+        focused_title="Alpha",
+    )
+    assert page_calls == [9222]
+    assert len(connect.calls) == 1
+    assert socket.closed
+
+
+def test_non_browse_runtime_title_and_extra_fields_are_rejected_safely(
+    tmp_path: Path,
+) -> None:
+    controller = make_controller(tmp_path)
+    invalid_context = {
+        **LOGIN_PASSWORD_CONTEXT,
+        "focused_title": "must-not-pass",
+        "value": "secret",
+    }
+    with pytest.raises(CommandExecutionError) as caught:
+        controller._accept_runtime_result(
+            {
+                "ok": True,
+                "status": "focused",
+                "focus": VALID_FOCUS,
+                "context": invalid_context,
+            }
+        )
+    assert caught.value.code == "netflix_controller_unavailable"
+    assert "secret" not in str(caught.value)
+
+
+def test_type_submit_runs_once_in_one_short_transaction_and_returns_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    submitted_context = {
+        **LOGIN_PASSWORD_CONTEXT,
+        "input_kind": "none",
+        "can_submit": False,
+    }
+    socket = FakeSocket(
+        runtime_results=[
+            {
+                "ok": True,
+                "status": "focused",
+                "focus": VALID_FOCUS,
+                "context": LOGIN_PASSWORD_CONTEXT,
+            },
+            {
+                "ok": True,
+                "status": "submitted",
+                "context": submitted_context,
+            },
+        ]
+    )
+    connect, _ = install_transport(monkeypatch, controller, [socket])
+
+    context = asyncio.run(controller.type_text("secret", submit=True))
+
+    methods = [message["method"] for message in socket.sent]
+    assert methods.count("Input.insertText") == 1
+    assert len(runtime_expressions(socket)) == 2
+    assert context.input_kind is NetflixInputKind.NONE
+    assert "secret" not in repr(context)
+    assert len(connect.calls) == 1
+    assert socket.closed
+
+
+def test_insert_text_ack_loss_does_not_send_submit_or_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    socket = FakeSocket(
+        runtime_result={
+            "ok": True,
+            "status": "focused",
+            "focus": VALID_FOCUS,
+            "context": LOGIN_PASSWORD_CONTEXT,
+        },
+        drop_insert_ack=True,
+    )
+    connect, _ = install_transport(monkeypatch, controller, [socket])
+
+    with pytest.raises(CommandExecutionError) as caught:
+        asyncio.run(controller.type_text("secret", submit=True))
+
+    assert caught.value.code == "netflix_controller_unavailable"
+    assert len(connect.calls) == 1
+    assert len(runtime_expressions(socket)) == 1
+    assert [message["method"] for message in socket.sent].count("Input.insertText") == 1
+    assert socket.closed
+
+
+def test_submit_ack_loss_does_not_reconnect_or_repeat_submit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    socket = FakeSocket(
+        runtime_result={
+            "ok": True,
+            "status": "focused",
+            "focus": VALID_FOCUS,
+            "context": LOGIN_PASSWORD_CONTEXT,
+        },
+        drop_run_ack_at=2,
+    )
+    connect, _ = install_transport(monkeypatch, controller, [socket])
+
+    with pytest.raises(CommandExecutionError) as caught:
+        asyncio.run(controller.type_text("secret", submit=True))
+
+    assert caught.value.code == "netflix_controller_unavailable"
+    assert len(connect.calls) == 1
+    submit_expressions = [
+        expression
+        for expression in runtime_expressions(socket)
+        if '"SUBMIT_PRIMARY"' in expression
+    ]
+    assert len(submit_expressions) == 1
+    assert socket.closed
+
+
+def test_ok_direct_play_unknown_outcome_is_not_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    socket = FakeSocket(drop_run_ack=True)
+    connect, _ = install_transport(monkeypatch, controller, [socket])
+
+    with pytest.raises(CommandExecutionError) as caught:
+        asyncio.run(controller.execute(Command.OK))
+
+    assert caught.value.code == "netflix_controller_unavailable"
+    assert len(connect.calls) == 1
+    assert len(runtime_expressions(socket)) == 1
+    assert socket.closed
+
+
+def test_submit_after_insert_skips_revalidation_and_never_repeats_insert(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    submitted_context = {
+        **LOGIN_PASSWORD_CONTEXT,
+        "input_kind": "none",
+        "can_submit": False,
+    }
+    first = FakeSocket(
+        runtime_results=[
+            {
+                "ok": True,
+                "status": "focused",
+                "focus": VALID_FOCUS,
+                "context": LOGIN_PASSWORD_CONTEXT,
+            },
+            {
+                "ok": True,
+                "status": "submitted",
+                "context": submitted_context,
+            },
+        ],
+        drop_version_ack_at=2,
+    )
+    second = FakeSocket()
+    connect, _ = install_transport(monkeypatch, controller, [first, second])
+
+    context = asyncio.run(controller.type_text("secret", submit=True))
+
+    assert context.input_kind is NetflixInputKind.NONE
+    assert first.version_calls == 1
+    assert [message["method"] for message in first.sent].count("Input.insertText") == 1
+    assert len(connect.calls) == 1
+    assert second.sent == []
     assert first.closed
     assert not second.closed

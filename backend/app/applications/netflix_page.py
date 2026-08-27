@@ -10,8 +10,10 @@ from urllib.parse import urlparse
 
 import httpx
 import websockets
+from pydantic import ValidationError
 
 from app.commands.ports import CommandExecutionError
+from app.protocol import Command, NetflixContext
 
 RUNTIME_VERSION = "1"
 ERROR_MESSAGES = {
@@ -21,11 +23,15 @@ ERROR_MESSAGES = {
     "netflix_focus_unavailable": "找不到可操作的 Netflix 項目，請稍後再試。",
     "netflix_input_unavailable": "找不到可輸入的 Netflix 欄位，請先選取輸入欄。",
     "netflix_video_unavailable": "目前沒有可播放或暫停的 Netflix 影片。",
+    "netflix_direct_play_unavailable": "找不到可播放的 Netflix 項目，請稍後再試。",
+    "netflix_submit_unavailable": "Netflix 目前無法送出，請確認電視畫面後再試。",
 }
 RUNTIME_ERROR_CODES = {
     "netflix_focus_unavailable",
     "netflix_input_unavailable",
     "netflix_video_unavailable",
+    "netflix_direct_play_unavailable",
+    "netflix_submit_unavailable",
 }
 FINGERPRINT_STRING_FIELDS = ("role", "label", "uia", "text", "pathKind", "rail")
 FINGERPRINT_FIELDS = (*FINGERPRINT_STRING_FIELDS, "index")
@@ -40,6 +46,8 @@ RUNTIME_STATUSES = {
     "history",
     "playing",
     "paused",
+    "context",
+    "submitted",
     "error",
 }
 FOCUS_REQUIRED_STATUSES = {
@@ -64,11 +72,28 @@ class NetflixAction(StrEnum):
     OK = "OK"
     BACK = "BACK"
     PLAY_PAUSE = "PLAY_PAUSE"
-IDEMPOTENT_ACTIONS = {NetflixAction.FOCUS_PRIMARY, NetflixAction.FOCUS_EDITABLE}
+    READ_CONTEXT = "READ_CONTEXT"
+    SUBMIT_PRIMARY = "SUBMIT_PRIMARY"
+IDEMPOTENT_ACTIONS = {
+    NetflixAction.FOCUS_PRIMARY,
+    NetflixAction.FOCUS_EDITABLE,
+    NetflixAction.READ_CONTEXT,
+}
+
+COMMAND_ACTIONS: dict[Command, NetflixAction] = {
+    Command.NAV_UP: NetflixAction.NAV_UP,
+    Command.NAV_DOWN: NetflixAction.NAV_DOWN,
+    Command.NAV_LEFT: NetflixAction.NAV_LEFT,
+    Command.NAV_RIGHT: NetflixAction.NAV_RIGHT,
+    Command.OK: NetflixAction.OK,
+    Command.BACK: NetflixAction.BACK,
+    Command.PLAY_PAUSE: NetflixAction.PLAY_PAUSE,
+    Command.TAB: NetflixAction.FOCUS_NEXT,
+}
 
 
 FocusFingerprint = dict[str, str | int]
-Operation = Callable[[Any], Awaitable[None]]
+Operation = Callable[[Any], Awaitable[NetflixContext]]
 
 
 class _RetryableControllerError(RuntimeError):
@@ -142,7 +167,15 @@ def select_netflix_target(pages: list[dict[str, Any]]) -> str:
 class NetflixPageController:
     VERSION_EXPRESSION = "globalThis.__freeTvNetflixControl?.version ?? null"
 
-    def __init__(self, timeout: float = 8.0, runtime_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        port: int,
+        timeout: float = 8.0,
+        runtime_path: Path | None = None,
+    ) -> None:
+        if type(port) is not int or not 1 <= port <= 65535:
+            raise ValueError("port must be an integer from 1 to 65535")
+        self._port = port
         self._timeout = timeout
         self._runtime_source = (
             runtime_path or Path(__file__).with_name("netflix_control.js")
@@ -150,56 +183,76 @@ class NetflixPageController:
         self._focus: FocusFingerprint | None = None
         self._command_id = 0
 
-    async def execute(self, port: int, action: NetflixAction) -> None:
-        if not isinstance(action, NetflixAction):
-            raise TypeError("action must be a NetflixAction")
+    async def initialize(self) -> NetflixContext:
+        async def operation(socket: Any) -> NetflixContext:
+            result = await self._run_runtime(socket, NetflixAction.FOCUS_PRIMARY)
+            return self._accept_runtime_result(result)
 
-        async def operation(socket: Any) -> None:
+        return await self._run_transaction(operation)
+
+    async def execute(self, command: Command) -> NetflixContext:
+        if not isinstance(command, Command):
+            raise TypeError("command must be a Command")
+        action = COMMAND_ACTIONS.get(command)
+        if action is None:
+            raise CommandExecutionError(
+                "command_not_supported",
+                "Netflix 不支援這個遙控指令。",
+            )
+
+        async def operation(socket: Any) -> NetflixContext:
             result = await self._run_runtime(socket, action)
             try:
-                self._accept_runtime_result(result)
+                return self._accept_runtime_result(result)
             except _RetryableControllerError:
                 if action not in IDEMPOTENT_ACTIONS:
                     raise _OutcomeUnknownError from None
                 raise
 
-        await self._run_transaction(port, operation)
+        return await self._run_transaction(operation)
 
-    async def type_text(self, port: int, text: str) -> None:
+    async def type_text(
+        self,
+        text: str,
+        submit: bool = False,
+    ) -> NetflixContext:
         if not isinstance(text, str):
             raise TypeError("text must be a string")
+        if type(submit) is not bool:
+            raise TypeError("submit must be a bool")
 
-        async def operation(socket: Any) -> None:
-            result = await self._run_runtime(socket, NetflixAction.FOCUS_EDITABLE)
-            self._accept_runtime_result(result)
+        async def operation(socket: Any) -> NetflixContext:
+            focused = self._accept_runtime_result(
+                await self._run_runtime(socket, NetflixAction.FOCUS_EDITABLE)
+            )
             await self._call(
                 socket,
                 "Input.insertText",
                 {"text": text},
                 outcome_unknown_on_failure=True,
             )
+            if not submit:
+                return focused
+            result = await self._run_action(socket, NetflixAction.SUBMIT_PRIMARY)
+            try:
+                return self._accept_runtime_result(result)
+            except _RetryableControllerError:
+                raise _OutcomeUnknownError from None
 
-        await self._run_transaction(port, operation)
+        return await self._run_transaction(operation)
 
-    async def _run_transaction(self, port: int, operation: Operation) -> None:
-        if type(port) is not int or not 1 <= port <= 65535:
-            raise CommandExecutionError(
-                "netflix_page_unavailable",
-                ERROR_MESSAGES["netflix_page_unavailable"],
-            )
-
+    async def _run_transaction(self, operation: Operation) -> NetflixContext:
         failure_code = "netflix_page_unavailable"
         for attempt in range(2):
             try:
-                pages = await self._list_pages(port)
+                pages = await self._list_pages(self._port)
                 debugger_url = select_netflix_target(pages)
                 async with websockets.connect(
                     debugger_url,
                     open_timeout=self._timeout,
                     max_size=2**22,
                 ) as socket:
-                    await operation(socket)
-                return
+                    return await operation(socket)
             except _OutcomeUnknownError:
                 raise CommandExecutionError(
                     "netflix_controller_unavailable",
@@ -217,6 +270,7 @@ class NetflixPageController:
                     failure_code,
                     ERROR_MESSAGES[failure_code],
                 ) from None
+        raise AssertionError("unreachable")
 
     async def _list_pages(self, port: int) -> list[dict[str, Any]]:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -227,54 +281,43 @@ class NetflixPageController:
             raise ValueError("CDP target list must be an array")
         return [page for page in payload if isinstance(page, dict)]
 
-    async def _run_runtime(self, socket: Any, action: NetflixAction) -> Any:
-        async def evaluate(
-            expression: str,
-            *,
-            outcome_unknown_on_failure: bool = False,
-        ) -> Any:
-            response = await self._call(
-                socket,
-                "Runtime.evaluate",
-                {
-                    "expression": expression,
-                    "returnByValue": True,
-                    "awaitPromise": True,
-                },
-                outcome_unknown_on_failure=outcome_unknown_on_failure,
-            )
-            if response.get("exceptionDetails") is not None:
-                if outcome_unknown_on_failure:
-                    raise _OutcomeUnknownError
-                raise _CdpCallError
-            remote = response.get("result")
-            if not isinstance(remote, dict):
-                if outcome_unknown_on_failure:
-                    raise _OutcomeUnknownError
-                raise _CdpCallError
-            return remote.get("value")
+    async def _evaluate(
+        self,
+        socket: Any,
+        expression: str,
+        *,
+        outcome_unknown_on_failure: bool = False,
+    ) -> Any:
+        response = await self._call(
+            socket,
+            "Runtime.evaluate",
+            {
+                "expression": expression,
+                "returnByValue": True,
+                "awaitPromise": True,
+            },
+            outcome_unknown_on_failure=outcome_unknown_on_failure,
+        )
+        if response.get("exceptionDetails") is not None:
+            if outcome_unknown_on_failure:
+                raise _OutcomeUnknownError
+            raise _CdpCallError
+        remote = response.get("result")
+        if not isinstance(remote, dict):
+            if outcome_unknown_on_failure:
+                raise _OutcomeUnknownError
+            raise _CdpCallError
+        return remote.get("value")
 
+    async def _run_runtime(self, socket: Any, action: NetflixAction) -> Any:
         try:
-            version = await evaluate(self.VERSION_EXPRESSION)
+            version = await self._evaluate(socket, self.VERSION_EXPRESSION)
             if version != RUNTIME_VERSION:
-                await evaluate(self._runtime_source)
-                version = await evaluate(self.VERSION_EXPRESSION)
+                await self._evaluate(socket, self._runtime_source)
+                version = await self._evaluate(socket, self.VERSION_EXPRESSION)
                 if version != RUNTIME_VERSION:
                     raise _RetryableControllerError
-
-            previous_focus = None
-            if self._focus is not None:
-                previous_focus = {field: self._focus[field] for field in FINGERPRINT_FIELDS}
-            action_json = json.dumps(action.value, ensure_ascii=True)
-            focus_json = json.dumps(previous_focus, ensure_ascii=True)
-            expression = (
-                "globalThis.__freeTvNetflixControl.run("
-                f"{action_json}, {focus_json})"
-            )
-            return await evaluate(
-                expression,
-                outcome_unknown_on_failure=action not in IDEMPOTENT_ACTIONS,
-            )
+            return await self._run_action(socket, action)
         except CommandExecutionError:
             raise
         except _OutcomeUnknownError:
@@ -284,11 +327,28 @@ class NetflixPageController:
         except Exception:
             raise _RetryableControllerError from None
 
-    def _accept_runtime_result(self, result: Any) -> None:
+    async def _run_action(self, socket: Any, action: NetflixAction) -> Any:
+        previous_focus = None
+        if self._focus is not None:
+            previous_focus = {field: self._focus[field] for field in FINGERPRINT_FIELDS}
+        action_json = json.dumps(action.value, ensure_ascii=True)
+        focus_json = json.dumps(previous_focus, ensure_ascii=True)
+        expression = (
+            "globalThis.__freeTvNetflixControl.run("
+            f"{action_json}, {focus_json})"
+        )
+        return await self._evaluate(
+            socket,
+            expression,
+            outcome_unknown_on_failure=action not in IDEMPOTENT_ACTIONS,
+        )
+
+    def _accept_runtime_result(self, result: Any) -> NetflixContext:
         if not isinstance(result, dict):
             raise _RetryableControllerError
         keys = set(result)
-        if not {"ok", "status"}.issubset(keys) or not keys <= {"ok", "status", "code", "focus"}:
+        allowed_keys = {"ok", "status", "code", "focus", "context"}
+        if not {"ok", "status"}.issubset(keys) or not keys <= allowed_keys:
             raise _RetryableControllerError
 
         ok = result["ok"]
@@ -300,16 +360,21 @@ class NetflixPageController:
 
         code = result.get("code")
         if ok:
-            if "code" in result or status == "error":
+            if "code" in result or status == "error" or "context" not in result:
                 raise _RetryableControllerError
         else:
-            if status != "error" or code not in RUNTIME_ERROR_CODES or "focus" in result:
+            if (
+                status != "error"
+                or code not in RUNTIME_ERROR_CODES
+                or "focus" in result
+                or "context" in result
+            ):
                 raise _RetryableControllerError
 
         has_focus = "focus" in result
         if ok and status in FOCUS_REQUIRED_STATUSES and not has_focus:
             raise _RetryableControllerError
-        if ok and status in NO_FOCUS_STATUSES and has_focus:
+        if ok and status in {"closed", "history", "paused", "context", "submitted"} and has_focus:
             raise _RetryableControllerError
 
         accepted_focus: FocusFingerprint | None = None
@@ -328,11 +393,18 @@ class NetflixPageController:
 
         if not ok:
             raise CommandExecutionError(code, ERROR_MESSAGES[code])
+        try:
+            context = NetflixContext.model_validate(result["context"])
+        except ValidationError:
+            raise CommandExecutionError(
+                "netflix_controller_unavailable",
+                ERROR_MESSAGES["netflix_controller_unavailable"],
+            ) from None
         if accepted_focus is not None:
             self._focus = accepted_focus
-        elif status in NO_FOCUS_STATUSES:
+        elif status == "submitted":
             self._focus = None
-
+        return context
     async def _call(
         self,
         socket: Any,
@@ -347,9 +419,8 @@ class NetflixPageController:
             {"id": command_id, "method": method, "params": params},
             ensure_ascii=True,
         )
-        await asyncio.wait_for(socket.send(request), timeout=self._timeout)
-
         try:
+            await asyncio.wait_for(socket.send(request), timeout=self._timeout)
             while True:
                 raw = await asyncio.wait_for(socket.recv(), timeout=self._timeout)
                 if not isinstance(raw, str) or len(raw) > 2**22:
