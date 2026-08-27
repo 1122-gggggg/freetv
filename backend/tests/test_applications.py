@@ -702,6 +702,70 @@ def test_persistently_missing_netflix_window_notifies_and_clears_tracking() -> N
     asyncio.run(scenario())
 
 
+def test_window_missing_grace_covers_html_fullscreen_transition() -> None:
+    assert (
+        manager_module._WINDOW_MISSING_GRACE_POLLS
+        * manager_module._APPLICATION_WATCH_INTERVAL_SECONDS
+        >= 3.0
+    )
+
+
+def test_transient_missing_window_within_old_grace_does_not_exit() -> None:
+    async def scenario() -> None:
+        exited: list[ActiveApp] = []
+
+        async def on_exit(app: ActiveApp) -> None:
+            exited.append(app)
+
+        manager, launcher, windows, _ = make_manager(
+            on_application_exit=on_exit,
+            watch_interval_seconds=0.05,
+        )
+        await manager.open(ActiveApp.NETFLIX)
+        windows.window_owned_by_process = False
+        windows.window_for_pid = None
+        await asyncio.sleep(0.22)
+        windows.window_owned_by_process = True
+        windows.window_for_pid = 900
+        await asyncio.sleep(0.12)
+
+        assert exited == []
+        assert launcher.process.poll() is None
+        assert manager.active_app is ActiveApp.NETFLIX
+        await manager.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_process_exit_is_handled_on_next_poll_without_window_grace() -> None:
+    async def scenario() -> None:
+        exited: list[ActiveApp] = []
+        notified = asyncio.Event()
+
+        async def on_exit(app: ActiveApp) -> None:
+            exited.append(app)
+            notified.set()
+
+        manager, launcher, windows, _ = make_manager(
+            on_application_exit=on_exit,
+            watch_interval_seconds=0.05,
+        )
+        await manager.open(ActiveApp.NETFLIX)
+        windows.window_owned_by_process = False
+        windows.window_for_pid = None
+        launcher.process.exit_code = 1
+
+        await asyncio.wait_for(notified.wait(), timeout=0.2)
+
+        assert exited == [ActiveApp.NETFLIX]
+        assert launcher.process.terminated is False
+        assert manager.active_app is ActiveApp.LAUNCHER
+        await manager.shutdown()
+
+    asyncio.run(scenario())
+
+
+
 def test_watcher_rebinds_replacement_window_without_false_exit() -> None:
     async def scenario() -> None:
         exited: list[ActiveApp] = []
