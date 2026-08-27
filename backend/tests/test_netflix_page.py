@@ -1121,3 +1121,46 @@ def test_fullscreen_runtime_evaluate_uses_user_gesture_and_returns_context(
     assert context.stage is NetflixStage.WATCH
     assert len(connect.calls) == 1
     assert socket.closed
+
+
+@pytest.mark.parametrize(
+    ("command", "status", "focus"),
+    [
+        (Command.OK, "clicked", VALID_FOCUS),
+        (Command.PLAY_PAUSE, "playing", None),
+        (Command.FULLSCREEN, "fullscreen", None),
+    ],
+)
+def test_side_effect_runtime_actions_use_user_gesture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: Command,
+    status: str,
+    focus: dict[str, Any] | None,
+) -> None:
+    controller = make_controller(tmp_path)
+    result: dict[str, Any] = {
+        "ok": True,
+        "status": status,
+        "context": {
+            "stage": "watch",
+            "input_kind": "none",
+            "has_error": False,
+            "can_submit": False,
+            "focused_title": None,
+        },
+    }
+    if focus is not None:
+        result["focus"] = focus
+    socket = FakeSocket(runtime_result=result)
+    install_transport(monkeypatch, controller, [socket])
+
+    asyncio.run(controller.execute(command))
+
+    request = next(
+        message
+        for message in socket.sent
+        if message["method"] == "Runtime.evaluate"
+        and f'"{command.value}"' in message["params"]["expression"]
+    )
+    assert request["params"]["userGesture"] is True

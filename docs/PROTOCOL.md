@@ -89,7 +89,7 @@ Allowed command values:
 
 There is no raw keyboard, shell, script, URL, process, path, or arbitrary command message.
 
-`FULLSCREEN` is a typed application command, not a raw key. Netflix sends one user-gesture CDP fullscreen action to its ready video/player container; YouTube/News sends one forced fullscreen action for the current ready video identity; Browser maps it to Windows F11. Launcher and non-browser applications reject it with a fixed unsupported-command error.
+`FULLSCREEN` is a typed application command, not a raw key. Netflix sends one user-gesture CDP fullscreen action to its ready video/player container; YouTube/News sends one forced fullscreen action for the current ready video identity; Browser maps it to Windows F11. Launcher and non-browser applications reject it with a fixed unsupported-command error. Netflix also marks OK and PLAY_PAUSE runtime evaluation as user gestures. Direct play does not acknowledge success until the routed page contains a visible ready watch video that is no longer paused; one bounded `video.play()` request is allowed, and unknown outcomes never replay it.
 
 ## Bounded pointer action
 

@@ -301,6 +301,7 @@ def test_netflix_chrome_launches_as_standalone_app_window_without_positional_url
     assert not any(argument == netflix_url for argument in argv)
     assert argv.count("--start-fullscreen") == 1
     assert argv.count("--disable-extensions") == 1
+    assert argv.count("--autoplay-policy=no-user-gesture-required") == 1
     assert argv.count("--remote-debugging-address=127.0.0.1") == 1
     assert argv.count("--remote-debugging-port=9444") == 1
     assert any(

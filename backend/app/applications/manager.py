@@ -206,6 +206,7 @@ class ApplicationManager:
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-extensions",
+            "--autoplay-policy=no-user-gesture-required",
             *CHROME_RESTORE_SUPPRESS_ARGS,
             *TV_CHROME_NOTIFICATION_FLAGS,
             f"--app={url}",

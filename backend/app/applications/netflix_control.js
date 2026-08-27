@@ -384,13 +384,44 @@
     '[role="dialog"]',
   ].join(',')
 
-  const cardElements = () =>
-    [...document.querySelectorAll(CARD_SELECTOR)].filter(
-      (element) =>
-        element instanceof HTMLElement &&
-        visible(element) &&
-        !element.closest(CARD_EXCLUSION_SELECTOR),
-    )
+  const canonicalCard = (element) => {
+    let card = element instanceof HTMLElement ? element.closest(CARD_SELECTOR) : null
+    while (card instanceof HTMLElement) {
+      const parentCard = card.parentElement?.closest(CARD_SELECTOR)
+      if (!(parentCard instanceof HTMLElement)) break
+      if (railContainer(parentCard) !== railContainer(card)) break
+      card = parentCard
+    }
+    return card
+  }
+
+  const cardElements = () => {
+    const cards = []
+    for (const candidate of document.querySelectorAll(CARD_SELECTOR)) {
+      const card = canonicalCard(candidate)
+      if (
+        !(card instanceof HTMLElement) ||
+        cards.includes(card) ||
+        !visible(card) ||
+        card.closest(CARD_EXCLUSION_SELECTOR)
+      ) {
+        continue
+      }
+      const rect = card.getBoundingClientRect()
+      const duplicate = cards.some((existing) => {
+        if (railContainer(existing) !== railContainer(card)) return false
+        const existingRect = existing.getBoundingClientRect()
+        return (
+          Math.abs(existingRect.left - rect.left) <= 1 &&
+          Math.abs(existingRect.top - rect.top) <= 1 &&
+          Math.abs(existingRect.right - rect.right) <= 1 &&
+          Math.abs(existingRect.bottom - rect.bottom) <= 1
+        )
+      })
+      if (!duplicate) cards.push(card)
+    }
+    return cards
+  }
 
   const settle = async (predicate, timeoutMs) => {
     const deadline = performance.now() + timeoutMs
@@ -447,7 +478,7 @@
     before.input_kind !== after.input_kind ||
     before.has_error !== after.has_error
 
-  const readyWatchContext = () => {
+  const readyWatchPlayback = () => {
     const context = netflixContext()
     if (context.stage !== 'watch') return null
     const video = [...document.querySelectorAll('video')].find(
@@ -456,7 +487,28 @@
         visible(element) &&
         element.readyState >= 2,
     )
-    return video ? context : null
+    return video ? { context, video } : null
+  }
+
+  const settlePlayingWatchContext = async (timeoutMs = 3000) => {
+    const deadline = performance.now() + timeoutMs
+    let playRequested = false
+    while (performance.now() < deadline) {
+      const playback = readyWatchPlayback()
+      if (playback) {
+        if (playback.video.paused && !playRequested) {
+          playRequested = true
+          try {
+            await playback.video.play()
+          } catch {
+            return null
+          }
+        }
+        if (!playback.video.paused) return playback.context
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    return null
   }
 
   const focusResult = (target, status, elements) => {
@@ -588,7 +640,7 @@
   }
 
   const directionalTarget = (elements, current, action) => {
-    const currentCard = current.closest(CARD_SELECTOR)
+    const currentCard = canonicalCard(current)
     if (currentCard instanceof HTMLElement) {
       const cards = cardElements()
       const currentRail = railContainer(currentCard)
@@ -800,8 +852,7 @@
     const errorField = loginErrorTarget(elements)
     const active = document.activeElement
     const current = active instanceof HTMLElement && elements.includes(active) ? active : null
-    const activeCard =
-      active instanceof HTMLElement ? active.closest(CARD_SELECTOR) : null
+    const activeCard = canonicalCard(active)
     if (
       errorField &&
       (!current || action === 'FOCUS_PRIMARY' || action === 'FOCUS_EDITABLE')
@@ -835,24 +886,21 @@
         const existingPlay = visiblePlayButton(activeCard)
         if (existingPlay instanceof HTMLElement) {
           existingPlay.click()
-          const context = await settle(() => readyWatchContext(), 1200)
+          const context = await settlePlayingWatchContext()
           return context
             ? success('playing', { focus: currentFocus }, context)
             : error('netflix_direct_play_unavailable')
         }
-        const previousOverlays = new Set(visibleOverlays())
         activeCard.click()
         const detailPlay = await settle(() => {
-          const overlay = visibleOverlays()
-            .filter((candidate) => !previousOverlays.has(candidate))
-            .at(-1)
+          const overlay = visibleOverlays().at(-1)
           return overlay ? visiblePlayButton(overlay) : null
         }, 1200)
         if (!(detailPlay instanceof HTMLElement)) {
           return error('netflix_direct_play_unavailable')
         }
         detailPlay.click()
-        const context = await settle(() => readyWatchContext(), 1200)
+        const context = await settlePlayingWatchContext()
         return context
           ? success('playing', { focus: currentFocus }, context)
           : error('netflix_direct_play_unavailable')

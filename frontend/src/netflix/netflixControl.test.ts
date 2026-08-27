@@ -64,6 +64,7 @@ function setReadyVideo(): void {
   const video = document.querySelector('video') as HTMLVideoElement
   setRect(video, 20, 20, 640, 360)
   Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+  Object.defineProperty(video, 'paused', { configurable: true, value: false })
 }
 
 function setSequentialRects(selector = 'button,a,input,textarea,[tabindex],video'): void {
@@ -910,9 +911,7 @@ describe('Netflix DOM control runtime', () => {
       setTimeout(() => {
         window.history.replaceState({}, '', '/watch/next')
         document.body.innerHTML = '<video></video>'
-        const video = document.querySelector('video') as HTMLVideoElement
-        setRect(video, 20, 20, 640, 360)
-        Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+        setReadyVideo()
       }, 80)
     })
 
@@ -1034,5 +1033,117 @@ describe('Netflix DOM control runtime', () => {
       code: 'netflix_fullscreen_unavailable',
     })
     expect(requestFullscreen).not.toHaveBeenCalled()
+  })
+
+  it('deduplicates nested cards and advances through five logical cards in order', async () => {
+    document.body.innerHTML = `
+      <div class="lolomoRow">
+        ${[1, 2, 3, 4, 5]
+          .map(
+            (index) =>
+              `<div class="title-card" tabindex="0" data-index="${index}"><div class="slider-item" tabindex="0">${index}</div></div>`,
+          )
+          .join('')}
+      </div>
+    `
+    const cards = [...document.querySelectorAll('.title-card')]
+    const nested = [...document.querySelectorAll('.slider-item')]
+    cards.forEach((card, index) => setRect(card, index * 180, 80))
+    nested.forEach((card, index) => setRect(card, index * 180 + 10, 80))
+    ;(nested[0] as HTMLElement).focus()
+
+    for (const expected of [2, 3, 4, 5]) {
+      await runtime().run('NAV_RIGHT', null)
+      expect(document.activeElement?.textContent?.trim()).toBe(String(expected))
+    }
+  })
+
+  it('autoplays the ready watch video before direct-play success', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = `
+      <div class="lolomoRow">
+        <div class="title-card" tabindex="0">Example <button>Play</button></div>
+      </div>
+    `
+    const card = document.querySelector('.title-card') as HTMLElement
+    const button = document.querySelector('button') as HTMLButtonElement
+    setRect(card, 20, 80)
+    setRect(button, 40, 90)
+    card.focus()
+    let paused = true
+    let playCalls = 0
+    const click = vi.spyOn(button, 'click').mockImplementation(() => {
+      setTimeout(() => {
+        window.history.replaceState({}, '', '/watch/autoplay')
+        document.body.innerHTML = '<video></video>'
+        const video = document.querySelector('video') as HTMLVideoElement
+        setRect(video, 20, 20, 640, 360)
+        Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+        Object.defineProperty(video, 'paused', {
+          configurable: true,
+          get: () => paused,
+        })
+        const playVideo = async () => {
+          playCalls += 1
+          paused = false
+        }
+        Object.defineProperty(video, 'play', {
+          configurable: true,
+          value: playVideo,
+        })
+      }, 20)
+    })
+
+    const pending = runtime().run('OK', null)
+    await vi.runAllTimersAsync()
+    const result = await pending
+    vi.useRealTimers()
+
+    expect(click).toHaveBeenCalledOnce()
+    expect(playCalls).toBe(1)
+    expect(result).toMatchObject({
+      ok: true,
+      status: 'playing',
+      context: { stage: 'watch' },
+    })
+  })
+
+  it('fails direct play when the routed ready video remains paused', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = `
+      <div class="lolomoRow">
+        <div class="title-card" tabindex="0">Example <button>Play</button></div>
+      </div>
+    `
+    const card = document.querySelector('.title-card') as HTMLElement
+    const button = document.querySelector('button') as HTMLButtonElement
+    setRect(card, 20, 80)
+    setRect(button, 40, 90)
+    card.focus()
+    const play = vi.fn().mockResolvedValue(undefined)
+    const click = vi.spyOn(button, 'click').mockImplementation(() => {
+      setTimeout(() => {
+        window.history.replaceState({}, '', '/watch/still-paused')
+        document.body.innerHTML = '<video></video>'
+        const video = document.querySelector('video') as HTMLVideoElement
+        setRect(video, 20, 20, 640, 360)
+        Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+        Object.defineProperty(video, 'paused', { configurable: true, value: true })
+        Object.defineProperty(video, 'play', { configurable: true, value: play })
+      }, 20)
+    })
+
+    const pending = runtime().run('OK', null)
+    await vi.runAllTimersAsync()
+    const result = await pending
+    vi.useRealTimers()
+
+    expect(result).toEqual({
+      ok: false,
+      status: 'error',
+      code: 'netflix_direct_play_unavailable',
+    })
+    expect(click).toHaveBeenCalledOnce()
+    expect(play).toHaveBeenCalledOnce()
   })
 })

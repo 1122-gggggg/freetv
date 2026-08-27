@@ -152,6 +152,44 @@ describe('RemotePage', () => {
     expect(socketMock.sendText).toHaveBeenCalledWith(text, false)
   })
 
+  it('does not repeat Netflix browse navigation on a natural 500ms press', () => {
+    vi.useFakeTimers()
+    socketMock.state = netflixState({
+      stage: 'browse',
+      input_kind: 'none',
+      has_error: false,
+      can_submit: false,
+      focused_title: 'Example',
+    })
+    const view = render(remoteElement())
+    let right = screen.getByRole('button', { name: '右' })
+
+    fireEvent.pointerDown(right, { button: 0, pointerId: 1 })
+    vi.advanceTimersByTime(500)
+    fireEvent.pointerUp(right, { button: 0, pointerId: 1 })
+    fireEvent.click(right)
+
+    expect(
+      socketMock.sendCommand.mock.calls.filter(([command]) => command === 'NAV_RIGHT'),
+    ).toHaveLength(1)
+
+    socketMock.sendCommand.mockClear()
+    socketMock.state = {
+      ...netflixState(null),
+      active_app: 'youtube',
+    }
+    view.rerender(remoteElement())
+    right = screen.getByRole('button', { name: '右' })
+    fireEvent.pointerDown(right, { button: 0, pointerId: 2 })
+    vi.advanceTimersByTime(500)
+    fireEvent.pointerUp(right, { button: 0, pointerId: 2 })
+
+    expect(
+      socketMock.sendCommand.mock.calls.filter(([command]) => command === 'NAV_RIGHT')
+        .length,
+    ).toBeGreaterThanOrEqual(2)
+  })
+
   it('sends search_video for 搜片', () => {
     render(
       <RemotePage

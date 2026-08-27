@@ -209,6 +209,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   const netflixInput = netflixContext
     ? NETFLIX_INPUT_PRESENTATION[netflixContext.input_kind]
     : undefined
+  const repeatDirectionalNavigation = netflixContext?.stage !== 'browse'
   const netflixSemanticKey = JSON.stringify([
     status === 'connected' ? (state?.active_app ?? null) : status,
     netflixContext?.stage ?? null,
@@ -433,11 +434,11 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       ) : null}
 
       <section className="remote-direction-pad" aria-label="方向鍵">
-        <CommandButton command="NAV_UP" label="上" onCommand={command} className="direction-up" disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="NAV_LEFT" label="左" onCommand={command} className="direction-left" disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="NAV_UP" label="上" onCommand={command} className="direction-up" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
+        <CommandButton command="NAV_LEFT" label="左" onCommand={command} className="direction-left" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
         <CommandButton command="OK" label="確定" onCommand={command} className="direction-ok" disabled={controlsDisabled} />
-        <CommandButton command="NAV_RIGHT" label="右" onCommand={command} className="direction-right" disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="NAV_DOWN" label="下" onCommand={command} className="direction-down" disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="NAV_RIGHT" label="右" onCommand={command} className="direction-right" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
+        <CommandButton command="NAV_DOWN" label="下" onCommand={command} className="direction-down" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
       </section>
 
       <section className="remote-grid two-column" aria-label="主要按鍵">

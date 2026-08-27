@@ -352,7 +352,11 @@ class NetflixPageController:
             socket,
             expression,
             outcome_unknown_on_failure=action not in IDEMPOTENT_ACTIONS,
-            user_gesture=action is NetflixAction.FULLSCREEN,
+            user_gesture=action in {
+                NetflixAction.OK,
+                NetflixAction.PLAY_PAUSE,
+                NetflixAction.FULLSCREEN,
+            },
         )
 
     def _accept_runtime_result(self, result: Any) -> NetflixContext:
