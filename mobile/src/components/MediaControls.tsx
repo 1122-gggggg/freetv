@@ -70,6 +70,58 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
         </TouchableOpacity>
       </View>
 
+      <View style={styles.row}>
+        <TouchableOpacity
+          style={[styles.btn, styles.speedBtn, disabled && styles.disabledControl]}
+          onPress={() => trigger('SEEK_BACKWARD_5')}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="倒退五秒"
+          accessibilityHint="將目前影片倒退五秒。"
+          accessibilityState={{ disabled: Boolean(disabled) }}
+        >
+          <Text style={styles.btnText}>−5 秒</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.btn, styles.speedBtn, disabled && styles.disabledControl]}
+          onPress={() => trigger('SEEK_FORWARD_5')}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="快轉五秒"
+          accessibilityHint="將目前影片快轉五秒。"
+          accessibilityState={{ disabled: Boolean(disabled) }}
+        >
+          <Text style={styles.btnText}>＋5 秒</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.row}>
+        <TouchableOpacity
+          style={[styles.btn, styles.speedBtn, disabled && styles.disabledControl]}
+          onPress={() => trigger('SPEED_DOWN')}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="降低倍速"
+          accessibilityHint="降低目前影片的播放速度。"
+          accessibilityState={{ disabled: Boolean(disabled) }}
+        >
+          <Text style={styles.btnText}>倍速 −</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.btn, styles.speedBtn, disabled && styles.disabledControl]}
+          onPress={() => trigger('SPEED_UP')}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="提高倍速"
+          accessibilityHint="提高目前影片的播放速度。"
+          accessibilityState={{ disabled: Boolean(disabled) }}
+        >
+          <Text style={styles.btnText}>倍速 ＋</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Volume & Channel Row */}
       <View style={styles.row}>
         <TouchableOpacity
@@ -191,6 +243,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#202a3c',
   },
   fullscreenBtn: {
+    backgroundColor: '#202a3c',
+  },
+  speedBtn: {
     backgroundColor: '#202a3c',
   },
   volBtn: {

@@ -64,49 +64,6 @@ export function AppLaunchers({ onCommand, activeApp, disabled }: AppLaunchersPro
           <Text style={styles.label}>Netflix</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[
-            styles.tile,
-            activeApp === 'live_tv' && styles.activeTile,
-            disabled && styles.disabledControl,
-          ]}
-          onPress={() => launch('OPEN_LIVE_TV')}
-          disabled={disabled}
-          accessibilityRole="button"
-          accessibilityLabel="開啟電視"
-          accessibilityHint="在電視上啟動電視。"
-          accessibilityState={{
-            disabled: Boolean(disabled),
-            selected: activeApp === 'live_tv',
-          }}
-        >
-          <View style={[styles.badge, styles.tvBadge]}>
-            <Text style={styles.badgeText}>電視</Text>
-          </View>
-          <Text style={styles.label}>電視</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.tile,
-            activeApp === 'browser' && styles.activeTile,
-            disabled && styles.disabledControl,
-          ]}
-          onPress={() => launch('OPEN_BROWSER')}
-          disabled={disabled}
-          accessibilityRole="button"
-          accessibilityLabel="開啟瀏覽器"
-          accessibilityHint="在電視上啟動瀏覽器。"
-          accessibilityState={{
-            disabled: Boolean(disabled),
-            selected: activeApp === 'browser',
-          }}
-        >
-          <View style={[styles.badge, styles.webBadge]}>
-            <Text style={styles.badgeText}>網頁</Text>
-          </View>
-          <Text style={styles.label}>瀏覽器</Text>
-        </TouchableOpacity>
       </View>
     </View>
   )
@@ -158,12 +115,6 @@ const styles = StyleSheet.create({
   },
   nfBadge: {
     backgroundColor: '#e50914',
-  },
-  tvBadge: {
-    backgroundColor: '#3b82f6',
-  },
-  webBadge: {
-    backgroundColor: '#f59e0b',
   },
   badgeText: {
     color: '#ffffff',

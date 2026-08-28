@@ -108,6 +108,10 @@ describe('RemotePage', () => {
     expect(screen.getByRole('button', { name: '返回' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '主畫面' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '全螢幕' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '倍速 +' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '倍速 −' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '倒退 5 秒' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '快轉 5 秒' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '頻道 +' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '音量 +' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '語音' })).toBeTruthy()
@@ -132,7 +136,20 @@ describe('RemotePage', () => {
       />,
     )
 
-    for (const label of ['上', '下', '左', '右', '確定', '返回', '播放／暫停', '全螢幕']) {
+    for (const label of [
+      '上',
+      '下',
+      '左',
+      '右',
+      '確定',
+      '返回',
+      '播放／暫停',
+      '倒退 5 秒',
+      '快轉 5 秒',
+      '倍速 −',
+      '倍速 +',
+      '全螢幕',
+    ]) {
       fireEvent.click(screen.getByRole('button', { name: label }))
     }
     const text = 'x'.repeat(256)
@@ -147,6 +164,10 @@ describe('RemotePage', () => {
       'OK',
       'BACK',
       'PLAY_PAUSE',
+      'SEEK_BACKWARD_5',
+      'SEEK_FORWARD_5',
+      'SPEED_DOWN',
+      'SPEED_UP',
       'FULLSCREEN',
     ])
     expect(socketMock.sendText).toHaveBeenCalledWith(text, false)

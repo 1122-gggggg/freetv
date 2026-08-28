@@ -64,13 +64,19 @@ describe('validateControllerTarget', () => {
     })
   })
 
-  it('throws for invalid IPv4 host', () => {
-    expect(() => validateControllerTarget('pc-tv.local', '8765')).toThrow(
-      '請輸入有效的 IPv4 位址（例如 192.168.1.10）。',
-    )
-    expect(() => validateControllerTarget('', '8765')).toThrow(
-      '請輸入有效的 IPv4 位址（例如 192.168.1.10）。',
-    )
+  it('accepts a secure tunnel hostname', () => {
+    expect(validateControllerTarget('example.trycloudflare.com', 443)).toEqual({
+      host: 'example.trycloudflare.com',
+      port: 443,
+    })
+  })
+
+  it('throws for invalid hosts', () => {
+    for (const host of ['', 'https://example.com', '-example.com', '192.168.1.256']) {
+      expect(() => validateControllerTarget(host, '8765')).toThrow(
+        '請輸入有效的 IPv4 位址或安全網域名稱。',
+      )
+    }
   })
 
   it('throws for invalid port', () => {
@@ -81,16 +87,23 @@ describe('validateControllerTarget', () => {
 })
 
 describe('controllerOrigin', () => {
-  it('builds the exact HTTPS origin for a controller endpoint', () => {
+  it('builds the exact HTTPS origin for controller endpoints', () => {
     expect(controllerOrigin('192.168.1.42', 8765)).toBe('https://192.168.1.42:8765')
+    expect(controllerOrigin('example.trycloudflare.com', 443)).toBe(
+      'https://example.trycloudflare.com',
+    )
   })
 
   it('rejects an authority that could change the request destination', () => {
     expect(() => controllerOrigin('192.168.1.42:444', 8765)).toThrow('控制器主機或連接埠無效。')
     expect(() => controllerOrigin('https://192.168.1.42', 8765)).toThrow('控制器主機或連接埠無效。')
   })
-  it('rejects hostnames and malformed IPv4 controller addresses', () => {
-    expect(() => controllerOrigin('pc-tv.local', 8765)).toThrow('控制器主機或連接埠無效。')
-    expect(() => controllerOrigin('192.168.1.256', 8765)).toThrow('控制器主機或連接埠無效。')
+  it('rejects malformed hostnames and IPv4 controller addresses', () => {
+    expect(() => controllerOrigin('-pc-tv.local', 8765)).toThrow(
+      '控制器主機或連接埠無效。',
+    )
+    expect(() => controllerOrigin('192.168.1.256', 8765)).toThrow(
+      '控制器主機或連接埠無效。',
+    )
   })
 })

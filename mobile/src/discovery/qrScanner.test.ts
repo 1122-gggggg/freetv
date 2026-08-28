@@ -28,6 +28,17 @@ describe('parsePairingPayload', () => {
     })
   })
 
+  it('uses the standard HTTPS port for a public tunnel URL', () => {
+    const result = parsePairingPayload(
+      'https://example.trycloudflare.com/remote?code=112233',
+    )
+    expect(result).toEqual({
+      host: 'example.trycloudflare.com',
+      port: 443,
+      code: '112233',
+    })
+  })
+
   it('returns null for invalid inputs', () => {
     expect(parsePairingPayload('')).toBeNull()
     expect(parsePairingPayload('invalid text')).toBeNull()

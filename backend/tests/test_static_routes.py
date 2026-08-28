@@ -12,9 +12,7 @@ from app.main import create_app
 def test_tv_and_remote_routes_serve_the_production_single_page_application() -> None:
     app = create_app(settings=Settings())
 
-    with TestClient(
-        app, base_url="https://127.0.0.1:8765", client=("127.0.0.1", 50_000)
-    ) as client:
+    with TestClient(app, base_url="https://127.0.0.1:8765", client=("127.0.0.1", 50_000)) as client:
         tv = client.get("/tv")
         remote = client.get("/remote", headers={"host": "127.0.0.1:8765"})
 
@@ -26,14 +24,14 @@ def test_tv_and_remote_routes_serve_the_production_single_page_application() -> 
     assert remote.headers["content-security-policy"] == "frame-ancestors 'none'"
     assert tv.headers["x-frame-options"] == "DENY"
     assert remote.headers["x-frame-options"] == "DENY"
+    assert tv.headers["cache-control"] == "no-store"
+    assert remote.headers["cache-control"] == "no-store"
 
 
 def test_remote_route_rejects_an_untrusted_host() -> None:
     app = create_app(settings=Settings())
 
-    with TestClient(
-        app, base_url="https://127.0.0.1:8765", client=("127.0.0.1", 50_000)
-    ) as client:
+    with TestClient(app, base_url="https://127.0.0.1:8765", client=("127.0.0.1", 50_000)) as client:
         response = client.get("/remote", headers={"host": "attacker.example:8765"})
 
     assert response.status_code == 403
@@ -49,14 +47,14 @@ def test_remote_route_serves_over_plain_http_to_a_lan_client(monkeypatch) -> Non
         "net_if_addrs",
         lambda: {
             "Wi-Fi": [
-                SimpleNamespace(
-                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
-                )
+                SimpleNamespace(family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0")
             ]
         },
     )
 
-    with TestClient(app, base_url="http://192.168.1.44:8765", client=("192.168.1.87", 50_000)) as client:
+    with TestClient(
+        app, base_url="http://192.168.1.44:8765", client=("192.168.1.87", 50_000)
+    ) as client:
         response = client.get("/remote", headers={"host": "192.168.1.44:8765"})
 
     assert response.status_code == 200
@@ -83,4 +81,3 @@ def test_remote_route_rejects_public_peer_without_tunnel_host(monkeypatch) -> No
 
     assert response.status_code == 403
     assert response.json()["detail"] == "遠端連線必須來自控制器區網。"
-

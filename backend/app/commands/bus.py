@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
+from app.applications.playback_rate import format_playback_rate
 from app.commands.ports import (
     ApplicationPort,
     CommandExecutionError,
@@ -41,16 +42,13 @@ _LAUNCH_TARGETS: dict[Command, ActiveApp] = {
 
 _FOCUS_TRANSITIONS: dict[tuple[LauncherTile, Command], LauncherTile] = {
     (LauncherTile.YOUTUBE, Command.NAV_RIGHT): LauncherTile.NETFLIX,
+    (LauncherTile.YOUTUBE, Command.NAV_DOWN): LauncherTile.NEWS,
     (LauncherTile.NETFLIX, Command.NAV_LEFT): LauncherTile.YOUTUBE,
-    (LauncherTile.LIVE_TV, Command.NAV_RIGHT): LauncherTile.BROWSER,
-    (LauncherTile.BROWSER, Command.NAV_LEFT): LauncherTile.LIVE_TV,
-    (LauncherTile.YOUTUBE, Command.NAV_DOWN): LauncherTile.LIVE_TV,
-    (LauncherTile.NETFLIX, Command.NAV_DOWN): LauncherTile.BROWSER,
-    (LauncherTile.LIVE_TV, Command.NAV_UP): LauncherTile.YOUTUBE,
-    (LauncherTile.BROWSER, Command.NAV_UP): LauncherTile.NETFLIX,
-    (LauncherTile.LIVE_TV, Command.NAV_DOWN): LauncherTile.SETTINGS,
-    (LauncherTile.BROWSER, Command.NAV_DOWN): LauncherTile.SETTINGS,
-    (LauncherTile.SETTINGS, Command.NAV_UP): LauncherTile.LIVE_TV,
+    (LauncherTile.NETFLIX, Command.NAV_DOWN): LauncherTile.SETTINGS,
+    (LauncherTile.NEWS, Command.NAV_UP): LauncherTile.YOUTUBE,
+    (LauncherTile.NEWS, Command.NAV_RIGHT): LauncherTile.SETTINGS,
+    (LauncherTile.SETTINGS, Command.NAV_UP): LauncherTile.NETFLIX,
+    (LauncherTile.SETTINGS, Command.NAV_LEFT): LauncherTile.NEWS,
 }
 
 
@@ -74,6 +72,7 @@ class CommandBus:
         self._power = power
         self._news = news
         self._command_lock = asyncio.Lock()
+
     async def dispatch_command(self, command: Command) -> CommandOutcome:
         async with self._command_lock:
             try:
@@ -131,7 +130,6 @@ class CommandBus:
                 return await self._failure(error)
             except Exception:
                 return await self._unknown_failure()
-
 
     async def dispatch_search(self, message: SearchVideoMessage) -> CommandOutcome:
         async with self._command_lock:
@@ -280,7 +278,6 @@ class CommandBus:
             )
             return CommandOutcome(True, state)
 
-
         if command in {Command.NAV_UP, Command.NAV_DOWN, Command.NAV_LEFT, Command.NAV_RIGHT}:
             return await self._navigate(current, command)
 
@@ -346,6 +343,31 @@ class CommandBus:
             level, muted = await self._volume.toggle_mute()
             return CommandOutcome(True, await self._success_state(volume=level, muted=muted))
 
+        if command in {Command.SPEED_UP, Command.SPEED_DOWN}:
+            self._require_external_input_target(current)
+            if current.active_app is ActiveApp.BROWSER:
+                raise CommandExecutionError(
+                    "command_not_supported",
+                    "目前應用程式不支援這個操作。",
+                )
+            direction = 1 if command is Command.SPEED_UP else -1
+            rate = await self._applications.adjust_playback_rate(direction)
+            state = await self._success_state(status_message=f"倍速 {format_playback_rate(rate)}×")
+            return CommandOutcome(True, state)
+
+        if command in {Command.SEEK_FORWARD_5, Command.SEEK_BACKWARD_5}:
+            self._require_external_input_target(current)
+            if current.active_app is ActiveApp.BROWSER:
+                raise CommandExecutionError(
+                    "command_not_supported",
+                    "目前應用程式不支援這個操作。",
+                )
+            direction = 1 if command is Command.SEEK_FORWARD_5 else -1
+            await self._applications.seek(direction)
+            status = "快轉 5 秒" if direction > 0 else "倒退 5 秒"
+            state = await self._success_state(status_message=status)
+            return CommandOutcome(True, state)
+
         if current.active_app in {
             ActiveApp.YOUTUBE,
             ActiveApp.NETFLIX,
@@ -361,9 +383,7 @@ class CommandBus:
                 )
                 return CommandOutcome(True, state)
             return await self._passive_success()
-        raise CommandExecutionError(
-            "command_not_supported", "目前應用程式不支援這個操作。"
-        )
+        raise CommandExecutionError("command_not_supported", "目前應用程式不支援這個操作。")
 
     async def _navigate(self, current: ControllerState, command: Command) -> CommandOutcome:
         if current.active_app is not ActiveApp.LAUNCHER:
@@ -382,9 +402,7 @@ class CommandBus:
                     )
                     return CommandOutcome(True, state)
                 return await self._passive_success()
-            raise CommandExecutionError(
-                "command_not_supported", "目前應用程式不支援這個操作。"
-            )
+            raise CommandExecutionError("command_not_supported", "目前應用程式不支援這個操作。")
 
         focused_tile = _FOCUS_TRANSITIONS.get(
             (current.focused_tile, command),

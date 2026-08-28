@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from collections.abc import Callable
 
 from app.applications.adblock import ADBLOCK_EXTENSION_ID, ADBLOCK_YOUTUBE_EXTENSION_ID
@@ -28,6 +29,8 @@ def force_install_entries() -> list[tuple[str, str]]:
 
 def apply_force_install(writer: Callable[[str, str], None] | None = None) -> list[tuple[str, str]]:
     entries = force_install_entries()
+    if writer is None and os.name != "nt":
+        return entries
     write = writer or _write_hkcu_string
     for name, value in entries:
         write(name, value)

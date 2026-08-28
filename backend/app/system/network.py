@@ -5,7 +5,7 @@ import os
 import socket
 import subprocess
 from dataclasses import dataclass
-from ipaddress import IPv4Address
+from ipaddress import IPv4Address, IPv4Network
 from time import monotonic
 
 import psutil
@@ -16,6 +16,27 @@ _PHYSICAL_ADAPTER_COMMAND = (
     "Get-NetAdapter -Physical | "
     "Where-Object { [int]$_.NdisPhysicalMedium -in 14, 9 } | "
     'ForEach-Object { "$($_.ifIndex)`t$($_.Name)" }'
+)
+_VIRTUAL_INTERFACE_PREFIXES = (
+    "lo",
+    "docker",
+    "br-",
+    "veth",
+    "virbr",
+    "cni",
+    "flannel",
+    "cali",
+    "tun",
+    "tap",
+    "utun",
+    "awdl",
+    "llw",
+    "anpi",
+    "vmnet",
+    "vboxnet",
+    "wg",
+    "zt",
+    "tailscale",
 )
 _cached_physical_interfaces: tuple[PhysicalLanInterface, ...] = ()
 _cache_valid_until = 0.0
@@ -38,15 +59,14 @@ class _SockAddrIn(ctypes.Structure):
 
 def physical_lan_interfaces() -> tuple[PhysicalLanInterface, ...]:
     """Returns physical Ethernet/Wi-Fi interfaces, cached briefly."""
-    if os.name != "nt":
-        return ()
-
     global _cached_physical_interfaces, _cache_valid_until
     now = monotonic()
     if now < _cache_valid_until:
         return _cached_physical_interfaces
-
-    _cached_physical_interfaces = _windows_physical_lan_interfaces()
+    if os.name == "nt":
+        _cached_physical_interfaces = _windows_physical_lan_interfaces()
+    else:
+        _cached_physical_interfaces = _posix_physical_lan_interfaces()
     _cache_valid_until = now + _PHYSICAL_ADAPTER_CACHE_SECONDS
     return _cached_physical_interfaces
 
@@ -77,11 +97,13 @@ def eligible_lan_interface_names() -> frozenset[str]:
 
 
 def is_eligible_lan_peer(address: IPv4Address) -> bool:
-    """Checks that Windows routes a peer through a currently up physical LAN interface."""
-    interface_index = _windows_best_interface_index(address)
-    return interface_index is not None and any(
-        interface.index == interface_index for interface in eligible_lan_interfaces()
-    )
+    """Checks that a peer is reachable over a currently up physical LAN interface."""
+    if os.name == "nt":
+        interface_index = _windows_best_interface_index(address)
+        return interface_index is not None and any(
+            interface.index == interface_index for interface in eligible_lan_interfaces()
+        )
+    return _posix_peer_on_eligible_subnet(address)
 
 
 def _windows_physical_lan_interfaces() -> tuple[PhysicalLanInterface, ...]:
@@ -139,3 +161,62 @@ def _windows_best_interface_index(address: IPv4Address) -> int | None:
     if get_best_interface(ctypes.byref(destination), ctypes.byref(interface_index)) != 0:
         return None
     return int(interface_index.value)
+
+
+def _is_virtual_interface(name: str) -> bool:
+    lowered = name.casefold()
+    return any(
+        lowered == prefix or lowered.startswith(prefix) for prefix in _VIRTUAL_INTERFACE_PREFIXES
+    )
+
+
+def _posix_physical_lan_interfaces() -> tuple[PhysicalLanInterface, ...]:
+    try:
+        stats = psutil.net_if_stats()
+    except OSError:
+        return ()
+    interfaces: list[PhysicalLanInterface] = []
+    for name in stats:
+        if _is_virtual_interface(name):
+            continue
+        try:
+            index = socket.if_nametoindex(name)
+        except OSError:
+            index = len(interfaces) + 1
+        if index > 0:
+            interfaces.append(PhysicalLanInterface(index=index, name=name.casefold()))
+    return tuple(interfaces)
+
+
+def _posix_peer_on_eligible_subnet(address: IPv4Address) -> bool:
+    names = eligible_lan_interface_names()
+    if not names:
+        return False
+    try:
+        interfaces = psutil.net_if_addrs()
+    except OSError:
+        return False
+    for interface_name, interface_addresses in interfaces.items():
+        if interface_name.casefold() not in names:
+            continue
+        for interface_address in interface_addresses:
+            if getattr(interface_address, "family", None) != socket.AF_INET:
+                continue
+            raw_address = getattr(interface_address, "address", None)
+            if not raw_address:
+                continue
+            try:
+                local = IPv4Address(raw_address.split("%", maxsplit=1)[0])
+            except ValueError:
+                continue
+            raw_netmask = getattr(interface_address, "netmask", None)
+            if raw_netmask:
+                try:
+                    network = IPv4Network(f"{local}/{raw_netmask}", strict=False)
+                except ValueError:
+                    network = IPv4Network(f"{local}/32", strict=False)
+            else:
+                network = IPv4Network(f"{local}/32", strict=False)
+            if address in network:
+                return True
+    return False

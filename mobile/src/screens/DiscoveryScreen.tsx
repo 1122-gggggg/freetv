@@ -178,7 +178,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
     } catch (error) {
       Alert.alert(
         '端點無效',
-        error instanceof Error ? error.message : '請輸入有效的 IPv4 位址與連接埠。',
+        error instanceof Error ? error.message : '請輸入有效的 IPv4 位址、網域名稱與連接埠。',
       )
     }
   }
@@ -192,7 +192,7 @@ export function DiscoveryScreen({ onDeviceConnected }: DiscoveryScreenProps): Re
       <View style={styles.header}>
         <Text style={styles.eyebrow}>電腦電視盒</Text>
         <Text style={styles.title}>連接你的電視</Text>
-        <Text style={styles.subtitle}>掃描電視畫面上的 QR 碼，或在下方輸入區網 IP。</Text>
+        <Text style={styles.subtitle}>掃描電視畫面上的 QR 碼，或在下方輸入區網 IP／安全網域。</Text>
       </View>
 
       {/* Primary Action: QR Code Scan */}

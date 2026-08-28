@@ -9,7 +9,7 @@ import pytest
 
 from app.commands.ports import CommandExecutionError
 from app.player.channels import ChannelManager, load_channels
-from app.player.mpv import MpvController
+from app.player.mpv import MpvController, default_mpv_ipc_name
 
 
 @dataclass
@@ -178,3 +178,16 @@ def test_mpv_preserves_current_channel_when_load_command_fails(tmp_path) -> None
         assert channels.current.number == 1
 
     asyncio.run(scenario())
+
+
+def test_default_mpv_ipc_name_uses_unix_socket(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("app.player.mpv.os.name", "posix")
+    monkeypatch.setattr("app.player.mpv.tempfile.gettempdir", lambda: str(tmp_path))
+    name = default_mpv_ipc_name()
+    assert name.startswith(str(tmp_path))
+    assert name.endswith(".sock")
+
+
+def test_default_mpv_ipc_name_uses_windows_pipe(monkeypatch) -> None:
+    monkeypatch.setattr("app.player.mpv.os.name", "nt")
+    assert default_mpv_ipc_name().startswith(r"\\.\pipe\pc-tv-box-mpv-")

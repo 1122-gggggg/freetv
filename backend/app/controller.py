@@ -15,10 +15,7 @@ from app.player.mpv import MpvController
 from app.security.pairing import PairingService
 from app.security.tokens import TokenStore
 from app.state import StateStore
-from app.system.input import WindowsInputController
-from app.system.power import WindowsPowerController
-from app.system.volume import WindowsVolumeController
-from app.system.windows import WindowsWindowController
+from app.system.factory import build_platform_controllers
 
 
 class UnavailablePlayer:
@@ -79,14 +76,15 @@ class ControllerRuntime:
         if shutdown_applications is not None:
             await shutdown_applications()
 
+
 def build_runtime(settings: Settings) -> ControllerRuntime:
     executable_paths = resolve_application_paths(settings)
-    input_controller = WindowsInputController()
+    platform = build_platform_controllers()
     applications = ApplicationManager(
         settings,
         executable_paths=executable_paths,
-        windows=WindowsWindowController(),
-        input_controller=input_controller,
+        windows=platform.windows,
+        input_controller=platform.input,
     )
     player = _build_player(settings, executable_paths["mpv"])
     news = _build_news(settings)
@@ -103,9 +101,9 @@ def build_runtime(settings: Settings) -> ControllerRuntime:
         StateStore(),
         applications=applications,
         player=player,
-        volume=WindowsVolumeController(),
-        input_controller=input_controller,
-        power=WindowsPowerController(),
+        volume=platform.volume,
+        input_controller=platform.input,
+        power=platform.power,
         news=news,
     )
     advertiser = (
@@ -130,9 +128,7 @@ def _build_player(settings: Settings, mpv_path: Path | None) -> MpvController | 
     try:
         channels = ChannelManager(load_channels(channels_path))
     except ValueError:
-        return UnavailablePlayer(
-            "尚未設定可用的電視頻道。請更新 config/channels.json。"
-        )
+        return UnavailablePlayer("尚未設定可用的電視頻道。請更新 config/channels.json。")
     return MpvController(channels, mpv_path=mpv_path)
 
 
@@ -144,6 +140,4 @@ def _build_news(settings: Settings) -> NewsChannelManager | UnavailableNews:
         channels = load_news_channels(news_path)
         return NewsChannelManager(channels)
     except (ValueError, FileNotFoundError):
-        return UnavailableNews(
-            "尚未設定可用的新聞頻道。請更新 config/news.json。"
-        )
+        return UnavailableNews("尚未設定可用的新聞頻道。請更新 config/news.json。")

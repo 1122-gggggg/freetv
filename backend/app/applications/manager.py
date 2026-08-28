@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import subprocess
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -32,7 +33,6 @@ CHROME_RESTORE_SUPPRESS_ARGS = (
 )
 
 
-
 def mark_chrome_profile_clean_exit(profile_dir: Path) -> None:
     prefs_path = profile_dir / "Default" / "Preferences"
     if not prefs_path.is_file():
@@ -53,7 +53,6 @@ def mark_chrome_profile_clean_exit(profile_dir: Path) -> None:
         json.dumps(data, ensure_ascii=False, separators=(",", ":")),
         encoding="utf-8",
     )
-
 
 
 class ChildProcess(Protocol):
@@ -107,7 +106,6 @@ _NETFLIX_INITIALIZATION_RETRY_CODES = {
 }
 
 
-
 class ApplicationManager:
     def __init__(
         self,
@@ -156,7 +154,6 @@ class ApplicationManager:
         self._watch_interval_seconds = watch_interval_seconds
         self._watchers: dict[int, asyncio.Task[None]] = {}
 
-
     @property
     def active_app(self) -> ActiveApp:
         return self._active_app
@@ -187,6 +184,7 @@ class ApplicationManager:
             "--autoplay-policy=no-user-gesture-required",
             *CHROME_RESTORE_SUPPRESS_ARGS,
             *TV_CHROME_NOTIFICATION_FLAGS,
+            *ApplicationManager._posix_chrome_flags(),
             url,
         ]
 
@@ -210,9 +208,9 @@ class ApplicationManager:
             "--autoplay-policy=no-user-gesture-required",
             *CHROME_RESTORE_SUPPRESS_ARGS,
             *TV_CHROME_NOTIFICATION_FLAGS,
+            *ApplicationManager._posix_chrome_flags(),
             f"--app={url}",
         ]
-
 
     async def open(self, app: ActiveApp) -> NetflixContext | None:
         if app not in {ActiveApp.YOUTUBE, ActiveApp.NETFLIX, ActiveApp.BROWSER}:
@@ -234,7 +232,6 @@ class ApplicationManager:
             )
             await self._launch_and_track(app, arguments, "Netflix")
             return await self._initialize_netflix(reused=False)
-
 
         await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
         executable, url, app_name = self._launch_spec(app)
@@ -259,9 +256,7 @@ class ApplicationManager:
         arguments = self._chrome_kiosk_args(url)
         await self._launch_and_track(ActiveApp.YOUTUBE, arguments, "YouTube")
 
-    async def _launch_and_track(
-        self, app: ActiveApp, arguments: list[str], app_name: str
-    ) -> None:
+    async def _launch_and_track(self, app: ActiveApp, arguments: list[str], app_name: str) -> None:
         try:
             process = self._launch_process(arguments)
         except OSError as error:
@@ -280,10 +275,7 @@ class ApplicationManager:
                 self._children.append(tracked)
             raise CommandExecutionError(
                 "application_window_unavailable",
-                (
-                    f"無法取得控制器管理的{app_name}視窗。"
-                    f"請先關閉現有的{app_name}視窗再試一次。"
-                ),
+                (f"無法取得控制器管理的{app_name}視窗。請先關閉現有的{app_name}視窗再試一次。"),
             )
         self._windows.maximize(window_handle)
         if not self._tracked_window_is_owned(tracked):
@@ -311,6 +303,7 @@ class ApplicationManager:
         self._active_app = app
         log_event(logger, "application_launched", app=app.value, process_id=process.pid)
         self._start_watcher(tracked)
+
     async def return_home(self) -> None:
         await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
         self._minimize_current_window()
@@ -346,9 +339,9 @@ class ApplicationManager:
         current = self._current
         youtube_apps = (ActiveApp.YOUTUBE, ActiveApp.NEWS)
         closes_youtube = any(app in youtube_apps for app in apps)
-        has_youtube = (
-            current is not None and current.app in youtube_apps
-        ) or any(tracked.app in youtube_apps for tracked in self._children)
+        has_youtube = (current is not None and current.app in youtube_apps) or any(
+            tracked.app in youtube_apps for tracked in self._children
+        )
         if closes_youtube and has_youtube:
             await self._youtube_fullscreen.stop()
         kept: list[TrackedApplication] = []
@@ -369,12 +362,7 @@ class ApplicationManager:
         if current is not None and current.app in apps:
             self._current = None
 
-
-
-
-    async def type_text(
-        self, text: str, submit: bool = False
-    ) -> NetflixContext | None:
+    async def type_text(self, text: str, submit: bool = False) -> NetflixContext | None:
         self.require_input_target(self._active_app)
         if self._active_app is ActiveApp.NETFLIX:
             return await self._netflix_page.type_text(text, submit=submit)
@@ -437,6 +425,38 @@ class ApplicationManager:
         self._input.send_command(command)
         return None
 
+    async def adjust_playback_rate(self, direction: int) -> float:
+        self.require_input_target(self._active_app)
+        if self._active_app is ActiveApp.NETFLIX:
+            command = Command.SPEED_UP if direction > 0 else Command.SPEED_DOWN
+            await self._netflix_page.execute(command)
+            return self._netflix_page.last_playback_rate
+        if self._active_app in {ActiveApp.YOUTUBE, ActiveApp.NEWS}:
+            return await self._youtube_fullscreen.adjust_playback_rate(
+                self._debug_port,
+                1 if direction > 0 else -1,
+            )
+        raise CommandExecutionError(
+            "command_not_supported",
+            "目前應用程式不支援這個操作。",
+        )
+
+    async def seek(self, direction: int) -> None:
+        self.require_input_target(self._active_app)
+        if self._active_app is ActiveApp.NETFLIX:
+            command = Command.SEEK_FORWARD_5 if direction > 0 else Command.SEEK_BACKWARD_5
+            await self._netflix_page.execute(command)
+            return
+        if self._active_app in {ActiveApp.YOUTUBE, ActiveApp.NEWS}:
+            await self._youtube_fullscreen.seek(
+                self._debug_port,
+                1 if direction > 0 else -1,
+            )
+            return
+        raise CommandExecutionError(
+            "command_not_supported",
+            "目前應用程式不支援這個操作。",
+        )
 
     def require_input_target(self, app: ActiveApp) -> None:
         if app not in {
@@ -472,10 +492,7 @@ class ApplicationManager:
         if not self._windows.is_foreground(tracked.window_handle):
             raise CommandExecutionError(
                 "input_target_not_foreground",
-                (
-                    "請先把控制器開啟的應用程式切到前景，"
-                    "再使用遙控輸入。"
-                ),
+                ("請先把控制器開啟的應用程式切到前景，再使用遙控輸入。"),
             )
 
     async def shutdown(self) -> None:
@@ -602,12 +619,9 @@ class ApplicationManager:
                 return False
         except OSError:
             return False
-        if (
-            tracked.window_handle is not None
-            and self._windows.window_belongs_to_process(
-                tracked.window_handle,
-                tracked.process.pid,
-            )
+        if tracked.window_handle is not None and self._windows.window_belongs_to_process(
+            tracked.window_handle,
+            tracked.process.pid,
         ):
             return True
         replacement = self._windows.find_window_for_pid(tracked.process.pid, 0.0)
@@ -647,5 +661,14 @@ class ApplicationManager:
             return False
 
     @staticmethod
+    def _posix_chrome_flags() -> list[str]:
+        if os.name == "nt":
+            return []
+        return ["--password-store=basic", "--ozone-platform-hint=auto"]
+
+    @staticmethod
     def _default_process_launcher(arguments: list[str]) -> ChildProcess:
-        return subprocess.Popen(arguments)  # noqa: S603 - arguments are local typed settings only.
+        kwargs: dict[str, object] = {}
+        if os.name != "nt":
+            kwargs["start_new_session"] = True
+        return subprocess.Popen(arguments, **kwargs)  # noqa: S603 - arguments are local typed settings only.

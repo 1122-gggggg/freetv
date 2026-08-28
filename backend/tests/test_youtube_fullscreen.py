@@ -28,9 +28,7 @@ from app.commands.ports import CommandExecutionError
         ("https://example.com/watch?v=alpha", None),
     ],
 )
-def test_extract_video_identity_covers_supported_routes(
-    url: str, identity: str | None
-) -> None:
+def test_extract_video_identity_covers_supported_routes(url: str, identity: str | None) -> None:
     assert extract_video_identity(url) == identity
 
 
@@ -42,6 +40,10 @@ class FakeProbe:
     fullscreen_calls: list[tuple[int, str, bool]] = field(default_factory=list)
     fullscreen_result: bool = True
     fail_after_send: bool = False
+    rate_calls: list[tuple[int, int]] = field(default_factory=list)
+    rate_result: float = 1.25
+    seek_calls: list[tuple[int, int]] = field(default_factory=list)
+    seek_result: bool = True
 
     async def inspect(self, port: int) -> tuple[str | None, bool, bool]:
         assert port == 9222
@@ -54,6 +56,14 @@ class FakeProbe:
         if self.fail_after_send:
             raise TimeoutError
         return self.fullscreen_result
+
+    async def playback_rate(self, port: int, direction: int) -> float:
+        self.rate_calls.append((port, direction))
+        return self.rate_result
+
+    async def seek(self, port: int, direction: int) -> bool:
+        self.seek_calls.append((port, direction))
+        return self.seek_result
 
 
 @pytest.mark.parametrize(
@@ -132,18 +142,13 @@ def test_force_fullscreen_ignores_last_identity_once_and_updates_it() -> None:
 
 def test_force_fullscreen_rejects_missing_or_unready_video() -> None:
     async def scenario(inspection: tuple[str | None, bool, bool]) -> str:
-        controller = YoutubeFullscreenController(
-            probe=FakeProbe(inspections=[inspection])
-        )
+        controller = YoutubeFullscreenController(probe=FakeProbe(inspections=[inspection]))
         with pytest.raises(CommandExecutionError) as caught:
             await controller.force_fullscreen(9222)
         return caught.value.code
 
     assert asyncio.run(scenario((None, True, False))) == "youtube_video_unavailable"
-    assert (
-        asyncio.run(scenario(("watch:alpha", False, False)))
-        == "youtube_video_unavailable"
-    )
+    assert asyncio.run(scenario(("watch:alpha", False, False))) == "youtube_video_unavailable"
 
 
 def test_force_fullscreen_unknown_outcome_sends_only_once() -> None:
@@ -156,6 +161,28 @@ def test_force_fullscreen_unknown_outcome_sends_only_once() -> None:
 
     assert asyncio.run(scenario()) == [(9222, "watch:alpha", True)]
 
+
+def test_adjust_playback_rate_delegates_to_probe() -> None:
+    async def scenario() -> tuple[float, float, list[tuple[int, int]]]:
+        probe = FakeProbe()
+        controller = YoutubeFullscreenController(probe=probe)
+        faster = await controller.adjust_playback_rate(9222, 1)
+        probe.rate_result = 0.75
+        slower = await controller.adjust_playback_rate(9222, -1)
+        return faster, slower, probe.rate_calls
+
+    assert asyncio.run(scenario()) == (1.25, 0.75, [(9222, 1), (9222, -1)])
+
+
+def test_seek_delegates_to_probe() -> None:
+    async def scenario() -> list[tuple[int, int]]:
+        probe = FakeProbe()
+        controller = YoutubeFullscreenController(probe=probe)
+        await controller.seek(9222, -1)
+        await controller.seek(9222, 1)
+        return probe.seek_calls
+
+    assert asyncio.run(scenario()) == [(9222, -1), (9222, 1)]
 
 
 @dataclass
@@ -180,6 +207,12 @@ class CoalescingProbe:
         await self.release_fullscreen.wait()
         return True
 
+    async def playback_rate(self, port: int, direction: int) -> float:
+        raise AssertionError("playback rate must not be reached")
+
+    async def seek(self, port: int, direction: int) -> bool:
+        raise AssertionError("seek must not be reached")
+
 
 def test_auto_and_manual_fullscreen_coalesce_without_duplicate_request() -> None:
     async def scenario() -> tuple[bool, bool, list[tuple[int, str, bool]]]:
@@ -202,14 +235,14 @@ def test_auto_and_manual_fullscreen_coalesce_without_duplicate_request() -> None
 
 def test_force_fullscreen_rejects_second_session_identity_change() -> None:
     async def scenario() -> str:
-        controller = YoutubeFullscreenController(
-            probe=FakeProbe(fullscreen_result=False)
-        )
+        controller = YoutubeFullscreenController(probe=FakeProbe(fullscreen_result=False))
         with pytest.raises(CommandExecutionError) as caught:
             await controller.force_fullscreen(9222)
         return caught.value.code
 
     assert asyncio.run(scenario()) == "youtube_video_unavailable"
+
+
 @dataclass
 class BlockingProbe:
     entered: asyncio.Event = field(default_factory=asyncio.Event)
@@ -227,6 +260,12 @@ class BlockingProbe:
 
     async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> bool:
         raise AssertionError("fullscreen must not be reached")
+
+    async def playback_rate(self, port: int, direction: int) -> float:
+        raise AssertionError("playback rate must not be reached")
+
+    async def seek(self, port: int, direction: int) -> bool:
+        raise AssertionError("seek must not be reached")
 
 
 def test_start_and_stop_are_idempotent_and_stop_waits_for_the_task() -> None:
@@ -284,9 +323,7 @@ class FakeSocket:
 
     async def recv(self) -> str:
         request = self.requests[-1]
-        result: dict[str, object] = {
-            "result": {"type": "object", "value": self.value}
-        }
+        result: dict[str, object] = {"result": {"type": "object", "value": self.value}}
         if self.outer_exception:
             result["exceptionDetails"] = {"text": "unsafe evaluation failed"}
         return json.dumps({"id": request["id"], "result": result})
@@ -377,6 +414,44 @@ def test_short_cdp_probe_uses_localhost_and_closes_each_socket(
     assert "key" not in expression.lower()
 
 
+def test_short_cdp_probe_sets_playback_rate_with_user_gesture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    FakeAsyncClient.payload = [_youtube_target("ws://127.0.0.1:9222/devtools/page/alpha")]
+    connect = FakeConnect()
+    connect.contexts = [FakeSocketContext(FakeSocket(1.25))]
+    monkeypatch.setattr(fullscreen_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(fullscreen_module.websockets, "connect", connect)
+
+    rate = asyncio.run(ShortCdpYoutubeProbe(timeout=0.8).playback_rate(9222, 1))
+
+    assert rate == 1.25
+    request = connect.contexts[0].socket.requests[0]
+    assert request["params"]["userGesture"] is True
+    expression = request["params"]["expression"]
+    assert "video.playbackRate = next" in expression
+    assert "[0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]" in expression
+
+
+def test_short_cdp_probe_seeks_five_seconds_with_user_gesture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    FakeAsyncClient.payload = [_youtube_target("ws://127.0.0.1:9222/devtools/page/alpha")]
+    connect = FakeConnect()
+    connect.contexts = [FakeSocketContext(FakeSocket(True))]
+    monkeypatch.setattr(fullscreen_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(fullscreen_module.websockets, "connect", connect)
+
+    performed = asyncio.run(ShortCdpYoutubeProbe(timeout=0.8).seek(9222, -1))
+
+    assert performed
+    request = connect.contexts[0].socket.requests[0]
+    assert request["params"]["userGesture"] is True
+    expression = request["params"]["expression"]
+    assert "video.currentTime + -5" in expression
+    assert "video.currentTime = target" in expression
+
+
 def test_inspect_rejects_outer_runtime_exception_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -387,9 +462,7 @@ def test_inspect_rejects_outer_runtime_exception_details(
     }
     FakeAsyncClient.payload = [_youtube_target("ws://127.0.0.1:9222/devtools/page/alpha")]
     connect = FakeConnect()
-    connect.contexts = [
-        FakeSocketContext(FakeSocket(inspection, outer_exception=True))
-    ]
+    connect.contexts = [FakeSocketContext(FakeSocket(inspection, outer_exception=True))]
     monkeypatch.setattr(fullscreen_module.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(fullscreen_module.websockets, "connect", connect)
 
@@ -417,9 +490,7 @@ def test_fullscreen_outer_runtime_exception_is_not_retried(
     monkeypatch.setattr(fullscreen_module.websockets, "connect", connect)
 
     async def scenario() -> bool:
-        controller = YoutubeFullscreenController(
-            probe=ShortCdpYoutubeProbe(timeout=0.8)
-        )
+        controller = YoutubeFullscreenController(probe=ShortCdpYoutubeProbe(timeout=0.8))
         with pytest.raises(ValueError, match="Runtime.evaluate"):
             await controller.probe_once(9222)
         return await controller.probe_once(9222)
@@ -438,9 +509,7 @@ def test_fullscreen_outer_runtime_exception_is_not_retried(
 def test_short_cdp_fullscreen_revalidates_expected_identity_in_second_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    FakeAsyncClient.payload = [
-        _youtube_target("ws://127.0.0.1:9222/devtools/page/alpha")
-    ]
+    FakeAsyncClient.payload = [_youtube_target("ws://127.0.0.1:9222/devtools/page/alpha")]
     connect = FakeConnect()
     connect.contexts = [FakeSocketContext(FakeSocket(False))]
     monkeypatch.setattr(fullscreen_module.httpx, "AsyncClient", FakeAsyncClient)
@@ -449,7 +518,7 @@ def test_short_cdp_fullscreen_revalidates_expected_identity_in_second_session(
     result = asyncio.run(
         ShortCdpYoutubeProbe(timeout=0.8).fullscreen(
             9222,
-            'watch:alpha\";globalThis.pwned=true;//',
+            'watch:alpha";globalThis.pwned=true;//',
             True,
         )
     )
@@ -458,7 +527,7 @@ def test_short_cdp_fullscreen_revalidates_expected_identity_in_second_session(
     request = connect.contexts[0].socket.requests[0]
     expression = request["params"]["expression"]
     assert request["params"]["userGesture"] is True
-    assert json.dumps('watch:alpha\";globalThis.pwned=true;//') in expression
+    assert json.dumps('watch:alpha";globalThis.pwned=true;//') in expression
     assert expression.count("requestFullscreen") == 1
 
 

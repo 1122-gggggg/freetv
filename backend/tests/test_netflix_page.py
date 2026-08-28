@@ -67,12 +67,17 @@ FULLSCREEN_WATCH_RESULT = {
     "status": "fullscreen",
     "context": WATCH_CONTEXT,
 }
+SPEED_WATCH_RESULT = {
+    "ok": True,
+    "status": "speed",
+    "rate": 1.25,
+    "context": WATCH_CONTEXT,
+}
 NETFLIX_PAGE = {
     "type": "page",
     "url": "https://www.netflix.com/browse",
     "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/page/netflix",
 }
-
 
 
 class FakeSocket:
@@ -113,7 +118,6 @@ class FakeSocket:
         self.entered = 0
         self.closed = False
 
-
     async def send(self, raw: str) -> None:
         payload = json.loads(raw)
         self.sent.append(payload)
@@ -147,9 +151,7 @@ class FakeSocket:
                 self._error(command_id)
             else:
                 runtime_result = (
-                    self.runtime_results.pop(0)
-                    if self.runtime_results
-                    else self.runtime_result
+                    self.runtime_results.pop(0) if self.runtime_results else self.runtime_result
                 )
                 self._remote_value(command_id, runtime_result)
         else:
@@ -163,7 +165,6 @@ class FakeSocket:
                     command_id,
                     self.reported_version if self.reported_version is not None else RUNTIME_VERSION,
                 )
-
 
     async def recv(self) -> str:
         return self._replies.pop(0)
@@ -260,6 +261,10 @@ def test_netflix_actions_exactly_match_runtime_actions() -> None:
         "BACK",
         "PLAY_PAUSE",
         "FULLSCREEN",
+        "SPEED_UP",
+        "SPEED_DOWN",
+        "SEEK_FORWARD_5",
+        "SEEK_BACKWARD_5",
         "READ_CONTEXT",
         "SUBMIT_PRIMARY",
     ]
@@ -329,7 +334,13 @@ def test_select_netflix_target_rejects_unsupported_or_ambiguous_targets(
     "pages",
     [
         [],
-        [{"type": "page", "url": "https://netflix.com.evil.test/", "webSocketDebuggerUrl": "ws://127.0.0.1/evil"}],
+        [
+            {
+                "type": "page",
+                "url": "https://netflix.com.evil.test/",
+                "webSocketDebuggerUrl": "ws://127.0.0.1/evil",
+            }
+        ],
         [{"type": "page", "url": "https://www.netflix.com/browse"}],
     ],
 )
@@ -340,6 +351,7 @@ def test_select_netflix_target_reports_missing_page_separately(
         select_netflix_target(pages)
     assert caught.value.code == "netflix_page_unavailable"
     assert caught.value.message == "無法連到 Netflix 控制頁面，請稍後再試。"
+
 
 @pytest.mark.parametrize(
     "debugger_url",
@@ -509,8 +521,6 @@ def test_current_runtime_version_is_not_reinjected(
     assert socket.closed
 
 
-
-
 def test_http_failure_retries_with_fresh_page_discovery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -555,6 +565,7 @@ def test_socket_connection_failure_retries_once_then_returns_page_unavailable(
     assert page_calls == [9222, 9222]
     assert len(connect.calls) == 2
 
+
 def test_version_ack_loss_retries_before_any_action_is_sent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -570,7 +581,6 @@ def test_version_ack_loss_retries_before_any_action_is_sent(
     assert runtime_expressions(first) == []
     assert len(runtime_expressions(second)) == 1
     assert first.closed and second.closed
-
 
 
 def test_idempotent_action_cdp_failure_retries_with_a_new_socket(
@@ -600,6 +610,8 @@ def test_idempotent_action_cdp_failure_retries_with_a_new_socket(
         Command.BACK,
         Command.PLAY_PAUSE,
         Command.FULLSCREEN,
+        Command.SPEED_UP,
+        Command.SPEED_DOWN,
     ],
 )
 def test_non_idempotent_action_ack_loss_is_not_retried(
@@ -662,9 +674,7 @@ def test_deterministic_target_errors_do_not_retry(
     assert connect.calls == []
 
 
-def test_missing_target_does_not_retry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_missing_target_does_not_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     controller = make_controller(tmp_path)
     connect, page_calls = install_transport(monkeypatch, controller, [], [])
 
@@ -707,6 +717,10 @@ def test_each_action_uses_enum_and_sends_only_whitelisted_previous_focus(
         (Command.BACK, "BACK"),
         (Command.PLAY_PAUSE, "PLAY_PAUSE"),
         (Command.FULLSCREEN, "FULLSCREEN"),
+        (Command.SPEED_UP, "SPEED_UP"),
+        (Command.SPEED_DOWN, "SPEED_DOWN"),
+        (Command.SEEK_FORWARD_5, "SEEK_FORWARD_5"),
+        (Command.SEEK_BACKWARD_5, "SEEK_BACKWARD_5"),
         (Command.TAB, "FOCUS_NEXT"),
     ]
     remaining = [
@@ -737,14 +751,13 @@ def test_each_action_uses_enum_and_sends_only_whitelisted_previous_focus(
         assert "innerHTML" not in expression
         assert "getBoundingClientRect" not in expression
 
+
 def test_back_preserves_previous_focus_for_browse_restore(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     controller = make_controller(tmp_path)
     focused = FakeSocket(runtime_result=VALID_RESULT)
-    closed = FakeSocket(
-        runtime_result={"ok": True, "status": "closed", "context": BROWSE_CONTEXT}
-    )
+    closed = FakeSocket(runtime_result={"ok": True, "status": "closed", "context": BROWSE_CONTEXT})
     next_command = FakeSocket(runtime_result=VALID_RESULT)
     install_transport(monkeypatch, controller, [focused, closed, next_command])
 
@@ -758,7 +771,6 @@ def test_back_preserves_previous_focus_for_browse_restore(
     assert runtime_expressions(next_command)[0].endswith(
         f", {json.dumps(VALID_FOCUS, ensure_ascii=True)})"
     )
-
 
 
 def test_execute_rejects_non_enum_action_before_page_discovery(tmp_path: Path) -> None:
@@ -796,6 +808,7 @@ def test_type_text_focuses_editable_then_uses_input_insert_text(
     assert socket.sent[-1]["params"] == {"text": secret}
     assert socket.closed
 
+
 def test_input_insert_text_ack_loss_is_not_retried(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -821,7 +834,6 @@ def test_input_insert_text_ack_loss_is_not_retried(
     assert insert_calls[0]["params"] == {"text": secret}
     assert first.closed
     assert not second.closed
-
 
 
 def test_type_text_does_not_expose_secret_in_error_log_or_state(
@@ -888,9 +900,7 @@ def test_runtime_codes_map_to_fixed_local_chinese_messages_without_retry(
         {
             "ok": True,
             "status": "focused",
-            "focus": {
-                key: value for key, value in VALID_FOCUS.items() if key != "rail"
-            },
+            "focus": {key: value for key, value in VALID_FOCUS.items() if key != "rail"},
         },
         {"ok": True, "status": "focused", "focus": {**VALID_FOCUS, "label": "x" * 257}},
         {"ok": True, "status": "focused", "focus": {**VALID_FOCUS, "index": True}},
@@ -1084,7 +1094,6 @@ def test_initialize_accepts_profile_gate_browse_title(
     assert socket.closed
 
 
-
 def test_type_submit_runs_once_in_one_short_transaction_and_returns_context(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1168,9 +1177,7 @@ def test_submit_ack_loss_does_not_reconnect_or_repeat_submit(
     assert caught.value.code == "netflix_controller_unavailable"
     assert len(connect.calls) == 1
     submit_expressions = [
-        expression
-        for expression in runtime_expressions(socket)
-        if '"SUBMIT_PRIMARY"' in expression
+        expression for expression in runtime_expressions(socket) if '"SUBMIT_PRIMARY"' in expression
     ]
     assert len(submit_expressions) == 1
     assert socket.closed
@@ -1264,12 +1271,36 @@ def test_fullscreen_runtime_evaluate_uses_user_gesture_and_returns_context(
     assert socket.closed
 
 
+def test_speed_runtime_evaluate_uses_user_gesture_and_records_rate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    socket = FakeSocket(runtime_result=SPEED_WATCH_RESULT)
+    connect, _ = install_transport(monkeypatch, controller, [socket])
+
+    context = asyncio.run(controller.execute(Command.SPEED_UP))
+
+    request = next(
+        message
+        for message in socket.sent
+        if message["method"] == "Runtime.evaluate"
+        and '"SPEED_UP"' in message["params"]["expression"]
+    )
+    assert request["params"]["userGesture"] is True
+    assert context.stage is NetflixStage.WATCH
+    assert controller.last_playback_rate == 1.25
+    assert len(connect.calls) == 1
+    assert socket.closed
+
+
 @pytest.mark.parametrize(
     ("command", "status", "focus"),
     [
         (Command.OK, "clicked", VALID_FOCUS),
         (Command.PLAY_PAUSE, "playing", None),
         (Command.FULLSCREEN, "fullscreen", None),
+        (Command.SEEK_FORWARD_5, "seek", None),
+        (Command.SEEK_BACKWARD_5, "seek", None),
     ],
 )
 def test_side_effect_runtime_actions_use_user_gesture(
@@ -1311,9 +1342,7 @@ def test_ok_watch_sends_one_fullscreen_evaluate_in_the_same_transaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     controller = make_controller(tmp_path)
-    socket = FakeSocket(
-        runtime_results=[PLAYING_WATCH_RESULT, FULLSCREEN_WATCH_RESULT]
-    )
+    socket = FakeSocket(runtime_results=[PLAYING_WATCH_RESULT, FULLSCREEN_WATCH_RESULT])
     connect, page_calls = install_transport(monkeypatch, controller, [socket])
 
     context = asyncio.run(controller.execute(Command.OK))
@@ -1366,5 +1395,3 @@ def test_ok_fullscreen_reject_does_not_replay_play(
     assert page_calls == [9222]
     assert len(connect.calls) == 1
     assert socket.closed
-
-

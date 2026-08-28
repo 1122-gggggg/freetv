@@ -91,6 +91,7 @@ function installHitTesting(): void {
 
 beforeEach(() => {
   vi.restoreAllMocks()
+  Reflect.deleteProperty(window, 'netflix')
   document.body.innerHTML = ''
   window.history.replaceState({}, '', '/')
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
@@ -560,7 +561,7 @@ describe('Netflix DOM control runtime', () => {
     expect(detailPlayClicks).toBe(1)
   })
 
-  it('exposes only the fixed global version and run interface and re-enumerates every run', async () => { expect(runtime().version).toBe('4')
+  it('exposes only the fixed global version and run interface and re-enumerates every run', async () => { expect(runtime().version).toBe('7')
 
   expect(Object.keys(runtime()).sort()).toEqual(['run', 'version'])
   document.body.innerHTML = '<button id="first">First</button>'
@@ -897,6 +898,125 @@ describe('Netflix DOM control runtime', () => {
   paused = false
   expect((await runtime().run('PLAY_PAUSE', null)).status).toBe('paused')
   expect(pause).toHaveBeenCalledOnce() })
+
+  it('adjusts playback rate in bounded steps on the visible video', async () => {
+    document.body.innerHTML = '<video id="hidden"></video><video id="visible"></video>'
+    const hidden = document.querySelector('#hidden') as HTMLVideoElement
+    const video = document.querySelector('#visible') as HTMLVideoElement
+    setRect(hidden, 20, 20, 0, 0)
+    setRect(video, 200, 100, 640, 360)
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+
+    expect(await runtime().run('SPEED_UP', null)).toMatchObject({
+      ok: true,
+      status: 'speed',
+      rate: 1.25,
+    })
+    expect(video.playbackRate).toBe(1.25)
+    expect(hidden.playbackRate).toBe(1)
+
+    expect(await runtime().run('SPEED_DOWN', null)).toMatchObject({
+      ok: true,
+      status: 'speed',
+      rate: 1,
+    })
+    expect(video.playbackRate).toBe(1)
+  })
+
+  it('seeks five seconds through the Netflix player API', async () => {
+    document.body.innerHTML = '<video id="video"></video>'
+    const video = document.querySelector('#video') as HTMLVideoElement
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+    const seek = vi.fn()
+    const player = {
+      getCurrentTime: () => 10_000,
+      getDuration: () => 12_000,
+      seek,
+    }
+    Object.defineProperty(window, 'netflix', {
+      configurable: true,
+      value: {
+        appContext: {
+          state: {
+            playerApp: {
+              getAPI: () => ({
+                videoPlayer: {
+                  getAllPlayerSessionIds: () => ['session'],
+                  getVideoPlayerBySessionId: () => player,
+                },
+              }),
+            },
+          },
+        },
+      },
+    })
+
+    expect((await runtime().run('SEEK_FORWARD_5', null)).status).toBe('seek')
+    expect((await runtime().run('SEEK_BACKWARD_5', null)).status).toBe('seek')
+    expect(seek.mock.calls).toEqual([[12_000], [5_000]])
+  })
+
+  it('selects a Traditional Chinese subtitle track before media control', async () => {
+    document.body.innerHTML = '<video id="video"></video>'
+    const video = document.querySelector('#video') as HTMLVideoElement
+    setRect(video, 200, 100, 640, 360)
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+    const english = {
+      kind: 'subtitles',
+      language: 'en',
+      label: 'English',
+      mode: 'showing',
+    }
+    const traditionalChinese = {
+      kind: 'subtitles',
+      language: 'zh-TW',
+      label: '繁體中文',
+      mode: 'disabled',
+    }
+    Object.defineProperty(video, 'textTracks', {
+      configurable: true,
+      value: [english, traditionalChinese],
+    })
+    vi.spyOn(video, 'play').mockResolvedValue(undefined)
+
+    expect((await runtime().run('PLAY_PAUSE', null)).status).toBe('playing')
+    expect(english.mode).toBe('disabled')
+    expect(traditionalChinese.mode).toBe('showing')
+  })
+
+  it('selects Traditional Chinese through the Netflix player API', async () => {
+    document.body.innerHTML = '<video id="video"></video>'
+    const video = document.querySelector('#video') as HTMLVideoElement
+    setRect(video, 200, 100, 640, 360)
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 2 })
+    vi.spyOn(video, 'play').mockResolvedValue(undefined)
+    const english = { bcp47: 'en', displayName: 'English' }
+    const traditionalChinese = { bcp47: 'zh-Hant', displayName: '中文（繁體）' }
+    const setTimedTextTrack = vi.fn()
+    Object.defineProperty(window, 'netflix', {
+      configurable: true,
+      value: {
+        appContext: {
+          state: {
+            playerApp: {
+              getAPI: () => ({
+                videoPlayer: {
+                  getAllPlayerSessionIds: () => ['session'],
+                  getVideoPlayerBySessionId: () => ({
+                    getTimedTextTrackList: () => [english, traditionalChinese],
+                    setTimedTextTrack,
+                  }),
+                },
+              }),
+            },
+          },
+        },
+      },
+    })
+
+    expect((await runtime().run('PLAY_PAUSE', null)).status).toBe('playing')
+    expect(setTimedTextTrack).toHaveBeenCalledWith(traditionalChinese)
+  })
 
   it('returns stable focus input and video error codes', async () => { expect(await runtime().run('FOCUS_PRIMARY', null)).toEqual({
     ok: false,

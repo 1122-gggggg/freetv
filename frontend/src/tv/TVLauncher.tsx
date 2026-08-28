@@ -8,8 +8,6 @@ const TILES: ReadonlyArray<{ id: TileId; label: string; detail: string; badge: s
   { id: 'youtube', label: 'YouTube', detail: '用現有設定檔開啟', badge: 'YT' },
   { id: 'netflix', label: 'Netflix', detail: '用現有 Chrome 設定檔開啟', badge: 'N' },
   { id: 'news', label: '新聞', detail: '觀看 YouTube 直播新聞', badge: '新聞' },
-  { id: 'live_tv', label: '電視', detail: '用 mpv 播放已設定頻道', badge: '電視' },
-  { id: 'browser', label: '瀏覽器', detail: '開啟設定的瀏覽器首頁', badge: '網頁' },
   { id: 'settings', label: '設定', detail: '用 settings.json 設定此電視盒', badge: '設定' },
 ]
 

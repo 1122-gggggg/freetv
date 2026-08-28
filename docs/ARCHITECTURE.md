@@ -10,8 +10,8 @@ flowchart LR
   API --> Bus[CommandBus]
   Bus --> Apps[ApplicationManager]
   Bus --> Player[MpvController]
-  Bus --> Input[Windows input adapter]
-  Bus --> Volume[Windows volume adapter]
+  Bus --> Input[Platform input adapter]
+  Bus --> Volume[Platform volume adapter]
   Apps --> Shell["Netflix standalone Chrome app window<br/>--app=&lt;url&gt;"]
   Apps -->|typed Netflix command/text| Page[NetflixPageController]
   Page -->|fresh short-lived CDP on 127.0.0.1| NetflixDOM[Netflix DOM runtime]
@@ -44,8 +44,8 @@ QR pairing is the primary endpoint-discovery path. A code-only QR is never assig
 | `app/applications/netflix_control.js` | Fixed async DOM runtime for safe context, rail navigation, bounded direct play, submit, BACK, and ready-video playback. |
 | `app/applications/youtube_fullscreen.py` | Bounded localhost probe that requests fullscreen at most once per YouTube video identity. |
 | `app/player/channels.py` | Validates and selects enabled, ordered channels. |
-| `app/player/mpv.py` | Starts mpv and controls it over named-pipe JSON IPC. |
-| `app/system/` | Narrow Windows adapters for mouse, Unicode text, windows, sleep, and Core Audio volume. |
+| `app/player/mpv.py` | Starts mpv and controls it over JSON IPC (named pipe on Windows, Unix socket elsewhere). |
+| `app/system/` | Narrow platform adapters for mouse, Unicode text, windows, sleep, and volume. Windows uses SendInput/Core Audio; macOS/Linux use xdotool/wpctl/pactl/osascript behind the same ports. |
 | `app/state.py` | Lock-protected controller state snapshot shared by all transports. |
 | `app/controller.py` | Composition root that injects platform adapters and coordinates cleanup. |
 

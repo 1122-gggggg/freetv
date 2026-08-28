@@ -18,7 +18,7 @@ from app.protocol import (
     SearchVideoMessage,
     TextInputMessage,
 )
-from app.state import ActiveApp, ControllerState, StateStore
+from app.state import ActiveApp, ControllerState, LauncherTile, StateStore
 
 LOGIN_CONTEXT = NetflixContext(
     stage=NetflixStage.LOGIN,
@@ -42,12 +42,16 @@ class FakeApplications:
     forwarded: list[Command] = field(default_factory=list)
     input_targets: list[ActiveApp] = field(default_factory=list)
     typed: list[tuple[str, bool]] = field(default_factory=list)
+    playback_rates: list[int] = field(default_factory=list)
+    seek_directions: list[int] = field(default_factory=list)
     next_context: NetflixContext | None = None
+    next_rate: float = 1.25
     failure: CommandExecutionError | None = None
 
     async def open(self, app: ActiveApp) -> NetflixContext | None:
         self.opened.append(app)
         return self.next_context
+
     async def open_news(self, url: str) -> None:
         self.opened_news.append(url)
 
@@ -66,9 +70,18 @@ class FakeApplications:
         self.forwarded.append(command)
         return self.next_context
 
-    async def type_text(
-        self, text: str, submit: bool = False
-    ) -> NetflixContext | None:
+    async def adjust_playback_rate(self, direction: int) -> float:
+        if self.failure is not None:
+            raise self.failure
+        self.playback_rates.append(direction)
+        return self.next_rate
+
+    async def seek(self, direction: int) -> None:
+        if self.failure is not None:
+            raise self.failure
+        self.seek_directions.append(direction)
+
+    async def type_text(self, text: str, submit: bool = False) -> NetflixContext | None:
         if self.failure is not None:
             raise self.failure
         self.typed.append((text, submit))
@@ -76,7 +89,6 @@ class FakeApplications:
 
     def require_input_target(self, app: ActiveApp) -> None:
         self.input_targets.append(app)
-
 
 
 @dataclass
@@ -165,6 +177,7 @@ class FakePower:
     async def sleep(self) -> None:
         self.sleep_calls += 1
 
+
 @dataclass
 class FakeNews:
     channels: list[Channel] = field(
@@ -192,7 +205,6 @@ class FakeNews:
     def move(self, direction: int) -> Channel:
         self.current_index = (self.current_index + direction) % len(self.channels)
         return self.current
-
 
 
 def make_bus(
@@ -229,6 +241,47 @@ def test_launcher_navigation_moves_focus_and_ok_launches_selected_tile() -> None
     asyncio.run(scenario())
 
 
+def test_launcher_down_stops_at_bottom_of_2x2_grid() -> None:
+    async def scenario() -> None:
+        bus, _, _, _ = make_bus()
+
+        first = await bus.dispatch_command(Command.NAV_DOWN)
+        second = await bus.dispatch_command(Command.NAV_DOWN)
+
+        assert first.state.focused_tile is LauncherTile.NEWS
+        assert second.state.focused_tile is LauncherTile.NEWS
+
+    asyncio.run(scenario())
+
+
+def test_speed_commands_report_playback_rate() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus(initial=ControllerState(active_app=ActiveApp.YOUTUBE))
+
+        result = await bus.dispatch_command(Command.SPEED_UP)
+
+        assert result.success
+        assert applications.playback_rates == [1]
+        assert result.state.status_message == "倍速 1.25×"
+
+    asyncio.run(scenario())
+
+
+def test_seek_commands_report_five_second_jump() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus(initial=ControllerState(active_app=ActiveApp.NETFLIX))
+
+        backward = await bus.dispatch_command(Command.SEEK_BACKWARD_5)
+        forward = await bus.dispatch_command(Command.SEEK_FORWARD_5)
+
+        assert backward.success and forward.success
+        assert applications.seek_directions == [-1, 1]
+        assert backward.state.status_message == "倒退 5 秒"
+        assert forward.state.status_message == "快轉 5 秒"
+
+    asyncio.run(scenario())
+
+
 def test_home_returns_from_tracked_application_to_launcher() -> None:
     async def scenario() -> None:
         bus, applications, _, _ = make_bus()
@@ -241,6 +294,7 @@ def test_home_returns_from_tracked_application_to_launcher() -> None:
         assert result.state.active_app is ActiveApp.LAUNCHER
 
     asyncio.run(scenario())
+
 
 def test_back_on_launcher_does_not_leave_desktop() -> None:
     async def scenario() -> None:
@@ -269,7 +323,6 @@ def test_back_from_youtube_forwards_escape() -> None:
         assert result.state.active_app is ActiveApp.YOUTUBE
 
     asyncio.run(scenario())
-
 
 
 def test_live_tv_channel_commands_publish_selected_channel() -> None:
@@ -463,7 +516,6 @@ def test_netflix_error_becomes_failed_ack_without_active_app_change() -> None:
     asyncio.run(scenario())
 
 
-
 def test_command_bus_alone_owns_netflix_context_and_clears_home() -> None:
     async def scenario() -> None:
         bus, applications, _, _ = make_bus()
@@ -487,9 +539,7 @@ def test_command_bus_alone_owns_netflix_context_and_clears_home() -> None:
 
 def test_command_bus_forwards_submit_once_and_stores_only_returned_context() -> None:
     async def scenario() -> None:
-        bus, applications, _, _ = make_bus(
-            initial=ControllerState(active_app=ActiveApp.NETFLIX)
-        )
+        bus, applications, _, _ = make_bus(initial=ControllerState(active_app=ActiveApp.NETFLIX))
         applications.next_context = LOGIN_CONTEXT
         outcome = await bus.dispatch_text(
             TextInputMessage(
@@ -716,6 +766,7 @@ def test_pointer_and_text_wait_for_an_in_progress_application_transition() -> No
 
     asyncio.run(scenario())
 
+
 def test_open_news_sets_channel_and_active_app() -> None:
     async def scenario() -> None:
         bus, applications, _, _ = make_bus()
@@ -836,6 +887,7 @@ def test_search_video_when_live_tv_active_stops_player() -> None:
 
     asyncio.run(scenario())
 
+
 def test_unavailable_news_raises_news_not_configured_on_open_news() -> None:
     async def scenario() -> None:
         from app.controller import UnavailableNews
@@ -899,7 +951,6 @@ def test_pointer_and_text_accepted_when_news_active() -> None:
     asyncio.run(scenario())
 
 
-
 def test_application_exit_clears_matching_active_state_safely() -> None:
     async def scenario() -> None:
         bus, _, _, _ = make_bus(
@@ -927,9 +978,7 @@ def test_application_exit_clears_matching_active_state_safely() -> None:
 
 def test_application_exit_ignores_inactive_app() -> None:
     async def scenario() -> None:
-        bus, _, _, _ = make_bus(
-            initial=ControllerState(active_app=ActiveApp.BROWSER)
-        )
+        bus, _, _, _ = make_bus(initial=ControllerState(active_app=ActiveApp.BROWSER))
 
         outcome = await bus.handle_application_exit(ActiveApp.YOUTUBE)
 
@@ -942,9 +991,7 @@ def test_application_exit_ignores_inactive_app() -> None:
 
 def test_fullscreen_is_rejected_for_non_browser_application() -> None:
     async def scenario() -> None:
-        bus, applications, _, _ = make_bus(
-            initial=ControllerState(active_app=ActiveApp.LIVE_TV)
-        )
+        bus, applications, _, _ = make_bus(initial=ControllerState(active_app=ActiveApp.LIVE_TV))
 
         outcome = await bus.dispatch_command(Command.FULLSCREEN)
 
