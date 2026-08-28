@@ -10,6 +10,7 @@ import time
 import webbrowser
 from collections.abc import Sequence
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from app.config import load_settings, project_root, resolve_application_paths
 
@@ -366,6 +367,17 @@ def _open_tv_launcher(root: Path, url: str) -> None:
     subprocess.Popen(arguments)
 
 
+def _systemd_quote(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    if any(character.isspace() for character in escaped) or not escaped:
+        return f'"{escaped}"'
+    return escaped
+
+
+def _plist_string(value: str) -> str:
+    return f"    <string>{escape(value)}</string>"
+
+
 def install_autostart(*, root: Path | None = None, remove: bool = False) -> None:
     base = root or project_root()
     if os.name == "nt":
@@ -392,7 +404,7 @@ def install_autostart(*, root: Path | None = None, remove: bool = False) -> None
             print(f"Removed {plist}")
             return
         plist.parent.mkdir(parents=True, exist_ok=True)
-        arguments_xml = "\n".join(f"    <string>{item}</string>" for item in start_command)
+        arguments_xml = "\n".join(_plist_string(item) for item in start_command)
         plist.write_text(
             (
                 '<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -403,7 +415,7 @@ def install_autostart(*, root: Path | None = None, remove: bool = False) -> None
                 "  <key>ProgramArguments</key><array>\n"
                 f"{arguments_xml}\n"
                 "  </array>\n"
-                f"  <key>WorkingDirectory</key><string>{base}</string>\n"
+                f"  <key>WorkingDirectory</key>{_plist_string(str(base))}\n"
                 "  <key>RunAtLoad</key><true/>\n"
                 "  <key>KeepAlive</key><true/>\n"
                 "</dict></plist>\n"
@@ -423,7 +435,7 @@ def install_autostart(*, root: Path | None = None, remove: bool = False) -> None
         print(f"Removed {unit}")
         return
     unit_dir.mkdir(parents=True, exist_ok=True)
-    exec_start = " ".join(start_command)
+    exec_start = " ".join(_systemd_quote(item) for item in start_command)
     unit.write_text(
         (
             "[Unit]\n"
@@ -431,7 +443,7 @@ def install_autostart(*, root: Path | None = None, remove: bool = False) -> None
             "After=network-online.target\n\n"
             "[Service]\n"
             "Type=simple\n"
-            f"WorkingDirectory={base}\n"
+            f"WorkingDirectory={_systemd_quote(str(base))}\n"
             f"ExecStart={exec_start}\n"
             "Restart=on-failure\n"
             "RestartSec=60\n"

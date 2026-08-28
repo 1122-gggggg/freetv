@@ -23,7 +23,8 @@ Copy this repository or unzip `pc-tv-box.zip` from GitHub Releases, then:
 python freetv.py
 ```
 
-On macOS/Linux you can also run `./run.sh`. On Windows, `run.cmd` or:
+On macOS/Linux you can also run `sh ./run.sh` (zip extraction may drop the
+executable bit). On Windows, `run.cmd` or:
 
 ```powershell
 py -3 .\freetv.py

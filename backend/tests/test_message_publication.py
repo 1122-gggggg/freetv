@@ -63,7 +63,7 @@ class FakeConnections:
 def test_dispatch_publication_preserves_state_order_when_an_acknowledgement_stalls() -> None:
     async def scenario() -> None:
         first_state = ControllerState(focused_tile=LauncherTile.NETFLIX)
-        second_state = ControllerState(focused_tile=LauncherTile.LIVE_TV)
+        second_state = ControllerState(focused_tile=LauncherTile.SETTINGS)
         app = SimpleNamespace(
             state=SimpleNamespace(
                 runtime=SimpleNamespace(
@@ -97,7 +97,7 @@ def test_dispatch_publication_preserves_state_order_when_an_acknowledgement_stal
 
         assert [state.focused_tile for state in app.state.connections.states] == [
             LauncherTile.NETFLIX.value,
-            LauncherTile.LIVE_TV.value,
+            LauncherTile.SETTINGS.value,
         ]
 
     asyncio.run(scenario())
@@ -108,7 +108,7 @@ def test_stalled_acknowledgement_is_bounded_and_does_not_block_later_dispatch(
 ) -> None:
     async def scenario() -> None:
         first_state = ControllerState(focused_tile=LauncherTile.NETFLIX)
-        second_state = ControllerState(focused_tile=LauncherTile.LIVE_TV)
+        second_state = ControllerState(focused_tile=LauncherTile.SETTINGS)
         connections = FakeConnections()
         app = SimpleNamespace(
             state=SimpleNamespace(
@@ -135,9 +135,7 @@ def test_stalled_acknowledgement_is_bounded_and_does_not_block_later_dispatch(
         )
 
         monkeypatch.setattr(main, "ACKNOWLEDGEMENT_SEND_TIMEOUT_SECONDS", 0.01)
-        stalled = asyncio.create_task(
-            _dispatch_and_broadcast(app, stalled_socket, stalled_message)
-        )
+        stalled = asyncio.create_task(_dispatch_and_broadcast(app, stalled_socket, stalled_message))
         await stalled_socket.acknowledgement_started.wait()
         responsive = asyncio.create_task(
             _dispatch_and_broadcast(app, responsive_socket, responsive_message)
@@ -151,7 +149,7 @@ def test_stalled_acknowledgement_is_bounded_and_does_not_block_later_dispatch(
         assert results == [False, True]
         assert [state.focused_tile for state in connections.states] == [
             LauncherTile.NETFLIX.value,
-            LauncherTile.LIVE_TV.value,
+            LauncherTile.SETTINGS.value,
         ]
         assert [payload["request_id"] for payload in responsive_socket.sent] == ["responsive"]
 

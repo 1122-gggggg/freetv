@@ -105,23 +105,17 @@ class PosixInputController:
         if backend == "xdotool":
             self._xdotool_pointer(message)
             return
-        if backend == "ydotool":
-            self._ydotool_pointer(message)
-            return
         if backend == "osascript":
             raise CommandExecutionError(
                 "pointer_unavailable",
                 "這個 macOS 環境沒有 cliclick，觸控板移動無法使用。",
             )
-        raise CommandExecutionError("input_unavailable", "找不到 xdotool、ydotool 或 osascript。")
+        raise CommandExecutionError("input_unavailable", "找不到 xdotool 或 osascript。")
 
     async def text(self, text: str) -> None:
         backend = self._backend()
         if backend == "xdotool":
             self._run(["xdotool", "type", "--delay", "0", "--", text])
-            return
-        if backend == "ydotool":
-            self._run(["ydotool", "type", "--", text])
             return
         if backend == "osascript":
             escaped = text.replace("\\", "\\\\").replace('"', '\\"')
@@ -146,15 +140,6 @@ class PosixInputController:
                 )
             self._run(["xdotool", "key", key])
             return
-        if backend == "ydotool":
-            key = _XDOTOL_KEYS.get(command)
-            if key is None:
-                raise CommandExecutionError(
-                    "unsupported_forward_command",
-                    "這個操作不適用於目前的應用程式。",
-                )
-            self._run(["ydotool", "key", key])
-            return
         if backend == "osascript":
             code = _MAC_KEY_CODES.get(command)
             if code is None:
@@ -177,9 +162,6 @@ class PosixInputController:
         if backend == "xdotool":
             self._run(["xdotool", "key", "alt+Left"])
             return
-        if backend == "ydotool":
-            self._run(["ydotool", "key", "alt+Left"])
-            return
         if backend == "osascript":
             self._run(
                 [
@@ -194,8 +176,6 @@ class PosixInputController:
     def _backend(self) -> str:
         if self._lookup("xdotool"):
             return "xdotool"
-        if self._lookup("ydotool"):
-            return "ydotool"
         if sys.platform == "darwin" and self._lookup("osascript"):
             return "osascript"
         return ""
@@ -209,21 +189,9 @@ class PosixInputController:
             self._run(["xdotool", "click", "--repeat", "2", "--delay", "50", "1"])
         elif message.action is PointerAction.SCROLL:
             button = "4" if message.dy >= 0 else "5"
-            self._run(["xdotool", "click", button])
+            repeats = str(max(1, min(abs(message.dy), 30)))
+            self._run(["xdotool", "click", "--repeat", repeats, button])
         else:  # pragma: no cover - Pydantic prevents unknown actions.
-            raise CommandExecutionError("invalid_pointer_action", "不允許這個觸控板操作。")
-
-    def _ydotool_pointer(self, message: PointerActionMessage) -> None:
-        if message.action is PointerAction.MOVE:
-            self._run(["ydotool", "mousemove", "--", str(message.dx), str(message.dy)])
-        elif message.action is PointerAction.TAP:
-            self._run(["ydotool", "click", "0xC0"])
-        elif message.action is PointerAction.DOUBLE_TAP:
-            self._run(["ydotool", "click", "0xC0"])
-            self._run(["ydotool", "click", "0xC0"])
-        elif message.action is PointerAction.SCROLL:
-            self._run(["ydotool", "mousemove", "--wheel", "--", "0", str(message.dy)])
-        else:  # pragma: no cover
             raise CommandExecutionError("invalid_pointer_action", "不允許這個觸控板操作。")
 
 
@@ -374,7 +342,7 @@ class PosixWindowController:
         return handle == pid and pid_is_running(pid)
 
     def minimize(self, handle: int) -> None:
-        self._xdotool_pid("windowminimize", handle)
+        self._xdotool_pid("windowminimize", handle, only_visible=True)
         self._osascript_set_visible(handle, False)
 
     def maximize(self, handle: int) -> None:
@@ -488,13 +456,20 @@ class PosixWindowController:
         except CommandExecutionError:
             return
 
-    def _xdotool_pid(self, action: str, pid: int) -> None:
+    def _xdotool_pid(self, action: str, pid: int, *, only_visible: bool = False) -> None:
         if not self._lookup("xdotool"):
             return
+        search = ["xdotool", "search"]
+        if only_visible:
+            search.append("--onlyvisible")
+        search.extend(["--pid", str(pid)])
         try:
-            window_id = self._run(
-                ["xdotool", "search", "--onlyvisible", "--pid", str(pid)]
-            ).split()[0]
+            window_id = self._run(search).split()[0]
+            if action == "windowactivate":
+                try:
+                    self._run(["xdotool", "windowmap", window_id])
+                except CommandExecutionError:
+                    pass
             self._run(["xdotool", action, window_id])
         except (CommandExecutionError, IndexError):
             return

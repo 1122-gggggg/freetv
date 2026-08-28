@@ -29,8 +29,6 @@ class CommandOutcome:
 _TILE_COMMANDS: dict[LauncherTile, Command] = {
     LauncherTile.YOUTUBE: Command.OPEN_YOUTUBE,
     LauncherTile.NETFLIX: Command.OPEN_NETFLIX,
-    LauncherTile.LIVE_TV: Command.OPEN_LIVE_TV,
-    LauncherTile.BROWSER: Command.OPEN_BROWSER,
     LauncherTile.NEWS: Command.OPEN_NEWS,
 }
 

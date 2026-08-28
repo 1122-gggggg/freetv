@@ -998,7 +998,10 @@
           )[0] || null,
       800,
     )
-    if (!(option instanceof HTMLElement)) return false
+    if (!(option instanceof HTMLElement)) {
+      menuButton.click()
+      return false
+    }
     option.click()
     return true
   }

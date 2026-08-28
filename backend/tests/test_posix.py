@@ -97,3 +97,72 @@ def test_posix_input_errors_without_backend() -> None:
     with pytest.raises(CommandExecutionError) as caught:
         controller.send_command(Command.OK)
     assert caught.value.code == "input_unavailable"
+
+
+def test_posix_scroll_preserves_delta_magnitude() -> None:
+    calls: list[list[str]] = []
+    controller = PosixInputController(
+        runner=lambda arguments: calls.append(list(arguments)) or "",
+        lookup=_lookup("xdotool"),
+    )
+
+    asyncio.run(
+        controller.pointer(
+            PointerActionMessage(
+                version=1,
+                type="pointer",
+                request_id="scroll-1",
+                action=PointerAction.SCROLL,
+                dx=0,
+                dy=3,
+            )
+        )
+    )
+    asyncio.run(
+        controller.pointer(
+            PointerActionMessage(
+                version=1,
+                type="pointer",
+                request_id="scroll-2",
+                action=PointerAction.SCROLL,
+                dx=0,
+                dy=-100,
+            )
+        )
+    )
+
+    assert calls == [
+        ["xdotool", "click", "--repeat", "3", "4"],
+        ["xdotool", "click", "--repeat", "30", "5"],
+    ]
+
+
+def test_posix_activate_maps_minimized_window_before_activating() -> None:
+    calls: list[list[str]] = []
+
+    def runner(arguments: list[str]) -> str:
+        calls.append(list(arguments))
+        return "4242" if arguments[:2] == ["xdotool", "search"] else ""
+
+    windows = PosixWindowController(runner=runner, lookup=_lookup("xdotool"))
+
+    windows.activate(4242)
+    windows.minimize(4242)
+
+    assert calls == [
+        ["xdotool", "search", "--pid", "4242"],
+        ["xdotool", "windowmap", "4242"],
+        ["xdotool", "windowactivate", "4242"],
+        ["xdotool", "search", "--onlyvisible", "--pid", "4242"],
+        ["xdotool", "windowminimize", "4242"],
+    ]
+
+
+def test_posix_ydotool_is_not_used_as_keyboard_backend() -> None:
+    controller = PosixInputController(
+        runner=lambda arguments: "",
+        lookup=_lookup("ydotool"),
+    )
+    with pytest.raises(CommandExecutionError) as caught:
+        controller.send_command(Command.OK)
+    assert caught.value.code == "input_unavailable"

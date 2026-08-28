@@ -47,7 +47,7 @@ export interface ControllerState {
   version: 1
   type: 'state'
   active_app: 'launcher' | 'youtube' | 'netflix' | 'live_tv' | 'browser' | 'news'
-  focused_tile: 'youtube' | 'netflix' | 'live_tv' | 'browser' | 'news' | 'settings'
+  focused_tile: 'youtube' | 'netflix' | 'news' | 'settings'
   volume: number
   muted: boolean
   channel_number: number | null

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.appliance import (
+    _systemd_quote,
     chrome_launcher_args,
     clear_public_origin,
     ensure_example_configs,
@@ -79,3 +80,9 @@ def test_clear_public_origin_drops_stale_tunnel_url(
 
     assert not origin.exists()
     assert "PC_TV_PUBLIC_ORIGIN" not in os.environ
+
+
+def test_systemd_quote_wraps_paths_with_spaces() -> None:
+    assert _systemd_quote("/opt/free tv/python") == '"/opt/free tv/python"'
+    assert _systemd_quote("--no-browser") == "--no-browser"
+    assert _systemd_quote('say "hi"') == '"say \\"hi\\""'
