@@ -96,9 +96,9 @@ def eligible_lan_interface_names() -> frozenset[str]:
     return frozenset(interface.name for interface in eligible_lan_interfaces())
 
 
-def is_eligible_lan_peer(address: IPv4Address) -> bool:
+def is_eligible_lan_peer(address: IPv4Address, *, os_name: str = os.name) -> bool:
     """Checks that a peer is reachable over a currently up physical LAN interface."""
-    if os.name == "nt":
+    if os_name == "nt":
         interface_index = _windows_best_interface_index(address)
         return interface_index is not None and any(
             interface.index == interface_index for interface in eligible_lan_interfaces()

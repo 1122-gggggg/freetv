@@ -123,13 +123,12 @@ def test_resolve_application_paths_finds_winget_mpv(tmp_path, monkeypatch) -> No
     mpv_exe = tmp_path / "Microsoft" / "WinGet" / "Links" / "mpv.exe"
     mpv_exe.parent.mkdir(parents=True)
     mpv_exe.write_text("", encoding="utf-8")
-    monkeypatch.setattr("app.config.os.name", "nt")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
     monkeypatch.setenv("ProgramFiles(x86)", str(tmp_path / "Program Files (x86)"))
     monkeypatch.delenv("PATH", raising=False)
 
-    paths = resolve_application_paths(Settings())
+    paths = resolve_application_paths(Settings(), os_name="nt")
     assert paths["mpv"] == mpv_exe
 
 

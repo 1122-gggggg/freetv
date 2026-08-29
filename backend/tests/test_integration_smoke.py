@@ -31,6 +31,7 @@ def _load_smoke_module():
         raise
     return module
 
+
 smoke = _load_smoke_module()
 
 

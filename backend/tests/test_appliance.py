@@ -30,21 +30,17 @@ def test_ensure_example_configs_copies_missing_files(tmp_path: Path) -> None:
     assert (config / "news.json").read_text(encoding="utf-8") == "[]"
 
 
-def test_venv_python_uses_platform_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.appliance.os.name", "nt")
-    assert venv_python(tmp_path) == tmp_path / ".venv" / "Scripts" / "python.exe"
-    monkeypatch.setattr("app.appliance.os.name", "posix")
-    assert venv_python(tmp_path) == tmp_path / ".venv" / "bin" / "python"
+def test_venv_python_uses_platform_layout(tmp_path: Path) -> None:
+    assert venv_python(tmp_path, os_name="nt") == tmp_path / ".venv" / "Scripts" / "python.exe"
+    assert venv_python(tmp_path, os_name="posix") == tmp_path / ".venv" / "bin" / "python"
 
 
-def test_chrome_launcher_args_add_linux_flags(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("app.appliance.os.name", "posix")
+def test_chrome_launcher_args_add_linux_flags(tmp_path: Path) -> None:
     arguments = chrome_launcher_args(
         Path("/usr/bin/google-chrome"),
         "http://127.0.0.1:8765/tv",
         tmp_path / "profile",
+        os_name="posix",
     )
     assert arguments[0] == "/usr/bin/google-chrome"
     assert "--start-fullscreen" in arguments

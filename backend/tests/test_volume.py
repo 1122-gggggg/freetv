@@ -63,7 +63,6 @@ def _install_audio_modules(
     pycaw_module.AudioUtilities = SimpleNamespace(GetSpeakers=lambda: device)
     pycaw_module.IAudioEndpointVolume = endpoint_volume_type
 
-    monkeypatch.setattr("app.system.volume.os.name", "nt")
     monkeypatch.setitem(sys.modules, "comtypes", comtypes)
     monkeypatch.setitem(sys.modules, "pycaw", pycaw_package)
     monkeypatch.setitem(sys.modules, "pycaw.pycaw", pycaw_module)
@@ -85,7 +84,7 @@ def test_volume_uses_endpoint_volume_from_current_pycaw(
 
     initialized, _ = _install_audio_modules(monkeypatch, CurrentAudioDevice())
 
-    result = asyncio.run(WindowsVolumeController(step_percent=5).increase())
+    result = asyncio.run(WindowsVolumeController(step_percent=5, os_name="nt").increase())
 
     assert result == (45, False)
     assert endpoint.level == pytest.approx(0.45)
@@ -117,7 +116,7 @@ def test_volume_falls_back_to_activate_for_legacy_pycaw(
 
     monkeypatch.setattr(ctypes, "cast", fake_cast)
 
-    result = asyncio.run(WindowsVolumeController(step_percent=5).decrease())
+    result = asyncio.run(WindowsVolumeController(step_percent=5, os_name="nt").decrease())
 
     assert result == (45, False)
     assert activation_calls == [("endpoint-volume-iid", "all-contexts", None)]
@@ -135,7 +134,7 @@ def test_volume_wraps_pycaw_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_audio_modules(monkeypatch, UnavailableAudioDevice())
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(WindowsVolumeController().increase())
+        asyncio.run(WindowsVolumeController(os_name="nt").increase())
 
     assert caught.value.code == "volume_unavailable"
     assert caught.value.message == "無法使用 Windows 系統音量。"
@@ -153,6 +152,6 @@ def test_volume_preserves_existing_command_errors(monkeypatch: pytest.MonkeyPatc
     _install_audio_modules(monkeypatch, FailingAudioDevice())
 
     with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(WindowsVolumeController().increase())
+        asyncio.run(WindowsVolumeController(os_name="nt").increase())
 
     assert caught.value is expected

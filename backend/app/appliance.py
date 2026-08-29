@@ -18,9 +18,9 @@ MINIMUM_PYTHON = (3, 11)
 CONTROLLER_MODULE = "app.main:app"
 
 
-def venv_python(root: Path | None = None) -> Path:
+def venv_python(root: Path | None = None, *, os_name: str = os.name) -> Path:
     base = root or project_root()
-    if os.name == "nt":
+    if os_name == "nt":
         return base / ".venv" / "Scripts" / "python.exe"
     return base / ".venv" / "bin" / "python"
 
@@ -63,10 +63,13 @@ def port_is_listening(port: int, host: str = "127.0.0.1") -> bool:
         return probe.connect_ex((host, port)) == 0
 
 
-def chrome_launcher_args(executable: Path, url: str, user_data_dir: Path) -> list[str]:
+def chrome_launcher_args(
+    executable: Path, url: str, user_data_dir: Path, *, os_name: str = os.name
+) -> list[str]:
     user_data_dir.mkdir(parents=True, exist_ok=True)
+    exe_str = executable.as_posix() if os_name != "nt" else str(executable)
     arguments = [
-        str(executable),
+        exe_str,
         "--start-fullscreen",
         url,
         "--no-first-run",
@@ -78,7 +81,7 @@ def chrome_launcher_args(executable: Path, url: str, user_data_dir: Path) -> lis
         "--disable-sync",
         f"--user-data-dir={user_data_dir}",
     ]
-    if os.name != "nt":
+    if os_name != "nt":
         arguments.extend(["--password-store=basic", "--ozone-platform-hint=auto"])
     return arguments
 
@@ -459,6 +462,10 @@ def install_autostart(*, root: Path | None = None, remove: bool = False) -> None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="把這台電腦變成可攜式電視機上盒。",
     )

@@ -30,10 +30,11 @@ class ChildProcess(Protocol):
 logger = logging.getLogger(__name__)
 
 
-def default_mpv_ipc_name() -> str:
-    if os.name == "nt":
+def default_mpv_ipc_name(*, os_name: str = os.name, temp_dir: str | None = None) -> str:
+    if os_name == "nt":
         return rf"\\.\pipe\pc-tv-box-mpv-{os.getpid()}"
-    return os.path.join(tempfile.gettempdir(), f"pc-tv-box-mpv-{os.getpid()}.sock")
+    base_dir = temp_dir or tempfile.gettempdir()
+    return os.path.join(base_dir, f"pc-tv-box-mpv-{os.getpid()}.sock")
 
 
 class MpvController:

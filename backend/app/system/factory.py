@@ -23,8 +23,8 @@ class PlatformControllers:
     windows: WindowsWindowController | PosixWindowController
 
 
-def build_platform_controllers() -> PlatformControllers:
-    if os.name == "nt":
+def build_platform_controllers(*, os_name: str = os.name) -> PlatformControllers:
+    if os_name == "nt":
         return PlatformControllers(
             input=WindowsInputController(),
             volume=WindowsVolumeController(),

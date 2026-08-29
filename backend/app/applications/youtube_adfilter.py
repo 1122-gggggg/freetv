@@ -112,10 +112,14 @@ class YoutubeAdFilter:
             except Exception as error:  # noqa: BLE001 - retry until timeout
                 last_error = error
             await asyncio.sleep(0.2)
-        raise RuntimeError(f"Chrome debugger pages were not ready on 127.0.0.1:{port}: {last_error}")
+        raise RuntimeError(
+            f"Chrome debugger pages were not ready on 127.0.0.1:{port}: {last_error}"
+        )
 
     async def _configure_page(self, debugger_url: str) -> None:
-        async with websockets.connect(debugger_url, open_timeout=self._timeout, max_size=2**22) as socket:
+        async with websockets.connect(
+            debugger_url, open_timeout=self._timeout, max_size=2**22
+        ) as socket:
             await self._call(socket, 1, "Network.enable", {})
             await self._call(
                 socket,

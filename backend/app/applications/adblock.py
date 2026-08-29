@@ -5,11 +5,12 @@ import base64
 import hashlib
 import io
 import json
-from pathlib import Path
 import shutil
 import struct
-from typing import Any
+import sys
 import zipfile
+from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -114,7 +115,9 @@ def extract_crx3_id(header_bytes: bytes) -> str | None:
             break
         crx_id_bytes = header_bytes[pos + 2 : pos + 18]
         if len(crx_id_bytes) == 16:
-            return "".join(chr(ord("a") + (b >> 4)) + chr(ord("a") + (b & 0x0F)) for b in crx_id_bytes)
+            return "".join(
+                chr(ord("a") + (b >> 4)) + chr(ord("a") + (b & 0x0F)) for b in crx_id_bytes
+            )
         idx = pos + 1
     return None
 
@@ -277,9 +280,7 @@ def ensure_store_extension(
             computed_id = header_crx_id
 
         if computed_id and computed_id != extension_id:
-            raise ValueError(
-                f"Extension ID mismatch: expected {extension_id}, got {computed_id}"
-            )
+            raise ValueError(f"Extension ID mismatch: expected {extension_id}, got {computed_id}")
 
         if directory.exists():
             shutil.rmtree(directory, ignore_errors=True)
@@ -319,7 +320,13 @@ def ensure_tv_adblockers(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="下載並驗證電視 Chrome 設定檔使用的 AdBlock 擴充功能。")
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    parser = argparse.ArgumentParser(
+        description="下載並驗證電視 Chrome 設定檔使用的 AdBlock 擴充功能。"
+    )
     parser.add_argument(
         "--directory",
         type=Path,

@@ -110,7 +110,6 @@ def test_posix_physical_adapters_skip_virtual_names(monkeypatch) -> None:
 
 
 def test_posix_lan_peer_accepts_same_subnet(monkeypatch) -> None:
-    monkeypatch.setattr("app.system.network.os.name", "posix")
     monkeypatch.setattr(
         network,
         "eligible_lan_interface_names",
@@ -130,5 +129,5 @@ def test_posix_lan_peer_accepts_same_subnet(monkeypatch) -> None:
         },
     )
 
-    assert network.is_eligible_lan_peer(IPv4Address("192.168.1.50"))
-    assert not network.is_eligible_lan_peer(IPv4Address("10.0.0.2"))
+    assert network.is_eligible_lan_peer(IPv4Address("192.168.1.50"), os_name="posix")
+    assert not network.is_eligible_lan_peer(IPv4Address("10.0.0.2"), os_name="posix")

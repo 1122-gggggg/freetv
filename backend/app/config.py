@@ -115,8 +115,8 @@ def _windows_search_roots() -> tuple[Path, Path, Path]:
     return program_files, program_files_x86, local_app_data
 
 
-def _chrome_candidates() -> tuple[Path, ...]:
-    if os.name == "nt":
+def _chrome_candidates(*, os_name: str = os.name) -> tuple[Path, ...]:
+    if os_name == "nt":
         program_files, program_files_x86, local_app_data = _windows_search_roots()
         return (
             program_files / "Google" / "Chrome" / "Application" / "chrome.exe",
@@ -136,8 +136,8 @@ def _chrome_candidates() -> tuple[Path, ...]:
     )
 
 
-def _brave_candidates() -> tuple[Path, ...]:
-    if os.name == "nt":
+def _brave_candidates(*, os_name: str = os.name) -> tuple[Path, ...]:
+    if os_name == "nt":
         program_files, _, local_app_data = _windows_search_roots()
         return (
             program_files / "BraveSoftware" / "Brave-Browser" / "Application" / "brave.exe",
@@ -151,8 +151,8 @@ def _brave_candidates() -> tuple[Path, ...]:
     )
 
 
-def _edge_candidates() -> tuple[Path, ...]:
-    if os.name == "nt":
+def _edge_candidates(*, os_name: str = os.name) -> tuple[Path, ...]:
+    if os_name == "nt":
         program_files, program_files_x86, _ = _windows_search_roots()
         return (
             program_files_x86 / "Microsoft" / "Edge" / "Application" / "msedge.exe",
@@ -165,8 +165,8 @@ def _edge_candidates() -> tuple[Path, ...]:
     )
 
 
-def _mpv_candidates() -> tuple[Path, ...]:
-    if os.name == "nt":
+def _mpv_candidates(*, os_name: str = os.name) -> tuple[Path, ...]:
+    if os_name == "nt":
         program_files, _, local_app_data = _windows_search_roots()
         return (
             program_files / "mpv" / "mpv.exe",
@@ -181,33 +181,39 @@ def _mpv_candidates() -> tuple[Path, ...]:
     )
 
 
-def resolve_application_paths(settings: Settings) -> dict[str, Path | None]:
+def resolve_application_paths(
+    settings: Settings, *, os_name: str = os.name
+) -> dict[str, Path | None]:
     chrome_commands = (
         ("chrome.exe",)
-        if os.name == "nt"
+        if os_name == "nt"
         else ("google-chrome-stable", "google-chrome", "chromium", "chromium-browser", "chrome")
     )
-    brave_commands = ("brave.exe",) if os.name == "nt" else ("brave-browser", "brave")
+    brave_commands = ("brave.exe",) if os_name == "nt" else ("brave-browser", "brave")
     edge_commands = (
-        ("msedge.exe",) if os.name == "nt" else ("microsoft-edge-stable", "microsoft-edge")
+        ("msedge.exe",) if os_name == "nt" else ("microsoft-edge-stable", "microsoft-edge")
     )
-    mpv_commands = ("mpv.exe",) if os.name == "nt" else ("mpv",)
-    browser_commands = ("msedge.exe",) if os.name == "nt" else ("microsoft-edge", "firefox")
+    mpv_commands = ("mpv.exe",) if os_name == "nt" else ("mpv",)
+    browser_commands = ("msedge.exe",) if os_name == "nt" else ("microsoft-edge", "firefox")
     return {
         "chrome": find_executable(
-            settings.applications.chrome_path, _chrome_candidates(), chrome_commands
+            settings.applications.chrome_path, _chrome_candidates(os_name=os_name), chrome_commands
         ),
         "brave": find_executable(
-            settings.applications.brave_path, _brave_candidates(), brave_commands
+            settings.applications.brave_path, _brave_candidates(os_name=os_name), brave_commands
         ),
-        "edge": find_executable(settings.applications.edge_path, _edge_candidates(), edge_commands),
-        "mpv": find_executable(settings.applications.mpv_path, _mpv_candidates(), mpv_commands),
+        "edge": find_executable(
+            settings.applications.edge_path, _edge_candidates(os_name=os_name), edge_commands
+        ),
+        "mpv": find_executable(
+            settings.applications.mpv_path, _mpv_candidates(os_name=os_name), mpv_commands
+        ),
         "browser": find_executable(settings.applications.browser_path, (), browser_commands),
     }
 
 
-def detect_capabilities(settings: Settings) -> dict[str, bool]:
-    applications = resolve_application_paths(settings)
+def detect_capabilities(settings: Settings, *, os_name: str = os.name) -> dict[str, bool]:
+    applications = resolve_application_paths(settings, os_name=os_name)
     return {
         "chrome_available": applications["chrome"] is not None,
         "brave_available": applications["brave"] is not None,

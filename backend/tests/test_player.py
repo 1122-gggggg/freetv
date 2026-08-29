@@ -180,14 +180,11 @@ def test_mpv_preserves_current_channel_when_load_command_fails(tmp_path) -> None
     asyncio.run(scenario())
 
 
-def test_default_mpv_ipc_name_uses_unix_socket(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("app.player.mpv.os.name", "posix")
-    monkeypatch.setattr("app.player.mpv.tempfile.gettempdir", lambda: str(tmp_path))
-    name = default_mpv_ipc_name()
+def test_default_mpv_ipc_name_uses_unix_socket(tmp_path) -> None:
+    name = default_mpv_ipc_name(os_name="posix", temp_dir=str(tmp_path))
     assert name.startswith(str(tmp_path))
     assert name.endswith(".sock")
 
 
-def test_default_mpv_ipc_name_uses_windows_pipe(monkeypatch) -> None:
-    monkeypatch.setattr("app.player.mpv.os.name", "nt")
-    assert default_mpv_ipc_name().startswith(r"\\.\pipe\pc-tv-box-mpv-")
+def test_default_mpv_ipc_name_uses_windows_pipe() -> None:
+    assert default_mpv_ipc_name(os_name="nt").startswith(r"\\.\pipe\pc-tv-box-mpv-")
