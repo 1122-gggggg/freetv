@@ -1,19 +1,47 @@
 # PC TV Box
 
-A local Windows 11 controller that turns an HDMI-connected PC into a TV-style launcher. It serves a 10-foot TV interface at `/tv` and a paired phone remote at `/remote`; no cloud service, IPTV discovery/scraping, DRM bypass, custom ad-blocking engines, or arbitrary remote shell/keyboard API is included. YouTube and News ad blocking is provided exclusively by loading the verified Chrome Web Store AdBlock extension (`gighmmpiobklfepjocnamgkkbiglidom`) in an isolated TV Chrome profile.
+A local controller that turns an HDMI-connected Windows, macOS, or Linux PC into a TV-style launcher. Copy this folder to any computer, run one command, and that machine becomes a set-top box: a 10-foot TV interface at `/tv` and a paired phone remote at `/remote`. No cloud account, IPTV discovery/scraping, DRM bypass, custom ad-blocking engines, or arbitrary remote shell/keyboard API is included. YouTube and News ad blocking is provided exclusively by loading the verified Chrome Web Store AdBlock extension (`gighmmpiobklfepjocnamgkkbiglidom`) in an isolated TV Chrome profile.
 
 ## Requirements
 
-- Windows 11, signed in as the user who will run the TV controller.
-- Python 3.11+ for appliance deployment, available as `python` on `PATH` or through the Windows `py` launcher; Node.js LTS only for frontend development.
-- Google Chrome for YouTube/News TV playback and the Netflix standalone app window. Netflix still relies on Chrome/Widevine and the user's normal Netflix authorization.
+- Windows 10/11, macOS, or Linux, signed in as the user who will run the TV controller.
+- Python 3.11+ on `PATH` (`python` / `python3`, or the Windows `py` launcher).
+- Google Chrome or Chromium for YouTube/News TV playback and the Netflix standalone app window. Netflix still relies on Chrome/Widevine and the user's normal Netflix authorization.
 - [mpv](https://mpv.io/installation/) for Live TV.
 - Laptop/PC on a private LAN. Phone may be on another network if `cloudflared` is installed.
+- Linux remotes also need `xdotool` or `ydotool` for D-pad/touchpad injection, and `wpctl` or `pactl` for system volume.
+- Node.js LTS only if `frontend/dist` is missing (git clones). Release zips already include it.
 - Native Android builds additionally require Android Studio, its Android SDK, and a JDK. Native iOS builds require macOS/Xcode or an authenticated Expo EAS build account.
 
 ## Installation
 
-### Appliance (Release zip)
+### Any computer (recommended)
+
+Copy this repository or unzip `pc-tv-box.zip` from GitHub Releases, then:
+
+```bash
+python freetv.py
+```
+
+On macOS/Linux you can also run `sh ./run.sh` (zip extraction may drop the
+executable bit). On Windows, `run.cmd` or:
+
+```powershell
+py -3 .\freetv.py
+```
+
+That single command creates `.venv`, installs Python dependencies, verifies the official AdBlock extension, builds the frontend if needed, writes local config from examples, starts the controller on port `8765`, and opens the TV launcher fullscreen. Useful subcommands:
+
+```bash
+python freetv.py setup       # install only
+python freetv.py start       # start only
+python freetv.py doctor      # print Chrome/mpv/Python/OS readiness
+python freetv.py autostart   # start at login (Task Scheduler / systemd / launchd)
+```
+
+Skip the browser window with `python freetv.py start --no-browser`. Skip Cloudflare with `--no-tunnel`.
+
+### Appliance (Release zip, Windows PowerShell)
 
 Download `pc-tv-box.zip` from GitHub Releases, unzip it, enter the extracted
 `pc-tv-box` directory, then in PowerShell:
@@ -27,21 +55,25 @@ The zip includes a prebuilt `frontend\dist`, so setup needs Python 3.11+ and net
 
 ### Development (git clone)
 
-Open PowerShell in the repository root:
+```bash
+python freetv.py setup
+```
+
+or, on Windows PowerShell:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\setup.ps1
 ```
 
-The setup script selects a qualifying `python` or `py` runtime, creates `.venv`, installs Python dependencies, downloads and verifies the official Chrome Web Store AdBlock extension into `vendor/adblock`, and builds the frontend when `frontend\dist` is missing (requires Node.js LTS). An existing `.venv` must contain an isolated Python 3.11+ runtime; setup leaves an invalid environment untouched and asks you to remove or rename it manually. It also creates ignored `config/settings.json`, `config/channels.json`, and `config/news.json` from their examples. Default transport is plain HTTP on the private LAN. HTTPS mode additionally creates a controller-specific local CA plus an IP-address TLS certificate in ignored `config\tls`.
+The setup path selects a qualifying Python 3.11+ runtime, creates `.venv`, installs Python dependencies, downloads and verifies the official Chrome Web Store AdBlock extension into `vendor/adblock`, and builds the frontend when `frontend/dist` is missing (requires Node.js LTS). An existing `.venv` must contain an isolated Python 3.11+ runtime; setup leaves an invalid environment untouched and asks you to remove or rename it manually. It also creates ignored `config/settings.json`, `config/channels.json`, and `config/news.json` from their examples. Default transport is plain HTTP on the private LAN. HTTPS mode additionally creates a controller-specific local CA plus an IP-address TLS certificate in ignored `config/tls`.
 
 Configure nonstandard executable locations in `config/settings.json`:
 
 ```json
 {
   "applications": {
-    "chrome_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "chrome_path": "",
     "brave_path": "",
     "edge_path": "",
     "mpv_path": "",
@@ -50,28 +82,28 @@ Configure nonstandard executable locations in `config/settings.json`:
 }
 ```
 
-Empty browser fields use the standard Windows locations where available. The generic Browser tile falls back to Edge unless `browser_path` is configured.
+Empty browser fields use the standard OS locations where available (Windows Program Files, `/usr/bin`, `/Applications`). The generic Browser tile falls back to Chrome unless `browser_path` is configured.
 
 ## Start
 
-```powershell
-.\scripts\start.ps1
+```bash
+python freetv.py start
 ```
 
-The script starts the controller on port `8765`, waits for `/api/health`, then opens the local TV Launcher in Edge full-screen kiosk mode when Edge is available. It falls back to the default browser with a warning otherwise. Re-running it safely restarts only this repository's production controller when HTTP/HTTPS or TLS material changed; it refuses to stop an unrelated listener on the configured port. If `cloudflared` is on PATH it also starts a Cloudflare quick tunnel and reprints pairing with that HTTPS URL. On the first Windows Firewall prompt, allow the controller only on **Private** networks; do not create port-forwarding rules. In HTTPS mode it also creates/refreshes the local TLS certificate for current LAN IPs.
+Windows PowerShell equivalent: `.\scripts\start.ps1`.
+
+The controller binds port `8765`, waits for `/api/health`, then opens the local TV Launcher fullscreen in Chrome/Chromium when available. Re-running it starts a new controller only if the port is free; it refuses to stop an unrelated listener. If `cloudflared` is on PATH it also starts a Cloudflare quick tunnel and reprints pairing with that HTTPS URL.
 
 - TV Launcher: `<scheme>://127.0.0.1:8765/tv`
 - Phone Remote: `https://<id>.trycloudflare.com/remote` when the tunnel is up, otherwise `<scheme>://<PC-LAN-IP>:8765/remote`
 - Health: `<scheme>://127.0.0.1:8765/api/health`
 
-Use `http` for the default transport and `https` when `server.transport` is `"https"`.
-
-Scan the QR printed on the TV. The tunnel hostname changes each restart; rescan after `start.ps1`.
+Use `http` for the default transport and `https` when `server.transport` is `"https"`. Scan the QR printed on the TV. The tunnel hostname changes each restart; rescan after start.
 
 For frontend/backend development:
 
-```powershell
-.\scripts\dev.ps1
+```bash
+./scripts/dev.ps1
 ```
 
 It runs Vite on `http://127.0.0.1:5173` and proxies `/api` and `/ws` to the local backend.
@@ -83,7 +115,7 @@ It runs Vite on `http://127.0.0.1:5173` and proxies `/api` and `/ws` to the loca
 3. The PWA stores the opaque token in its local storage. The native app stores it in the OS secure store.
 4. The Remote reconnects automatically after temporary Wi-Fi or server interruptions.
 
-Pairing codes expire after 10 minutes and can be used once. Five failed attempts from one address pause further attempts for one minute. Use **Forget** on the Remote to remove its local token. Install `cloudflared` (`winget install Cloudflare.cloudflared`) for off-LAN control. Skip the tunnel with `.\scripts\start.ps1 -NoTunnel`.
+Pairing codes expire after 10 minutes and can be used once. Five failed attempts from one address pause further attempts for one minute. Use **Forget** on the Remote to remove its local token. Install `cloudflared` for off-LAN control. Skip the tunnel with `python freetv.py start --no-tunnel`.
 
 ## Native Remote app
 
@@ -264,7 +296,7 @@ For HTTPS mode, verify the same instance with its generated controller CA:
 
 ## Known limitations
 
-- The TV Launcher is a browser window, not a native Windows shell replacement. Configure Windows sign-in/autostart and use fullscreen/maximized browser behavior for the closest appliance flow.
+- The TV Launcher is a browser window, not a native OS shell replacement. Use `python freetv.py autostart` and Chrome/Chromium fullscreen for the closest appliance flow. Linux D-pad/volume need xdotool/ydotool and wpctl/pactl.
 - HTTP mode cannot install the Remote as a PWA (service workers require a secure context). HTTPS mode requires explicit trust of the controller local CA; the certificate contains literal current IP addresses, so `start.ps1` refreshes it after LAN-address changes.
 - Native Remote pairing uses QR or a manually entered numeric IP and remains HTTPS-only. The controller advertises mDNS metadata only in HTTPS mode, but the current native app does not yet provide automatic mDNS discovery.
 - Native iOS builds require macOS/Xcode or an authenticated Expo EAS account.

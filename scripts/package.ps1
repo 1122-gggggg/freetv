@@ -38,6 +38,9 @@ try {
     Copy-Item (Join-Path $Root 'config\channels.example.json') (Join-Path $Stage 'config\')
     Copy-Item (Join-Path $Root 'config\news.example.json') (Join-Path $Stage 'config\')
     Copy-Item (Join-Path $Root 'README.md') $Stage
+    Copy-Item (Join-Path $Root 'freetv.py') $Stage
+    Copy-Item (Join-Path $Root 'run.sh') $Stage
+    Copy-Item (Join-Path $Root 'run.cmd') $Stage
     Copy-Item (Join-Path $Root 'run.ps1') $Stage
     Copy-Item (Join-Path $Root 'docs\*.md') (Join-Path $Stage 'docs\')
 

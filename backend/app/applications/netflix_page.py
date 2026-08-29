@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from app.commands.ports import CommandExecutionError
 from app.protocol import Command, NetflixContext, NetflixStage
 
-RUNTIME_VERSION = "4"
+RUNTIME_VERSION = "7"
 ERROR_MESSAGES = {
     "netflix_page_unavailable": "無法連到 Netflix 控制頁面，請稍後再試。",
     "netflix_controller_unavailable": "無法載入 Netflix 遙控控制，請稍後再試。",
@@ -51,6 +51,8 @@ RUNTIME_STATUSES = {
     "playing",
     "paused",
     "fullscreen",
+    "speed",
+    "seek",
     "context",
     "submitted",
     "error",
@@ -63,7 +65,16 @@ FOCUS_REQUIRED_STATUSES = {
     "boundary",
     "clicked",
 }
-NO_FOCUS_STATUSES = {"closed", "history", "playing", "paused"}
+NO_FOCUS_STATUSES = {
+    "closed",
+    "history",
+    "playing",
+    "paused",
+    "speed",
+    "seek",
+    "context",
+    "submitted",
+}
 
 
 class NetflixAction(StrEnum):
@@ -78,8 +89,14 @@ class NetflixAction(StrEnum):
     BACK = "BACK"
     PLAY_PAUSE = "PLAY_PAUSE"
     FULLSCREEN = "FULLSCREEN"
+    SPEED_UP = "SPEED_UP"
+    SPEED_DOWN = "SPEED_DOWN"
+    SEEK_FORWARD_5 = "SEEK_FORWARD_5"
+    SEEK_BACKWARD_5 = "SEEK_BACKWARD_5"
     READ_CONTEXT = "READ_CONTEXT"
     SUBMIT_PRIMARY = "SUBMIT_PRIMARY"
+
+
 IDEMPOTENT_ACTIONS = {
     NetflixAction.FOCUS_PRIMARY,
     NetflixAction.FOCUS_EDITABLE,
@@ -95,6 +112,10 @@ COMMAND_ACTIONS: dict[Command, NetflixAction] = {
     Command.BACK: NetflixAction.BACK,
     Command.PLAY_PAUSE: NetflixAction.PLAY_PAUSE,
     Command.FULLSCREEN: NetflixAction.FULLSCREEN,
+    Command.SPEED_UP: NetflixAction.SPEED_UP,
+    Command.SPEED_DOWN: NetflixAction.SPEED_DOWN,
+    Command.SEEK_FORWARD_5: NetflixAction.SEEK_FORWARD_5,
+    Command.SEEK_BACKWARD_5: NetflixAction.SEEK_BACKWARD_5,
     Command.TAB: NetflixAction.FOCUS_NEXT,
 }
 
@@ -105,6 +126,7 @@ Operation = Callable[[Any], Awaitable[NetflixContext]]
 
 class _RetryableControllerError(RuntimeError):
     pass
+
 
 class _OutcomeUnknownError(RuntimeError):
     pass
@@ -120,6 +142,7 @@ def _is_netflix_host(url: str) -> bool:
     except ValueError:
         return False
     return host == "netflix.com" or host.endswith(".netflix.com")
+
 
 def _is_local_debugger_url(url: object) -> bool:
     if not isinstance(url, str) or not url:
@@ -147,13 +170,8 @@ def select_netflix_target(pages: list[dict[str, Any]]) -> str:
             ERROR_MESSAGES["netflix_target_unsupported"],
         )
 
-    debugger_pages = [
-        page for page in netflix if "webSocketDebuggerUrl" in page
-    ]
-    if any(
-        not _is_local_debugger_url(page.get("webSocketDebuggerUrl"))
-        for page in debugger_pages
-    ):
+    debugger_pages = [page for page in netflix if "webSocketDebuggerUrl" in page]
+    if any(not _is_local_debugger_url(page.get("webSocketDebuggerUrl")) for page in debugger_pages):
         raise CommandExecutionError(
             "netflix_target_unsupported",
             ERROR_MESSAGES["netflix_target_unsupported"],
@@ -189,7 +207,7 @@ class NetflixPageController:
         ).read_text(encoding="utf-8")
         self._focus: FocusFingerprint | None = None
         self._command_id = 0
-
+        self.last_playback_rate = 1.0
 
     async def initialize(self) -> NetflixContext:
         async def operation(socket: Any) -> NetflixContext:
@@ -223,7 +241,6 @@ class NetflixPageController:
                 except _RetryableControllerError:
                     raise _OutcomeUnknownError from None
             return context
-
 
         return await self._run_transaction(operation)
 
@@ -353,18 +370,20 @@ class NetflixPageController:
             previous_focus = {field: self._focus[field] for field in FINGERPRINT_FIELDS}
         action_json = json.dumps(action.value, ensure_ascii=True)
         focus_json = json.dumps(previous_focus, ensure_ascii=True)
-        expression = (
-            "globalThis.__freeTvNetflixControl.run("
-            f"{action_json}, {focus_json})"
-        )
+        expression = f"globalThis.__freeTvNetflixControl.run({action_json}, {focus_json})"
         return await self._evaluate(
             socket,
             expression,
             outcome_unknown_on_failure=action not in IDEMPOTENT_ACTIONS,
-            user_gesture=action in {
+            user_gesture=action
+            in {
                 NetflixAction.OK,
                 NetflixAction.PLAY_PAUSE,
                 NetflixAction.FULLSCREEN,
+                NetflixAction.SPEED_UP,
+                NetflixAction.SPEED_DOWN,
+                NetflixAction.SEEK_FORWARD_5,
+                NetflixAction.SEEK_BACKWARD_5,
             },
         )
 
@@ -372,7 +391,7 @@ class NetflixPageController:
         if not isinstance(result, dict):
             raise _RetryableControllerError
         keys = set(result)
-        allowed_keys = {"ok", "status", "code", "focus", "context"}
+        allowed_keys = {"ok", "status", "code", "focus", "context", "rate"}
         if not {"ok", "status"}.issubset(keys) or not keys <= allowed_keys:
             raise _RetryableControllerError
 
@@ -393,13 +412,21 @@ class NetflixPageController:
                 or code not in RUNTIME_ERROR_CODES
                 or "focus" in result
                 or "context" in result
+                or "rate" in result
             ):
                 raise _RetryableControllerError
+
+        rate_value = result.get("rate")
+        if ok and status == "speed":
+            if type(rate_value) not in {int, float} or not 0.25 <= float(rate_value) <= 4:
+                raise _RetryableControllerError
+        elif "rate" in result:
+            raise _RetryableControllerError
 
         has_focus = "focus" in result
         if ok and status in FOCUS_REQUIRED_STATUSES and not has_focus:
             raise _RetryableControllerError
-        if ok and status in {"closed", "history", "paused", "context", "submitted"} and has_focus:
+        if ok and status in NO_FOCUS_STATUSES and has_focus:
             raise _RetryableControllerError
 
         accepted_focus: FocusFingerprint | None = None
@@ -429,7 +456,10 @@ class NetflixPageController:
             self._focus = accepted_focus
         elif status == "submitted":
             self._focus = None
+        if ok and status == "speed":
+            self.last_playback_rate = float(rate_value)
         return context
+
     async def _call(
         self,
         socket: Any,

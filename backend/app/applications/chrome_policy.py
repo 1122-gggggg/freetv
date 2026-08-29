@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from collections.abc import Callable
 
 from app.applications.adblock import ADBLOCK_EXTENSION_ID, ADBLOCK_YOUTUBE_EXTENSION_ID
@@ -28,6 +30,8 @@ def force_install_entries() -> list[tuple[str, str]]:
 
 def apply_force_install(writer: Callable[[str, str], None] | None = None) -> list[tuple[str, str]]:
     entries = force_install_entries()
+    if writer is None and os.name != "nt":
+        return entries
     write = writer or _write_hkcu_string
     for name, value in entries:
         write(name, value)
@@ -45,6 +49,10 @@ def _write_hkcu_string(name: str, value: str) -> None:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(
         description="為這個 Windows 使用者強制安裝電視盒用的商店 AdBlock。"
     )

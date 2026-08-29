@@ -20,8 +20,6 @@ class ActiveApp(StrEnum):
 class LauncherTile(StrEnum):
     YOUTUBE = "youtube"
     NETFLIX = "netflix"
-    LIVE_TV = "live_tv"
-    BROWSER = "browser"
     NEWS = "news"
     SETTINGS = "settings"
 

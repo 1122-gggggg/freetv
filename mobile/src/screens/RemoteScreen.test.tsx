@@ -293,7 +293,13 @@ describe('RemoteScreen', () => {
       })
     }
     const media = root.findByType(MediaControls)
-    for (const command of ['BACK', 'PLAY_PAUSE', 'FULLSCREEN'] as const) {
+    for (const command of [
+      'BACK',
+      'PLAY_PAUSE',
+      'SEEK_BACKWARD_5',
+      'SEEK_FORWARD_5',
+      'FULLSCREEN',
+    ] as const) {
       await act(async () => {
         await media.props.onCommand(command)
       })
@@ -312,10 +318,14 @@ describe('RemoteScreen', () => {
       'OK',
       'BACK',
       'PLAY_PAUSE',
+      'SEEK_BACKWARD_5',
+      'SEEK_FORWARD_5',
       'FULLSCREEN',
     ])
     expect(latestMockSocket!.sendTextInput).toHaveBeenCalledWith(text, false)
     expect(root.findByProps({ accessibilityLabel: '全螢幕' })).toBeTruthy()
+    expect(root.findByProps({ accessibilityLabel: '倒退五秒' })).toBeTruthy()
+    expect(root.findByProps({ accessibilityLabel: '快轉五秒' })).toBeTruthy()
   })
 
   it('surfaces failed command ACK in error banner and clears on success', async () => {

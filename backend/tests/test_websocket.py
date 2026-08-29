@@ -61,9 +61,13 @@ class FakeApplications:
     async def forward_command(self, command: Command) -> NetflixContext | None:
         return self.next_context
 
-    async def type_text(
-        self, text: str, submit: bool = False
-    ) -> NetflixContext | None:
+    async def adjust_playback_rate(self, direction: int) -> float:
+        return 1.25 if direction > 0 else 0.75
+
+    async def seek(self, direction: int) -> None:
+        return None
+
+    async def type_text(self, text: str, submit: bool = False) -> NetflixContext | None:
         return self.next_context
 
     def require_input_target(self, app: ActiveApp) -> None:
@@ -79,9 +83,9 @@ class FakeApplications:
         assert self.lifecycle_callback is not None
         await self.lifecycle_callback(app)
 
-
     async def shutdown(self) -> None:
         return None
+
 
 @dataclass
 class FakePlayer:
@@ -251,7 +255,6 @@ def test_paired_remote_receives_acknowledgement_and_state_after_command(tmp_path
     assert state["focused_tile"] == "netflix"
 
 
-
 def test_netflix_context_is_broadcast_as_object_then_null_on_home(tmp_path) -> None:
     app = make_app(tmp_path)
     runtime = app.state.runtime
@@ -263,9 +266,7 @@ def test_netflix_context_is_broadcast_as_object_then_null_on_home(tmp_path) -> N
     token = runtime.pairing.pair("482731")
 
     with secure_remote_client(app) as client:
-        with client.websocket_connect(
-            REMOTE_SOCKET_URL, headers=TRUSTED_REMOTE_HEADERS
-        ) as socket:
+        with client.websocket_connect(REMOTE_SOCKET_URL, headers=TRUSTED_REMOTE_HEADERS) as socket:
             authenticate(socket, token, "auth-context")
             socket.send_json(
                 {
@@ -296,6 +297,7 @@ def test_netflix_context_is_broadcast_as_object_then_null_on_home(tmp_path) -> N
             assert socket.receive_json()["success"] is True
             assert socket.receive_json()["netflix_context"] is None
 
+
 def test_all_paired_remotes_receive_state_broadcasts(tmp_path) -> None:
     app = make_app(tmp_path)
     runtime = app.state.runtime
@@ -318,8 +320,8 @@ def test_all_paired_remotes_receive_state_broadcasts(tmp_path) -> None:
             first_state = first.receive_json()
             second_state = second.receive_json()
 
-    assert first_state["focused_tile"] == "live_tv"
-    assert second_state["focused_tile"] == "live_tv"
+    assert first_state["focused_tile"] == "news"
+    assert second_state["focused_tile"] == "news"
 
 
 def test_unexpected_netflix_exit_broadcasts_cleared_context_to_all_remotes(
@@ -391,6 +393,7 @@ def test_remote_socket_uses_a_distinct_close_code_for_invalid_tokens(tmp_path) -
 
     assert error.value.code == 4401
 
+
 def test_invalid_remote_command_is_rejected_after_successful_authentication(tmp_path) -> None:
     app = make_app(tmp_path)
     token = app.state.runtime.pairing.pair("482731")
@@ -457,9 +460,7 @@ def test_remote_socket_rejects_a_missing_origin(tmp_path) -> None:
 
     with secure_remote_client(app) as client:
         with pytest.raises(WebSocketDisconnect) as error:
-            with client.websocket_connect(
-                REMOTE_SOCKET_URL, headers={"host": "127.0.0.1:8765"}
-            ):
+            with client.websocket_connect(REMOTE_SOCKET_URL, headers={"host": "127.0.0.1:8765"}):
                 pass
 
     assert error.value.code == 1008
@@ -475,9 +476,7 @@ def test_remote_socket_rejects_plain_websocket_from_the_lan_in_https_mode(
         "net_if_addrs",
         lambda: {
             "Wi-Fi": [
-                SimpleNamespace(
-                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
-                )
+                SimpleNamespace(family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0")
             ]
         },
     )
@@ -489,6 +488,7 @@ def test_remote_socket_rejects_plain_websocket_from_the_lan_in_https_mode(
                 pass
 
     assert error.value.code == 1008
+
 
 def test_remote_socket_rejects_connections_when_pre_auth_capacity_is_exhausted(tmp_path) -> None:
     app = make_app(tmp_path)
@@ -575,6 +575,7 @@ def test_pairing_code_endpoint_rejects_an_untrusted_host_from_loopback(tmp_path)
 
     assert response.status_code == 403
 
+
 def test_pairing_code_endpoint_includes_lan_remote_url(tmp_path, monkeypatch) -> None:
     app = make_app(tmp_path)
     monkeypatch.delenv("PC_TV_PUBLIC_ORIGIN", raising=False)
@@ -630,9 +631,7 @@ def test_pairing_accepts_public_tunnel_origin_from_public_peer(tmp_path, monkeyp
     assert app.state.runtime.pairing.verify_token(response.json()["token"])
 
 
-def test_remote_socket_accepts_public_tunnel_origin_from_public_peer(
-    tmp_path, monkeypatch
-) -> None:
+def test_remote_socket_accepts_public_tunnel_origin_from_public_peer(tmp_path, monkeypatch) -> None:
     app = make_app(tmp_path)
     monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
     headers = {
@@ -668,7 +667,6 @@ def test_parse_cloudflared_origin_from_log_line() -> None:
     assert main.parse_cloudflared_origin("no url here") is None
 
 
-
 def test_pairing_endpoint_rejects_an_oversized_body_before_validation(tmp_path) -> None:
     app = make_app(tmp_path)
 
@@ -692,9 +690,7 @@ def test_pairing_endpoint_rejects_plain_http_from_the_lan_in_https_mode(
         "net_if_addrs",
         lambda: {
             "Wi-Fi": [
-                SimpleNamespace(
-                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
-                )
+                SimpleNamespace(family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0")
             ]
         },
     )
@@ -705,6 +701,7 @@ def test_pairing_endpoint_rejects_plain_http_from_the_lan_in_https_mode(
 
     assert response.status_code == 403
 
+
 def test_pairing_accepts_the_controller_lan_ip_origin(tmp_path, monkeypatch) -> None:
     app = make_app(tmp_path)
     lan_ip = "192.168.1.44"
@@ -713,9 +710,7 @@ def test_pairing_accepts_the_controller_lan_ip_origin(tmp_path, monkeypatch) -> 
         "net_if_addrs",
         lambda: {
             "Wi-Fi": [
-                SimpleNamespace(
-                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
-                )
+                SimpleNamespace(family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0")
             ]
         },
     )
@@ -738,9 +733,7 @@ def test_pairing_accepts_plain_http_from_the_lan_in_http_mode(tmp_path, monkeypa
         "net_if_addrs",
         lambda: {
             "Wi-Fi": [
-                SimpleNamespace(
-                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
-                )
+                SimpleNamespace(family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0")
             ]
         },
     )
@@ -765,9 +758,7 @@ def test_remote_socket_accepts_plain_websocket_from_the_lan_in_http_mode(
         "net_if_addrs",
         lambda: {
             "Wi-Fi": [
-                SimpleNamespace(
-                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
-                )
+                SimpleNamespace(family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0")
             ]
         },
     )
@@ -793,6 +784,7 @@ def test_pairing_code_endpoint_uses_https_remote_url_in_https_mode(tmp_path, mon
 
     assert response.status_code == 200
     assert response.json()["remote_url"] == "https://192.168.1.42:8765/remote"
+
 
 def test_pairing_endpoint_rejects_non_ascii_digits_before_pairing(tmp_path) -> None:
     app = make_app(tmp_path)
@@ -933,9 +925,7 @@ def test_remote_socket_accepts_same_subnet_lan_peer(tmp_path, monkeypatch) -> No
         "net_if_addrs",
         lambda: {
             "Wi-Fi": [
-                SimpleNamespace(
-                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
-                )
+                SimpleNamespace(family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0")
             ]
         },
     )
@@ -973,9 +963,7 @@ def test_remote_token_revocation_accepts_same_subnet_lan_peer(tmp_path, monkeypa
         "net_if_addrs",
         lambda: {
             "Wi-Fi": [
-                SimpleNamespace(
-                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
-                )
+                SimpleNamespace(family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0")
             ]
         },
     )
@@ -1004,9 +992,7 @@ def test_remote_socket_rejects_off_subnet_peer(tmp_path, monkeypatch) -> None:
         "net_if_addrs",
         lambda: {
             "Wi-Fi": [
-                SimpleNamespace(
-                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
-                )
+                SimpleNamespace(family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0")
             ]
         },
     )
@@ -1033,9 +1019,7 @@ def test_pairing_endpoint_rejects_off_subnet_peer(tmp_path, monkeypatch) -> None
         "net_if_addrs",
         lambda: {
             "Wi-Fi": [
-                SimpleNamespace(
-                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
-                )
+                SimpleNamespace(family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0")
             ]
         },
     )
@@ -1061,9 +1045,7 @@ def test_pairing_endpoint_rejects_global_and_link_local_and_ipv6_peers(
         "net_if_addrs",
         lambda: {
             "Wi-Fi": [
-                SimpleNamespace(
-                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
-                )
+                SimpleNamespace(family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0")
             ]
         },
     )
@@ -1088,9 +1070,7 @@ def test_remote_token_revocation_rejects_off_subnet_peer(tmp_path, monkeypatch) 
         "net_if_addrs",
         lambda: {
             "Wi-Fi": [
-                SimpleNamespace(
-                    family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0"
-                )
+                SimpleNamespace(family=main.socket.AF_INET, address=lan_ip, netmask="255.255.255.0")
             ]
         },
     )
@@ -1231,6 +1211,7 @@ def test_private_virtual_or_cellular_adapters_are_not_controller_or_remote_lans(
     assert main._is_trusted_remote_peer("192.168.1.87")
     assert not main._is_trusted_remote_peer("172.20.0.42")
     assert not main._is_trusted_remote_peer("10.0.0.99")
+
 
 def test_remote_socket_dispatches_search_video_and_broadcasts_state(tmp_path) -> None:
     app = make_app(tmp_path, transport="https")

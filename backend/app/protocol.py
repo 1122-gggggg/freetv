@@ -25,6 +25,10 @@ class Command(StrEnum):
     HOME = "HOME"
     PLAY_PAUSE = "PLAY_PAUSE"
     FULLSCREEN = "FULLSCREEN"
+    SPEED_UP = "SPEED_UP"
+    SPEED_DOWN = "SPEED_DOWN"
+    SEEK_FORWARD_5 = "SEEK_FORWARD_5"
+    SEEK_BACKWARD_5 = "SEEK_BACKWARD_5"
     NEXT = "NEXT"
     PREVIOUS = "PREVIOUS"
     VOLUME_UP = "VOLUME_UP"
@@ -38,7 +42,6 @@ class Command(StrEnum):
     OPEN_BROWSER = "OPEN_BROWSER"
     OPEN_NEWS = "OPEN_NEWS"
     POWER_SLEEP = "POWER_SLEEP"
-
 
 
 class NetflixStage(StrEnum):
@@ -72,6 +75,7 @@ class NetflixContext(BaseModel):
         if self.stage is not NetflixStage.BROWSE and self.focused_title is not None:
             raise ValueError("focused_title is only valid during browse")
         return self
+
 
 class PointerAction(StrEnum):
     MOVE = "move"
@@ -138,7 +142,6 @@ class TextInputMessage(WireModel):
         return sanitized
 
 
-
 class SearchVideoMessage(WireModel):
     version: Literal[PROTOCOL_VERSION]
     type: Literal["search_video"]
@@ -154,6 +157,7 @@ class SearchVideoMessage(WireModel):
         if not sanitized:
             raise ValueError("Search query must include visible characters.")
         return sanitized
+
 
 ClientMessage = Annotated[
     AuthenticationMessage

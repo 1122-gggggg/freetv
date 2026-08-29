@@ -4,16 +4,18 @@ import json
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
+
 from app.config import (
     ApplicationSettings,
     Settings,
     UrlSettings,
     detect_capabilities,
+    find_executable,
     load_settings,
     resolve_application_paths,
 )
 from app.controller import build_runtime
-from pydantic import ValidationError
 
 
 def test_load_settings_merges_defaults_with_local_overrides(tmp_path) -> None:
@@ -126,7 +128,17 @@ def test_resolve_application_paths_finds_winget_mpv(tmp_path, monkeypatch) -> No
     monkeypatch.setenv("ProgramFiles(x86)", str(tmp_path / "Program Files (x86)"))
     monkeypatch.delenv("PATH", raising=False)
 
-    paths = resolve_application_paths(Settings())
+    paths = resolve_application_paths(Settings(), os_name="nt")
     assert paths["mpv"] == mpv_exe
 
 
+def test_find_executable_accepts_multiple_command_names(tmp_path, monkeypatch) -> None:
+    chrome = tmp_path / "google-chrome"
+    chrome.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.config.shutil.which",
+        lambda command: str(chrome) if command == "google-chrome-stable" else None,
+    )
+
+    found = find_executable("", (), ("google-chrome-stable", "chromium"))
+    assert found == chrome

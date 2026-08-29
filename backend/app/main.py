@@ -47,6 +47,7 @@ ACKNOWLEDGEMENT_SEND_TIMEOUT_SECONDS = 2.0
 HTML_SECURITY_HEADERS = {
     "Content-Security-Policy": "frame-ancestors 'none'",
     "X-Frame-Options": "DENY",
+    "Cache-Control": "no-store",
 }
 
 
@@ -248,9 +249,7 @@ def create_app(
         )
         token = _bearer_token(request)
         if token is None or not app.state.runtime.pairing.verify_token(token):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="遙控器權杖無效。"
-            )
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="遙控器權杖無效。")
         connections: ConnectionRegistry = app.state.connections
         async with app.state.dispatch_lock:
             app.state.runtime.pairing.revoke_token(token)
@@ -337,9 +336,7 @@ def create_app(
                         pass
             except TimeoutError:
                 log_event(logger, "remote_session_expired", client=client_host)
-                await _send_error(
-                    websocket, "authentication_failed", "遙控器權杖已過期。"
-                )
+                await _send_error(websocket, "authentication_failed", "遙控器權杖已過期。")
                 await websocket.close(code=REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE)
             except WebSocketDisconnect:
                 return
@@ -369,14 +366,10 @@ def create_app(
                 try:
                     message = parse_client_message(await websocket.receive_json())
                 except (ValidationError, ValueError, TypeError):
-                    await _send_error(
-                        websocket, "invalid_message", "訊息不符合通訊協定第 1 版。"
-                    )
+                    await _send_error(websocket, "invalid_message", "訊息不符合通訊協定第 1 版。")
                     continue
                 if not isinstance(message, CommandMessage):
-                    await _send_error(
-                        websocket, "invalid_message", "電視端只接受指令。"
-                    )
+                    await _send_error(websocket, "invalid_message", "電視端只接受指令。")
                     continue
                 if not await _dispatch_and_broadcast(app, websocket, message):
                     return
@@ -394,10 +387,9 @@ def create_app(
     async def frontend_public_asset(request: Request) -> FileResponse:
         path = frontend / request.url.path.rsplit("/", maxsplit=1)[-1]
         if not path.is_file():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="尚未建置前端資源。"
-            )
-        return FileResponse(path)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="尚未建置前端資源。")
+        headers = {"Cache-Control": "no-cache"} if path.name == "service-worker.js" else None
+        return FileResponse(path, headers=headers)
 
     @app.get("/")
     @app.get("/tv")
@@ -425,15 +417,11 @@ async def _handle_remote_message(
     try:
         message = parse_client_message(payload)
     except (ValidationError, ValueError, TypeError):
-        await _send_error(
-            websocket, "invalid_message", "訊息不符合通訊協定第 1 版。"
-        )
+        await _send_error(websocket, "invalid_message", "訊息不符合通訊協定第 1 版。")
         return True
 
     if isinstance(message, AuthenticationMessage):
-        await _send_error(
-            websocket, "invalid_message", "僅能在連線時進行驗證。"
-        )
+        await _send_error(websocket, "invalid_message", "僅能在連線時進行驗證。")
         return True
     if await _dispatch_and_broadcast(app, websocket, message, session=session):
         return True

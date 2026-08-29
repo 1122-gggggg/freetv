@@ -95,9 +95,7 @@ class WindowsInputController:
             wheel_delta = ctypes.c_uint32(message.dy * WHEEL_DELTA).value
             self._send(self._mouse(0, 0, wheel_delta, MOUSEEVENTF_WHEEL))
         else:  # pragma: no cover - Pydantic prevents unknown actions.
-            raise CommandExecutionError(
-                "invalid_pointer_action", "不允許這個觸控板操作。"
-            )
+            raise CommandExecutionError("invalid_pointer_action", "不允許這個觸控板操作。")
 
     async def text(self, text: str) -> None:
         self._require_windows()
@@ -139,9 +137,7 @@ class WindowsInputController:
     @staticmethod
     def _require_windows() -> None:
         if os.name != "nt":
-            raise CommandExecutionError(
-                "windows_only", "僅能在 Windows 上使用輸入控制。"
-            )
+            raise CommandExecutionError("windows_only", "僅能在 Windows 上使用輸入控制。")
 
     @staticmethod
     def _send(*events: INPUT) -> None:
@@ -152,6 +148,4 @@ class WindowsInputController:
             len(events), ctypes.byref(array), ctypes.sizeof(INPUT)
         )
         if sent != len(events):
-            raise CommandExecutionError(
-                "windows_input_failed", "Windows 未接受這個輸入。"
-            )
+            raise CommandExecutionError("windows_input_failed", "Windows 未接受這個輸入。")

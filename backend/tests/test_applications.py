@@ -44,6 +44,7 @@ class FakeProcess:
         self.killed = True
         return None
 
+
 @dataclass
 class FakeLauncher:
     calls: list[list[str]] = field(default_factory=list)
@@ -66,8 +67,6 @@ class FakeLauncher:
         self.process = process
         self.processes.append(process)
         return process
-
-
 
 
 @dataclass
@@ -151,6 +150,7 @@ class FakeNetflixPageController:
     block_execute: bool = False
     cancellations: int = 0
     initializations: int = 0
+    last_playback_rate: float = 1.0
 
     async def initialize(self) -> NetflixContext:
         self.attempts.append("initialize")
@@ -173,16 +173,15 @@ class FakeNetflixPageController:
         if self.failure is not None:
             raise self.failure
         self.actions.append(command)
+        if command in {Command.SPEED_UP, Command.SPEED_DOWN}:
+            self.last_playback_rate = 1.25 if command is Command.SPEED_UP else 0.75
         return self.context
 
-    async def type_text(
-        self, text: str, submit: bool = False
-    ) -> NetflixContext:
+    async def type_text(self, text: str, submit: bool = False) -> NetflixContext:
         if self.failure is not None:
             raise self.failure
         self.typed.append((text, submit))
         return self.context
-
 
 
 @dataclass
@@ -199,6 +198,9 @@ class FakeYoutubeFullscreen:
     fail_start: bool = False
     force_ports: list[int] = field(default_factory=list)
     force_failure: CommandExecutionError | None = None
+    rate_calls: list[tuple[int, int]] = field(default_factory=list)
+    seek_calls: list[tuple[int, int]] = field(default_factory=list)
+    next_rate: float = 1.25
 
     async def start(self, port: int) -> None:
         self.events.append(f"start:{port}")
@@ -213,6 +215,13 @@ class FakeYoutubeFullscreen:
         if self.force_failure is not None:
             raise self.force_failure
         return True
+
+    async def adjust_playback_rate(self, port: int, direction: int) -> float:
+        self.rate_calls.append((port, direction))
+        return self.next_rate
+
+    async def seek(self, port: int, direction: int) -> None:
+        self.seek_calls.append((port, direction))
 
 
 def _ready_adblock(tmp_path: Path) -> Path:
@@ -290,7 +299,6 @@ def test_netflix_chrome_launches_as_standalone_app_window_without_positional_url
     manager, launcher, _, _ = make_manager()
     asyncio.run(manager.open(ActiveApp.NETFLIX))
 
-
     argv = launcher.calls[0]
     netflix_url = manager._settings.urls.netflix
     expected_app_arg = f"--app={netflix_url}"
@@ -305,8 +313,7 @@ def test_netflix_chrome_launches_as_standalone_app_window_without_positional_url
     assert argv.count("--remote-debugging-address=127.0.0.1") == 1
     assert argv.count("--remote-debugging-port=9444") == 1
     assert any(
-        argument.startswith("--user-data-dir=")
-        and "chrome-netflix-profile" in argument
+        argument.startswith("--user-data-dir=") and "chrome-netflix-profile" in argument
         for argument in argv
     )
     assert argv.count("--disable-notifications") == 1
@@ -385,7 +392,6 @@ def test_netflix_text_and_tab_use_page_controller_without_windows_input(
     asyncio.run(scenario())
 
 
-
 def test_mark_chrome_profile_clean_exit_clears_crash_state(tmp_path: Path) -> None:
     from app.applications.manager import mark_chrome_profile_clean_exit
 
@@ -399,7 +405,6 @@ def test_mark_chrome_profile_clean_exit_clears_crash_state(tmp_path: Path) -> No
     data = json.loads(prefs.read_text(encoding="utf-8"))
     assert data["profile"]["exit_type"] == "Normal"
     assert data["profile"]["exited_cleanly"] is True
-
 
 
 def test_opening_netflix_twice_reuses_the_same_window() -> None:
@@ -450,6 +455,7 @@ def test_search_youtube_replaces_an_existing_youtube_window() -> None:
     assert launcher.calls[1][-1] == "https://www.youtube.com/tv#/search?q=cat+videos"
     assert manager.active_app is ActiveApp.YOUTUBE
 
+
 def test_opening_youtube_twice_replaces_the_first_window() -> None:
     manager, launcher, windows, _ = make_manager()
     asyncio.run(manager.open(ActiveApp.YOUTUBE))
@@ -476,7 +482,6 @@ def test_opening_netflix_closes_playing_youtube() -> None:
     asyncio.run(scenario())
 
 
-
 def test_home_closes_youtube_but_keeps_netflix() -> None:
     async def scenario() -> None:
         manager, launcher, windows, _ = make_manager()
@@ -495,9 +500,6 @@ def test_home_closes_youtube_but_keeps_netflix() -> None:
     asyncio.run(scenario())
 
 
-
-
-
 def test_leave_to_desktop_closes_youtube_and_launcher(tmp_path: Path) -> None:
     async def scenario() -> None:
         manager, launcher, windows, _ = make_manager(adblock_dir=_ready_adblock(tmp_path))
@@ -509,8 +511,6 @@ def test_leave_to_desktop_closes_youtube_and_launcher(tmp_path: Path) -> None:
         assert manager.active_app is ActiveApp.LAUNCHER
 
     asyncio.run(scenario())
-
-
 
 
 def test_open_news_opens_kiosk_chrome_with_live_url(tmp_path: Path) -> None:
@@ -627,9 +627,6 @@ def test_youtube_fullscreen_start_failure_rolls_back_new_process() -> None:
         assert manager._children == []
 
     asyncio.run(scenario())
-
-
-
 
 
 def test_unexpected_youtube_exit_stops_probe_and_notifies_lifecycle() -> None:
@@ -765,7 +762,6 @@ def test_process_exit_is_handled_on_next_poll_without_window_grace() -> None:
     asyncio.run(scenario())
 
 
-
 def test_watcher_rebinds_replacement_window_without_false_exit() -> None:
     async def scenario() -> None:
         exited: list[ActiveApp] = []
@@ -837,6 +833,52 @@ def test_fullscreen_routes_to_netflix_runtime_and_browser_f11() -> None:
 
         assert browser_context is None
         assert input_controller.commands == [Command.FULLSCREEN]
+        await manager.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_playback_rate_routes_to_youtube_and_netflix() -> None:
+    async def scenario() -> None:
+        fullscreen = FakeYoutubeFullscreen(next_rate=1.5)
+        netflix = FakeNetflixPageController()
+        manager, _, _, input_controller = make_manager(
+            netflix_page=netflix,
+            youtube_fullscreen=fullscreen,
+            debug_port=9222,
+        )
+
+        await manager.open(ActiveApp.YOUTUBE)
+        assert await manager.adjust_playback_rate(1) == 1.5
+        assert fullscreen.rate_calls == [(9222, 1)]
+
+        await manager.open(ActiveApp.NETFLIX)
+        assert await manager.adjust_playback_rate(-1) == 0.75
+        assert netflix.actions == [Command.SPEED_DOWN]
+        assert input_controller.commands == []
+        await manager.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_seek_routes_to_youtube_and_netflix() -> None:
+    async def scenario() -> None:
+        fullscreen = FakeYoutubeFullscreen()
+        netflix = FakeNetflixPageController()
+        manager, _, _, input_controller = make_manager(
+            netflix_page=netflix,
+            youtube_fullscreen=fullscreen,
+            debug_port=9222,
+        )
+
+        await manager.open(ActiveApp.YOUTUBE)
+        await manager.seek(1)
+        assert fullscreen.seek_calls == [(9222, 1)]
+
+        await manager.open(ActiveApp.NETFLIX)
+        await manager.seek(-1)
+        assert netflix.actions == [Command.SEEK_BACKWARD_5]
+        assert input_controller.commands == []
         await manager.shutdown()
 
     asyncio.run(scenario())
@@ -1005,8 +1047,6 @@ def test_reused_netflix_initial_focus_failure_reminimizes_without_closing(
     asyncio.run(scenario())
 
 
-
-
 def test_new_netflix_initialization_has_a_wall_clock_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1099,6 +1139,7 @@ def test_netflix_initial_focus_retries_until_page_dom_is_ready(
         assert manager.active_app is ActiveApp.NETFLIX
 
     asyncio.run(scenario())
+
 
 def test_shutdown_terminates_only_the_child_started_by_controller() -> None:
     async def scenario() -> None:

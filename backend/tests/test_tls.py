@@ -70,7 +70,6 @@ def test_tls_materials_reuse_the_local_ca_and_replace_leaf_for_new_ip_addresses(
     assert ("IP Address", "192.168.1.45") in certificate_san_entries(rotated.certificate)
 
 
-
 def test_tls_materials_rotate_the_leaf_when_a_lan_address_is_removed(tmp_path) -> None:
     directory = tmp_path / "tls"
     initial = ensure_tls_materials(
@@ -85,6 +84,7 @@ def test_tls_materials_rotate_the_leaf_when_a_lan_address_is_removed(tmp_path) -
     san = certificate_san_entries(rotated.certificate)
     assert ("IP Address", "192.168.1.44") in san
     assert ("IP Address", "192.168.1.45") not in san
+
 
 def test_tls_materials_filter_san_entries_to_loopback_and_eligible_private_addresses(
     tmp_path,

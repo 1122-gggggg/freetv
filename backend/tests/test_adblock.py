@@ -87,7 +87,9 @@ def test_ensure_adblock_rejects_wrong_extension_id_and_deletes_directory(tmp_pat
     assert not adblock_dir.exists()
 
 
-def test_ensure_adblock_rejects_missing_manifest_after_unpack_and_deletes_directory(tmp_path: Path) -> None:
+def test_ensure_adblock_rejects_missing_manifest_after_unpack_and_deletes_directory(
+    tmp_path: Path,
+) -> None:
     adblock_dir = tmp_path / "adblock"
     bad_crx = _make_mock_crx3(manifest_dict=None)
 
@@ -140,7 +142,9 @@ def _proto_bytes(field: int, payload: bytes) -> bytes:
     return _varint((field << 3) | 2) + _varint(len(payload)) + payload
 
 
-def _make_mock_crx3_with_public_key(manifest_dict: dict, public_key: bytes, extension_id: str) -> bytes:
+def _make_mock_crx3_with_public_key(
+    manifest_dict: dict, public_key: bytes, extension_id: str
+) -> bytes:
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", json.dumps(manifest_dict))
@@ -158,7 +162,9 @@ def test_ensure_store_extension_writes_manifest_key_from_crx_public_key(tmp_path
     public_key = b"\x30" + b"K" * 80
     extension_id = compute_extension_id(public_key)
     target = tmp_path / "ext"
-    crx = _make_mock_crx3_with_public_key({"name": "Store", "version": "1.0"}, public_key, extension_id)
+    crx = _make_mock_crx3_with_public_key(
+        {"name": "Store", "version": "1.0"}, public_key, extension_id
+    )
 
     result = ensure_store_extension(target, extension_id, crx_bytes=crx)
 
@@ -206,4 +212,3 @@ def test_ensure_tv_adblockers_installs_both_store_ids(tmp_path: Path) -> None:
     assert installed == (adblock, youtube)
     assert (adblock / "manifest.json").is_file()
     assert (youtube / "manifest.json").is_file()
-

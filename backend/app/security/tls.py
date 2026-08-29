@@ -133,6 +133,7 @@ def wait_for_lan_interface_addresses(
             )
         sleep(min(poll_interval_seconds, remaining))
 
+
 def certificate_fingerprint(certificate_path: Path) -> str:
     certificate = _load_ca_certificate(certificate_path)
     fingerprint = certificate.fingerprint(hashes.SHA256()).hex().upper()
@@ -145,6 +146,7 @@ def _certificate_addresses(addresses: Iterable[IPAddress]) -> tuple[IPAddress, .
         if _is_eligible_local_address(address):
             normalized.add(address)
     return tuple(sorted(normalized, key=lambda address: (address.version, address.packed)))
+
 
 def _load_or_create_ca(materials: TLSMaterialPaths) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
     certificate_exists = materials.ca_certificate.is_file()

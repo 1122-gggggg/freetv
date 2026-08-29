@@ -30,6 +30,10 @@ config/cloudflared.log
 config/cloudflared.out.log
 logs/
 
+# Agent tooling state
+.serena/
+.superpowers/
+
 # Appliance packages
 pc-tv-box.zip
 pc-tv-box-stage/

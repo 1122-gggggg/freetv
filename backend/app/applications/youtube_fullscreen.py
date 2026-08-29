@@ -8,6 +8,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import websockets
 
+from app.applications.playback_rate import PLAYBACK_RATE_STEPS
 from app.commands.ports import CommandExecutionError
 
 _INSPECT_EXPRESSION = """(() => {
@@ -53,11 +54,48 @@ def _fullscreen_expression(video_id: str) -> str:
 }})()"""
 
 
+def _rate_expression(direction: int) -> str:
+    steps = json.dumps(list(PLAYBACK_RATE_STEPS), ensure_ascii=True)
+    step = 1 if direction > 0 else -1
+    return f"""(() => {{
+  const steps = {steps};
+  const video = [...document.querySelectorAll('video')].find(
+    (element) => element instanceof HTMLVideoElement && element.readyState >= 2
+  );
+  if (!video) return null;
+  const current = Number(video.playbackRate) || 1;
+  let index = steps.findIndex((rate) => Math.abs(rate - current) < 0.01);
+  if (index < 0) index = steps.indexOf(1);
+  const next = steps[Math.max(0, Math.min(steps.length - 1, index + {step}))];
+  video.playbackRate = next;
+  return next;
+}})()"""
+
+
+def _seek_expression(direction: int) -> str:
+    seconds = 5 if direction > 0 else -5
+    return f"""(() => {{
+  const video = [...document.querySelectorAll('video')].find(
+    (element) => element instanceof HTMLVideoElement && element.readyState >= 2
+  );
+  if (!video) return false;
+  const duration = Number(video.duration);
+  const target = Math.max(
+    0,
+    Number.isFinite(duration)
+      ? Math.min(duration, video.currentTime + {seconds})
+      : video.currentTime + {seconds}
+  );
+  video.currentTime = target;
+  return true;
+}})()"""
+
+
 class YoutubeProbe(Protocol):
     async def inspect(self, port: int) -> tuple[str | None, bool, bool]: ...
-    async def fullscreen(
-        self, port: int, video_id: str, user_gesture: bool
-    ) -> bool: ...
+    async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> bool: ...
+    async def playback_rate(self, port: int, direction: int) -> float: ...
+    async def seek(self, port: int, direction: int) -> bool: ...
 
 
 def extract_video_identity(url: str) -> str | None:
@@ -112,6 +150,32 @@ class ShortCdpYoutubeProbe:
         )
         if type(value) is not bool:
             raise ValueError("YouTube fullscreen result is invalid")
+        return value
+
+    async def playback_rate(self, port: int, direction: int) -> float:
+        if direction not in {1, -1}:
+            raise ValueError("direction must be 1 or -1")
+        debugger_url = await self._debugger_url(port)
+        value = await self._evaluate(
+            debugger_url,
+            _rate_expression(direction),
+            user_gesture=True,
+        )
+        if type(value) not in {int, float}:
+            raise ValueError("YouTube playback rate result is invalid")
+        return float(value)
+
+    async def seek(self, port: int, direction: int) -> bool:
+        if direction not in {1, -1}:
+            raise ValueError("direction must be 1 or -1")
+        debugger_url = await self._debugger_url(port)
+        value = await self._evaluate(
+            debugger_url,
+            _seek_expression(direction),
+            user_gesture=True,
+        )
+        if type(value) is not bool:
+            raise ValueError("YouTube seek result is invalid")
         return value
 
     async def _debugger_url(self, port: int) -> str:
@@ -252,6 +316,47 @@ class YoutubeFullscreenController:
                     "目前沒有可切換為全螢幕的 YouTube 影片。",
                 )
             return True
+
+    async def adjust_playback_rate(self, port: int, direction: int) -> float:
+        playback_rate = getattr(self._probe, "playback_rate", None)
+        if playback_rate is None:
+            raise CommandExecutionError(
+                "youtube_video_unavailable",
+                "目前沒有可調整倍速的影片。",
+            )
+        try:
+            async with self._probe_lock:
+                rate = await playback_rate(port, 1 if direction > 0 else -1)
+        except CommandExecutionError:
+            raise
+        except Exception as error:
+            raise CommandExecutionError(
+                "youtube_video_unavailable",
+                "目前沒有可調整倍速的影片。",
+            ) from error
+        if type(rate) not in {int, float} or not 0.25 <= float(rate) <= 4:
+            raise CommandExecutionError(
+                "youtube_video_unavailable",
+                "目前沒有可調整倍速的影片。",
+            )
+        return float(rate)
+
+    async def seek(self, port: int, direction: int) -> None:
+        try:
+            async with self._probe_lock:
+                performed = await self._probe.seek(port, 1 if direction > 0 else -1)
+        except CommandExecutionError:
+            raise
+        except Exception as error:
+            raise CommandExecutionError(
+                "youtube_video_unavailable",
+                "目前沒有可快轉或倒退的影片。",
+            ) from error
+        if not performed:
+            raise CommandExecutionError(
+                "youtube_video_unavailable",
+                "目前沒有可快轉或倒退的影片。",
+            )
 
     async def _run(self, port: int) -> None:
         while True:

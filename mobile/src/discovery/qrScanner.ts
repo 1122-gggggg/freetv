@@ -46,11 +46,11 @@ export function parsePairingPayload(raw: string): ParsedPairingPayload | null {
       const url = new URL(trimmed)
       const host = url.hostname
       const portStr = url.port
-      const port = portStr ? parseInt(portStr, 10) : (url.protocol === 'https:' ? 443 : 80)
+      const port = portStr ? parseInt(portStr, 10) : url.protocol === 'https:' ? 443 : 80
       const code = url.searchParams.get('code')
       return {
         host,
-        port: port === 443 || port === 80 ? (portStr ? port : 8765) : port,
+        port,
         code: code && /^\d{6}$/.test(code) ? code : null,
       }
     } catch {

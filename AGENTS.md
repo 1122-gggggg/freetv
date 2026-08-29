@@ -2,7 +2,7 @@
 
 ## Product boundary
 
-This repository builds a per-user Windows 11 TV controller. It runs locally on the HDMI-connected PC and accepts paired remotes only over the LAN. It does not implement DRM bypass, custom ad-blocking engines, IPTV discovery/scraping, daily-Chrome profile mutation, arbitrary shell execution, or unrestricted remote keyboard control. Ad blocking for YouTube and News is provided exclusively by loading the verified Chrome Web Store AdBlock extension (`gighmmpiobklfepjocnamgkkbiglidom`) in an isolated TV Chrome profile.
+This repository builds a per-user TV controller for an HDMI-connected Windows, macOS, or Linux PC. It runs locally on that computer and accepts paired remotes only over the LAN. It does not implement DRM bypass, custom ad-blocking engines, IPTV discovery/scraping, daily-Chrome profile mutation, arbitrary shell execution, or unrestricted remote keyboard control. Ad blocking for YouTube and News is provided exclusively by loading the verified Chrome Web Store AdBlock extension (`gighmmpiobklfepjocnamgkkbiglidom`) in an isolated TV Chrome profile. The portable entry point is `freetv.py` (`python freetv.py`); Windows PowerShell scripts remain supported wrappers.
 
 ## Architecture invariants
 
@@ -11,7 +11,7 @@ This repository builds a per-user Windows 11 TV controller. It runs locally on t
 - Remote WebSocket traffic is authenticated after pairing. The TV WebSocket is loopback-only.
 - All remote input is a whitelist: commands, bounded relative pointer actions, and sanitized text input. Never add a raw command or arbitrary key-sequence API.
 - `ApplicationManager` owns applications launched by this project. Never terminate all Brave, Edge, or mpv processes; minimize a specific launched window or terminate tracked children only.
-- Windows-dependent code belongs behind small protocols with fake implementations for tests.
+- Platform-dependent code belongs behind small protocols with fake implementations for tests.
 - Configuration is typed and loaded from `config/settings.json`; example files are committed and local files, tokens, and logs are ignored.
 
 ## Python conventions

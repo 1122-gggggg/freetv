@@ -4,7 +4,9 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import subprocess
+import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -28,6 +30,13 @@ class ChildProcess(Protocol):
 logger = logging.getLogger(__name__)
 
 
+def default_mpv_ipc_name(*, os_name: str = os.name, temp_dir: str | None = None) -> str:
+    if os_name == "nt":
+        return rf"\\.\pipe\pc-tv-box-mpv-{os.getpid()}"
+    base_dir = temp_dir or tempfile.gettempdir()
+    return os.path.join(base_dir, f"pc-tv-box-mpv-{os.getpid()}.sock")
+
+
 class MpvController:
     def __init__(
         self,
@@ -41,7 +50,7 @@ class MpvController:
         self._channels = channels
         self._mpv_path = mpv_path
         self._launch_process = process_launcher or self._default_process_launcher
-        self._pipe_name = pipe_name or rf"\\.\pipe\pc-tv-box-mpv-{os.getpid()}"
+        self._pipe_name = pipe_name or default_mpv_ipc_name()
         self._send_ipc = ipc_sender or self._default_ipc_sender
         self._process: ChildProcess | None = None
 
@@ -56,6 +65,11 @@ class MpvController:
         if self._process is not None and self._process.poll() is None:
             await self._send_command(["loadfile", channel.url, "replace"])
         else:
+            if os.name != "nt":
+                try:
+                    Path(self._pipe_name).unlink(missing_ok=True)
+                except OSError:
+                    pass
             arguments = [
                 self._mpv_path.as_posix(),
                 "--fullscreen",
@@ -81,6 +95,11 @@ class MpvController:
             pass
         finally:
             self._process = None
+            if os.name != "nt":
+                try:
+                    Path(self._pipe_name).unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     async def toggle_pause(self) -> None:
         await self._send_command(["cycle", "pause"])
@@ -129,10 +148,16 @@ class MpvController:
         deadline = time.monotonic() + 1.5
         while True:
             try:
-                with open(self._pipe_name, "r+b", buffering=0) as connection:
-                    connection.write(payload)
-                    connection.flush()
+                if os.name == "nt":
+                    with open(self._pipe_name, "r+b", buffering=0) as connection:
+                        connection.write(payload)
+                        connection.flush()
                     return
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                    connection.settimeout(0.4)
+                    connection.connect(self._pipe_name)
+                    connection.sendall(payload)
+                return
             except OSError as error:
                 if time.monotonic() >= deadline:
                     raise error

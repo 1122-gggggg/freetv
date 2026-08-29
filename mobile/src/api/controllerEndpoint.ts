@@ -6,6 +6,25 @@ export function isIpv4Literal(host: string): boolean {
   )
 }
 
+function isDnsHostname(host: string): boolean {
+  if (host.length > 253 || host.startsWith('.') || host.endsWith('.')) return false
+  if (/^[\d.]+$/.test(host)) return false
+  const labels = host.split('.')
+  return (
+    labels.length >= 2 &&
+    labels.every(
+      (label) =>
+        label.length >= 1 &&
+        label.length <= 63 &&
+        /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label),
+    )
+  )
+}
+
+function isControllerHost(host: string): boolean {
+  return isIpv4Literal(host) || isDnsHostname(host)
+}
+
 export function parseControllerPort(rawPort: string | number | undefined | null): number {
   if (rawPort === undefined || rawPort === null) {
     return 8765
@@ -35,14 +54,17 @@ export function validateControllerTarget(
   rawPort?: string | number | null,
 ): { host: string; port: number } {
   if (typeof host !== 'string') {
-    throw new Error('請輸入有效的 IPv4 位址（例如 192.168.1.10）。')
+    throw new Error('請輸入有效的 IPv4 位址或安全網域名稱。')
   }
   const trimmedHost = host.trim()
-  if (!isIpv4Literal(trimmedHost)) {
-    throw new Error('請輸入有效的 IPv4 位址（例如 192.168.1.10）。')
+  if (!isControllerHost(trimmedHost)) {
+    throw new Error('請輸入有效的 IPv4 位址或安全網域名稱。')
   }
   const port = parseControllerPort(rawPort)
-  return { host: trimmedHost, port }
+  return {
+    host: isIpv4Literal(trimmedHost) ? trimmedHost : trimmedHost.toLowerCase(),
+    port,
+  }
 }
 
 export function controllerOrigin(host: string, port: number): string {
@@ -52,7 +74,7 @@ export function controllerOrigin(host: string, port: number): string {
     port > 65_535 ||
     typeof host !== 'string' ||
     host !== host.trim() ||
-    !isIpv4Literal(host)
+    !isControllerHost(host)
   ) {
     throw new Error('控制器主機或連接埠無效。')
   }

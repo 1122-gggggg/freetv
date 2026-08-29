@@ -7,9 +7,16 @@ from app.commands.ports import CommandExecutionError
 
 
 class WindowsVolumeController:
-    def __init__(self, *, step_percent: int = 5, endpoint: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        step_percent: int = 5,
+        endpoint: Any | None = None,
+        os_name: str = os.name,
+    ) -> None:
         self._step = step_percent / 100
         self._endpoint = endpoint
+        self._os_name = os_name
 
     async def increase(self) -> tuple[int, bool]:
         return self._adjust(self._step)
@@ -32,10 +39,8 @@ class WindowsVolumeController:
     def _get_endpoint(self) -> Any:
         if self._endpoint is not None:
             return self._endpoint
-        if os.name != "nt":
-            raise CommandExecutionError(
-                "windows_only", "僅能在 Windows 上調整系統音量。"
-            )
+        if self._os_name != "nt":
+            raise CommandExecutionError("windows_only", "僅能在 Windows 上調整系統音量。")
         try:
             from ctypes import POINTER, cast
 

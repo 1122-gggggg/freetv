@@ -11,6 +11,10 @@ export type Command =
   | 'HOME'
   | 'PLAY_PAUSE'
   | 'FULLSCREEN'
+  | 'SPEED_UP'
+  | 'SPEED_DOWN'
+  | 'SEEK_FORWARD_5'
+  | 'SEEK_BACKWARD_5'
   | 'NEXT'
   | 'PREVIOUS'
   | 'VOLUME_UP'
@@ -43,7 +47,7 @@ export interface ControllerState {
   version: 1
   type: 'state'
   active_app: 'launcher' | 'youtube' | 'netflix' | 'live_tv' | 'browser' | 'news'
-  focused_tile: 'youtube' | 'netflix' | 'live_tv' | 'browser' | 'news' | 'settings'
+  focused_tile: 'youtube' | 'netflix' | 'news' | 'settings'
   volume: number
   muted: boolean
   channel_number: number | null
