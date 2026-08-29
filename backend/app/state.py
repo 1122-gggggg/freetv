@@ -36,6 +36,7 @@ class ControllerState(BaseModel):
     status_message: str | None = Field(default=None, max_length=256)
     error_message: str | None = Field(default=None, max_length=256)
     netflix_context: NetflixContext | None = None
+    update_available: str | None = None
 
     def to_wire(self) -> StateMessage:
         return StateMessage(
@@ -49,6 +50,7 @@ class ControllerState(BaseModel):
             status_message=self.status_message,
             error_message=self.error_message,
             netflix_context=self.netflix_context,
+            update_available=self.update_available,
         )
 
 

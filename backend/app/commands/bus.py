@@ -43,10 +43,11 @@ _FOCUS_TRANSITIONS: dict[tuple[LauncherTile, Command], LauncherTile] = {
     (LauncherTile.YOUTUBE, Command.NAV_RIGHT): LauncherTile.NETFLIX,
     (LauncherTile.YOUTUBE, Command.NAV_DOWN): LauncherTile.NEWS,
     (LauncherTile.NETFLIX, Command.NAV_LEFT): LauncherTile.YOUTUBE,
+    (LauncherTile.NETFLIX, Command.NAV_RIGHT): LauncherTile.NEWS,
     (LauncherTile.NETFLIX, Command.NAV_DOWN): LauncherTile.NEWS,
+    (LauncherTile.NEWS, Command.NAV_LEFT): LauncherTile.NETFLIX,
     (LauncherTile.NEWS, Command.NAV_UP): LauncherTile.YOUTUBE,
-    (LauncherTile.NEWS, Command.NAV_LEFT): LauncherTile.YOUTUBE,
-    (LauncherTile.NEWS, Command.NAV_RIGHT): LauncherTile.NETFLIX,
+    (LauncherTile.NEWS, Command.NAV_RIGHT): LauncherTile.YOUTUBE,
 }
 
 
@@ -284,13 +285,15 @@ class CommandBus:
                     raise
             else:
                 await self._applications.open_news(channel.url)
+            channel_text = f"頻道 {channel.number:02d} · {channel.name}"
+            await self._applications.show_osd(channel_text)
             state = await self._state.update(
                 active_app=ActiveApp.NEWS,
                 channel_number=channel.number,
                 channel_name=channel.name,
                 netflix_context=None,
                 error_message=None,
-                status_message=None,
+                status_message=channel_text,
             )
             return CommandOutcome(True, state)
 
@@ -326,12 +329,14 @@ class CommandBus:
             if current.active_app is ActiveApp.NEWS:
                 channel = self._news.move(direction)
                 await self._applications.open_news(channel.url)
+                channel_text = f"頻道 {channel.number:02d} · {channel.name}"
+                await self._applications.show_osd(channel_text)
                 state = await self._state.update(
                     channel_number=channel.number,
                     channel_name=channel.name,
                     netflix_context=None,
                     error_message=None,
-                    status_message=None,
+                    status_message=channel_text,
                 )
                 return CommandOutcome(True, state)
             if current.active_app is ActiveApp.LIVE_TV:

@@ -55,6 +55,7 @@ export function TVLauncher(): ReactElement {
   const { status, state, lastError, sendCommand } = useControllerSocket('/ws/tv')
   const [pairing, setPairing] = useState<PairingInfo | null>(null)
   const [hudMessage, setHudMessage] = useState<string | null>(null)
+  const [isUpdating, setIsUpdating] = useState(false)
   const hudTimerRef = useRef<number | undefined>(undefined)
   const tileRefs = useRef<Partial<Record<TileId, HTMLButtonElement>>>({})
   const focusedTile = state && isTileId(state.focused_tile) ? state.focused_tile : 'youtube'
@@ -106,6 +107,20 @@ export function TVLauncher(): ReactElement {
     const command = tileCommand(tile)
     if (command) sendCommand(command)
   }
+
+  const applyUpdate = () => {
+    if (isUpdating) return
+    setIsUpdating(true)
+    fetch('/api/update/apply', { method: 'POST' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error('更新失敗')
+        setHudMessage('更新成功，正在重啟電視盒...')
+      })
+      .catch(() => {
+        setHudMessage('更新失敗，請檢查網路。')
+        setIsUpdating(false)
+      })
+  }
   const renderedState = state ?? {
     active_app: 'launcher',
     volume: 50,
@@ -115,6 +130,7 @@ export function TVLauncher(): ReactElement {
     channel_name: null,
     status_message: null,
     error_message: null,
+    update_available: null,
   }
 
   useEffect(() => {
@@ -138,6 +154,20 @@ export function TVLauncher(): ReactElement {
           {status === 'connected' ? '主畫面已連線' : status === 'authenticating' ? '主畫面驗證中' : status === 'connecting' ? '主畫面連線中' : status === 'disconnected' ? '主畫面已斷線' : '主畫面連線失敗'}
         </div>
       </header>
+
+      {renderedState.update_available && (
+        <div className="update-banner" role="alert">
+          <span>🚀 發現新版本 FreeTV ({renderedState.update_available})</span>
+          <button
+            className="update-action-btn"
+            type="button"
+            disabled={isUpdating}
+            onClick={applyUpdate}
+          >
+            {isUpdating ? '正在更新…' : '立即更新'}
+          </button>
+        </div>
+      )}
 
       <section className="tv-content" aria-label="應用程式">
         <div className="tv-grid">

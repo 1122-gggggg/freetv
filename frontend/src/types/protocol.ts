@@ -58,6 +58,7 @@ export interface ControllerState {
   status_message: string | null
   error_message: string | null
   netflix_context?: NetflixContext | null
+  update_available?: string | null
 }
 
 export interface Acknowledgement {

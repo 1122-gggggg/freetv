@@ -595,6 +595,26 @@ describe('Netflix DOM control runtime', () => {
     expect(input.value).toBe('test@example.com')
   })
 
+  it('automatically clicks Skip Intro on OK during playback', async () => {
+    window.history.replaceState({}, '', '/watch/70143836')
+    document.body.innerHTML = `
+      <video src="blob:test"></video>
+      <button data-uia="player-skip-intro">略過介紹</button>
+    `
+    const skipBtn = document.querySelector('[data-uia="player-skip-intro"]') as HTMLButtonElement
+    setRect(skipBtn, 100, 100, 120, 40)
+    setReadyVideo()
+
+    let clicked = false
+    skipBtn.onclick = () => {
+      clicked = true
+    }
+
+    const result = await runtime().run('OK', null)
+    expect(result.ok).toBe(true)
+    expect(clicked).toBe(true)
+  })
+
   it('moves right by rectangles and keeps focus at the boundary', async () => { document.body.innerHTML = '<button id="a">A</button><button id="b">B</button><button id="c">C</button>'
   const [a, b, c] = [...document.querySelectorAll('button')]
   setRect(a, 0, 0)

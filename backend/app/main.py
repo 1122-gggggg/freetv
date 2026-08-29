@@ -133,10 +133,15 @@ async def controller_lifespan(app: FastAPI):
     startup_runtime = getattr(app.state.runtime, "startup", None)
     if startup_runtime is not None:
         await startup_runtime()
+    updater = getattr(app.state, "update_watcher", None)
+    if updater is not None:
+        updater.start()
     log_event(logger, "controller_started")
     try:
         yield
     finally:
+        if updater is not None:
+            updater.stop()
         await app.state.connections.close()
         await app.state.runtime.shutdown()
         log_event(logger, "controller_stopped")
@@ -166,6 +171,9 @@ def create_app(
     app.state.pairing_attempts = PairingAttemptGuard()
     app.state.remote_authentication_guard = RemoteAuthenticationGuard()
     app.state.dispatch_lock = asyncio.Lock()
+    from app.system.updater import UpdateWatcher
+
+    app.state.update_watcher = UpdateWatcher(app.state.runtime.bus._state)
 
     async def handle_application_exit(exited_app: ActiveApp) -> None:
         async with app.state.dispatch_lock:
@@ -256,6 +264,33 @@ def create_app(
             sessions = await connections.remove_token_sessions(token)
         await connections.close_connections(sessions)
         log_event(logger, "remote_token_revoked", client=_client_host(request))
+
+    @app.get("/api/update/check")
+    async def update_check() -> dict[str, object]:
+        from app.system.updater import check_for_update
+
+        info = await check_for_update()
+        if info and info.available:
+            return {
+                "available": True,
+                "version": info.version,
+                "release_name": info.release_name,
+                "release_notes": info.release_notes,
+            }
+        return {"available": False, "version": None, "release_name": None, "release_notes": None}
+
+    @app.post("/api/update/apply")
+    async def update_apply() -> dict[str, object]:
+        from app.system.updater import apply_update
+
+        success, message = await apply_update()
+        if success:
+            try:
+                await app.state.runtime.bus._applications.show_osd("更新完成，正在重新載入...")
+            except Exception:
+                pass
+            return {"success": True, "message": message}
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
 
     @app.websocket("/ws/remote")
     async def remote_socket(websocket: WebSocket) -> None:

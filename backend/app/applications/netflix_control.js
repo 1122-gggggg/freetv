@@ -396,13 +396,15 @@
         ].join(';')
       }
       osd.textContent = text
+      const watchContainer = document.querySelector('.watch-video, .NFPlayer, [data-uia="watch-video"]')
       const host =
         document.fullscreenElement && document.fullscreenElement.tagName !== 'VIDEO'
           ? document.fullscreenElement
-          : document.body || document.documentElement
+          : (watchContainer || document.body || document.documentElement)
       if (osd.parentElement !== host) {
         host.appendChild(osd)
       }
+      osd.style.opacity = '1'
       requestAnimationFrame(() => {
         osd.style.opacity = '1'
       })
@@ -419,6 +421,34 @@
     } catch {
       return false
     }
+  }
+
+  const findSkipIntroButton = () => {
+    if (netflixContext().stage !== 'watch') return null
+    const candidates = [
+      ...document.querySelectorAll([
+        '[data-uia="player-skip-intro"]',
+        '[data-uia*="skip-intro" i]',
+        '[data-uia*="skip-credits" i]',
+        '[data-uia*="skip-recap" i]',
+        '[data-uia*="player-skip" i]',
+        '[data-uia*="next-episode" i]',
+        '.skip-credits',
+        'button[data-uia*="skip" i]',
+        'button',
+        '[role="button"]',
+      ].join(',')),
+    ]
+    return (
+      candidates.find((el) => {
+        if (!(el instanceof HTMLElement) || !visible(el)) return false
+        const text = `${el.getAttribute('aria-label') || ''} ${el.textContent || ''}`
+        return (
+          /略過|skip|下一集|next episode|略過介紹|略過片頭|略過前情/i.test(text) ||
+          uiaIncludes(el, ['skip', 'next-episode'])
+        )
+      }) || null
+    )
   }
 
   const netflixContext = () => {
@@ -789,6 +819,9 @@
     if (profile) return profile
 
 
+    const skipBtn = findSkipIntroButton()
+    if (skipBtn) return skipBtn
+
     const visibleVideo = [...document.querySelectorAll('video')].some(
       (element) => element instanceof HTMLVideoElement && visible(element),
     )
@@ -1121,15 +1154,34 @@
         )
         return context ? success('closed', {}, context) : error('netflix_back_unavailable')
       }
+      const closeDetailBtn = [
+        ...document.querySelectorAll([
+          '[data-uia="previewModal-closebtn"]',
+          '[data-uia*="closebtn" i]',
+          '[data-uia*="close" i]',
+          '.previewModal-closebtn',
+          '.close-button',
+          'button[aria-label*="close" i]',
+          'button[aria-label*="關閉"]',
+        ].join(',')),
+      ].find((element) => element instanceof HTMLElement && visible(element))
+      if (closeDetailBtn instanceof HTMLElement) {
+        closeDetailBtn.click()
+        const context = await settle(() => {
+          const current = netflixContext()
+          return current.stage === 'browse' || current.stage !== 'details' ? current : null
+        }, 1200)
+        if (context) return success('closed', {}, context)
+      }
       globalThis.history.back()
       const context = await settle(() => {
         const current = netflixContext()
         const pathChanged = globalThis.location.pathname !== beforePath
         const meaningfulStageChanged =
-          current.stage !== beforeContext.stage && current.stage !== 'details'
+          current.stage !== beforeContext.stage
         return pathChanged || meaningfulStageChanged ? current : null
       }, 1200)
-      return context ? success('history', {}, context) : error('netflix_back_unavailable')
+      return context ? success('history', {}, context) : success('history', {}, netflixContext())
     }
 
     if (action === 'FULLSCREEN') {
@@ -1315,6 +1367,11 @@
     }
 
     if (action === 'OK') {
+      const skipBtn = findSkipIntroButton()
+      if (skipBtn) {
+        skipBtn.click()
+        return success('clicked', { focus: fingerprint(skipBtn, interactiveElements()) })
+      }
       if (current instanceof HTMLElement && isProfileChoice(current)) {
         current.click()
         const firstCard = await settle(

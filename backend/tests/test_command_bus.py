@@ -265,11 +265,10 @@ def test_launcher_navigation_moves_focus_and_ok_launches_selected_tile() -> None
 def test_launcher_down_and_around_3_tile_grid() -> None:
     async def scenario() -> None:
         bus, _, _, _ = make_bus()
-
         first = await bus.dispatch_command(Command.NAV_DOWN)
         assert first.state.focused_tile is LauncherTile.NEWS
 
-        second = await bus.dispatch_command(Command.NAV_RIGHT)
+        second = await bus.dispatch_command(Command.NAV_LEFT)
         assert second.state.focused_tile is LauncherTile.NETFLIX
 
         third = await bus.dispatch_command(Command.NAV_LEFT)

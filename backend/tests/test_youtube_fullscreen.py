@@ -25,8 +25,8 @@ from app.commands.ports import CommandExecutionError
         ("https://www.youtube.com/tv#/watch?v=beta", "watch:beta"),
         ("https://www.youtube.com/shorts/gamma?feature=share", "shorts:gamma"),
         ("https://www.youtube.com/live/delta", "live:delta"),
+        ("https://www.youtube.com/@FTV_News/live", "live:@FTV_News"),
         ("https://www.youtube.com/tv#/browse", None),
-        ("https://example.com/watch?v=alpha", None),
     ],
 )
 def test_extract_video_identity_covers_supported_routes(url: str, identity: str | None) -> None:

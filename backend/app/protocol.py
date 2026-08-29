@@ -201,6 +201,7 @@ class StateMessage(WireModel):
     status_message: str | None = Field(default=None, max_length=256)
     error_message: str | None = Field(default=None, max_length=256)
     netflix_context: NetflixContext | None = None
+    update_available: str | None = None
 
 
 def parse_client_message(payload: object) -> ClientMessage:

@@ -69,7 +69,7 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
   const [isUnpairing, setIsUnpairing] = useState(false)
   const [waitingForNetflix, setWaitingForNetflix] = useState(false)
   const [netflixSendFailed, setNetflixSendFailed] = useState(false)
-
+  const [isUpdating, setIsUpdating] = useState(false)
   useEffect(() => {
     const client = new ControllerSocket({
       host: device.host,
@@ -211,6 +211,22 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
     }
   }
 
+  const handleApplyUpdate = async () => {
+    if (isUpdating) return
+    setIsUpdating(true)
+    try {
+      const res = await fetch(`http://${device.host}:${device.port}/api/update/apply`, {
+        method: 'POST',
+      })
+      if (!res.ok) throw new Error('更新失敗')
+      Alert.alert('更新成功', '電視盒正在更新並重新載入。')
+    } catch {
+      Alert.alert('更新失敗', '請確認電視盒與網路連線。')
+    } finally {
+      setIsUpdating(false)
+    }
+  }
+
   const handleForgetPress = () => {
     if (isUnpairing) return
     Alert.alert(
@@ -266,6 +282,21 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
           <Text style={styles.forgetText}>{isUnpairing ? '解除中…' : '解除配對'}</Text>
         </TouchableOpacity>
       </View>
+
+      {controllerState?.update_available ? (
+        <View style={styles.updateCard}>
+          <Text style={styles.updateText}>
+            🚀 發現新版本 FreeTV ({controllerState.update_available})
+          </Text>
+          <TouchableOpacity
+            style={[styles.updateBtn, isUpdating && styles.disabledBtn]}
+            onPress={() => void handleApplyUpdate()}
+            disabled={isUpdating}
+          >
+            <Text style={styles.updateBtnText}>{isUpdating ? '更新中…' : '立即更新'}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {/* Now Controlling Status Readout */}
       {isConnected && controllerState && (
@@ -488,8 +519,37 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
     </View>
   )
 }
-
 const styles = StyleSheet.create({
+  updateCard: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 12,
+    backgroundColor: '#1b2d4b',
+    borderColor: '#395786',
+    borderWidth: 1,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  updateText: {
+    flex: 1,
+    color: '#f7d488',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  updateBtn: {
+    backgroundColor: '#f7d488',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  updateBtnText: {
+    color: '#0f172a',
+    fontSize: 12,
+    fontWeight: '800',
+  },
   container: {
     flex: 1,
     backgroundColor: '#0c111d',

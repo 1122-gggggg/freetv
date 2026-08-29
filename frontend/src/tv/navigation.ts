@@ -4,8 +4,8 @@ export type TileId = 'youtube' | 'netflix' | 'news'
 
 const TRANSITIONS: Record<TileId, Partial<Record<Command, TileId>>> = {
   youtube: { NAV_RIGHT: 'netflix', NAV_DOWN: 'news' },
-  netflix: { NAV_LEFT: 'youtube', NAV_DOWN: 'news' },
-  news: { NAV_UP: 'youtube', NAV_LEFT: 'youtube', NAV_RIGHT: 'netflix' },
+  netflix: { NAV_LEFT: 'youtube', NAV_RIGHT: 'news', NAV_DOWN: 'news' },
+  news: { NAV_LEFT: 'netflix', NAV_UP: 'youtube', NAV_RIGHT: 'youtube' },
 }
 
 const TILE_COMMANDS: Record<TileId, Command> = {

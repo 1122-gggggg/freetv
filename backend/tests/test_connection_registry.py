@@ -97,6 +97,7 @@ def test_state_broadcast_continues_when_a_peer_disconnects() -> None:
                 "status_message": None,
                 "error_message": None,
                 "netflix_context": None,
+                "update_available": None,
             }
         ]
 

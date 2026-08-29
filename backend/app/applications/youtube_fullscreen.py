@@ -237,9 +237,8 @@ def extract_video_identity(url: str) -> str | None:
     host = (parsed.hostname or "").lower()
     if host != "youtube.com" and not host.endswith(".youtube.com"):
         return None
-
     query_id = parse_qs(parsed.query).get("v", [None])[0]
-    if parsed.path.endswith("/watch") and query_id:
+    if (parsed.path.endswith("/watch") or "/watch" in parsed.path) and query_id:
         return f"watch:{query_id}"
 
     if parsed.fragment.startswith("/watch?"):
@@ -250,6 +249,14 @@ def extract_video_identity(url: str) -> str | None:
     parts = [part for part in parsed.path.split("/") if part]
     if len(parts) >= 2 and parts[-2] in {"shorts", "live"}:
         return f"{parts[-2]}:{parts[-1]}"
+    if len(parts) >= 2 and parts[-1] == "live":
+        return f"live:{parts[-2]}"
+    if len(parts) >= 1 and parts[-1] == "live":
+        return "live:default"
+    if parsed.path.startswith("/live/"):
+        return f"live:{parsed.path[6:]}"
+    if parsed.path.startswith("/shorts/"):
+        return f"shorts:{parsed.path[8:]}"
     return None
 
 

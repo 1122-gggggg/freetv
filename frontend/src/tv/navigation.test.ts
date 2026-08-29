@@ -7,18 +7,18 @@ describe('TV grid navigation', () => {
     expect(moveFocus('youtube', 'NAV_RIGHT')).toBe('netflix')
     expect(moveFocus('youtube', 'NAV_DOWN')).toBe('news')
     expect(moveFocus('netflix', 'NAV_LEFT')).toBe('youtube')
+    expect(moveFocus('netflix', 'NAV_RIGHT')).toBe('news')
     expect(moveFocus('netflix', 'NAV_DOWN')).toBe('news')
 
+    expect(moveFocus('news', 'NAV_LEFT')).toBe('netflix')
     expect(moveFocus('news', 'NAV_UP')).toBe('youtube')
-    expect(moveFocus('news', 'NAV_LEFT')).toBe('youtube')
-    expect(moveFocus('news', 'NAV_RIGHT')).toBe('netflix')
+    expect(moveFocus('news', 'NAV_RIGHT')).toBe('youtube')
   })
 
   it('retains focus when navigating into outer boundaries', () => {
     expect(moveFocus('youtube', 'NAV_LEFT')).toBe('youtube')
     expect(moveFocus('youtube', 'NAV_UP')).toBe('youtube')
     expect(moveFocus('netflix', 'NAV_UP')).toBe('netflix')
-    expect(moveFocus('netflix', 'NAV_RIGHT')).toBe('netflix')
     expect(moveFocus('news', 'NAV_DOWN')).toBe('news')
   })
 
