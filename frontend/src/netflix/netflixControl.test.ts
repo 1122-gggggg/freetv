@@ -561,9 +561,9 @@ describe('Netflix DOM control runtime', () => {
     expect(detailPlayClicks).toBe(1)
   })
 
-  it('exposes only the fixed global version and run interface and re-enumerates every run', async () => { expect(runtime().version).toBe('7')
-
-  expect(Object.keys(runtime()).sort()).toEqual(['run', 'version'])
+  it('exposes only the fixed global version and run interface and re-enumerates every run', async () => {
+    expect(runtime().version).toBe('8')
+    expect(Object.keys(runtime()).sort()).toEqual(['run', 'showOsd', 'version'])
   document.body.innerHTML = '<button id="first">First</button>'
   const first = document.querySelector('#first') as HTMLButtonElement
   setRect(first, 20, 20)
@@ -577,11 +577,23 @@ describe('Netflix DOM control runtime', () => {
     focus: { text: 'Replacement' },
   })
   expect(document.activeElement).toBe(replacement)
-  expect(await runtime().run('NOT_AN_ACTION', null)).toEqual({
-    ok: false,
-    status: 'error',
-    code: 'netflix_focus_unavailable',
-  }) })
+    expect(await runtime().run('NOT_AN_ACTION', null)).toEqual({
+      ok: false,
+      status: 'error',
+      code: 'netflix_focus_unavailable',
+    })
+  })
+
+  it('sets editable input value directly and dispatches events on SET_TEXT', async () => {
+    document.body.innerHTML = '<input type="text" id="email" value="" />'
+    const input = document.querySelector('#email') as HTMLInputElement
+    setRect(input, 20, 20)
+    input.focus()
+
+    const result = await runtime().run('SET_TEXT', { text: 'test@example.com' } as unknown as FocusFingerprint)
+    expect(result.ok).toBe(true)
+    expect(input.value).toBe('test@example.com')
+  })
 
   it('moves right by rectangles and keeps focus at the boundary', async () => { document.body.innerHTML = '<button id="a">A</button><button id="b">B</button><button id="c">C</button>'
   const [a, b, c] = [...document.querySelectorAll('button')]

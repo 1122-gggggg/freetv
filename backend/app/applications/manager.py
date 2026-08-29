@@ -417,7 +417,13 @@ class ApplicationManager:
             ActiveApp.YOUTUBE,
             ActiveApp.NEWS,
         }:
-            await self._youtube_fullscreen.force_fullscreen(self._debug_port)
+            performed = False
+            try:
+                performed = await self._youtube_fullscreen.force_fullscreen(self._debug_port)
+            except Exception:
+                performed = False
+            if not performed:
+                self._input.send_command(command)
             return None
         if command is Command.BACK and self._active_app is ActiveApp.BROWSER:
             self._input.send_browser_back()
@@ -457,6 +463,22 @@ class ApplicationManager:
             "command_not_supported",
             "目前應用程式不支援這個操作。",
         )
+
+    async def show_osd(self, text: str) -> None:
+        if self._active_app in {ActiveApp.YOUTUBE, ActiveApp.NEWS}:
+            show = getattr(self._youtube_fullscreen, "show_osd", None)
+            if show is not None:
+                try:
+                    await show(self._debug_port, text)
+                except Exception:
+                    pass
+        elif self._active_app is ActiveApp.NETFLIX:
+            show = getattr(self._netflix_page, "show_osd", None)
+            if show is not None:
+                try:
+                    await show(text)
+                except Exception:
+                    pass
 
     def require_input_target(self, app: ActiveApp) -> None:
         if app not in {

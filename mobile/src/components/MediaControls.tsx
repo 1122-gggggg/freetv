@@ -167,6 +167,33 @@ export function MediaControls({ onCommand, disabled, muted }: MediaControlsProps
         </TouchableOpacity>
       </View>
 
+      {/* Brightness Row */}
+      <View style={styles.row}>
+        <TouchableOpacity
+          style={[styles.btn, styles.volBtn, disabled && styles.disabledControl]}
+          onPress={() => trigger('BRIGHTNESS_DOWN')}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="降低亮度"
+          accessibilityHint="降低電視螢幕亮度。"
+          accessibilityState={{ disabled: Boolean(disabled) }}
+        >
+          <Text style={styles.btnText}>亮度 −</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.btn, styles.volBtn, disabled && styles.disabledControl]}
+          onPress={() => trigger('BRIGHTNESS_UP')}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel="提高亮度"
+          accessibilityHint="提高電視螢幕亮度。"
+          accessibilityState={{ disabled: Boolean(disabled) }}
+        >
+          <Text style={styles.btnText}>亮度 ＋</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Channel Switch Row */}
       <View style={styles.row}>
         <TouchableOpacity

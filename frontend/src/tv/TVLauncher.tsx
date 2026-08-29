@@ -8,7 +8,6 @@ const TILES: ReadonlyArray<{ id: TileId; label: string; detail: string; badge: s
   { id: 'youtube', label: 'YouTube', detail: '用現有設定檔開啟', badge: 'YT' },
   { id: 'netflix', label: 'Netflix', detail: '用現有 Chrome 設定檔開啟', badge: 'N' },
   { id: 'news', label: '新聞', detail: '觀看 YouTube 直播新聞', badge: '新聞' },
-  { id: 'settings', label: '設定', detail: '用 settings.json 設定此電視盒', badge: '設定' },
 ]
 
 const PAIRING_REFRESH_INTERVAL_MS = 30_000
@@ -55,10 +54,11 @@ function isTileId(value: string): value is TileId {
 export function TVLauncher(): ReactElement {
   const { status, state, lastError, sendCommand } = useControllerSocket('/ws/tv')
   const [pairing, setPairing] = useState<PairingInfo | null>(null)
+  const [hudMessage, setHudMessage] = useState<string | null>(null)
+  const hudTimerRef = useRef<number | undefined>(undefined)
   const tileRefs = useRef<Partial<Record<TileId, HTMLButtonElement>>>({})
   const focusedTile = state && isTileId(state.focused_tile) ? state.focused_tile : 'youtube'
   const pairingQr = pairing ? pairingQrValue(pairing) : null
-
   useEffect(() => {
     document.title = '我的電視'
     let cancelled = false
@@ -106,17 +106,26 @@ export function TVLauncher(): ReactElement {
     const command = tileCommand(tile)
     if (command) sendCommand(command)
   }
-
   const renderedState = state ?? {
     active_app: 'launcher',
     volume: 50,
     muted: false,
+    brightness: 100,
     channel_number: null,
     channel_name: null,
     status_message: null,
     error_message: null,
   }
 
+  useEffect(() => {
+    const msg = renderedState.status_message || renderedState.error_message
+    if (!msg) return
+    setHudMessage(msg)
+    if (hudTimerRef.current !== undefined) window.clearTimeout(hudTimerRef.current)
+    hudTimerRef.current = window.setTimeout(() => {
+      setHudMessage(null)
+    }, 2200)
+  }, [renderedState.status_message, renderedState.error_message, renderedState.volume, renderedState.muted, renderedState.brightness])
   return (
     <main className="tv-shell" aria-label="電視主畫面">
       <header className="tv-header">
@@ -167,7 +176,11 @@ export function TVLauncher(): ReactElement {
           </div>
           <div className="volume-readout" aria-label={`系統音量 ${renderedState.volume}${renderedState.muted ? '，已靜音' : ''}`}>
             <span>音量</span>
-            <strong>{renderedState.muted ? '靜音' : renderedState.volume}</strong>
+            <strong>{renderedState.muted ? '靜音' : `${renderedState.volume}%`}</strong>
+          </div>
+          <div className="volume-readout" aria-label={`螢幕亮度 ${renderedState.brightness}%`}>
+            <span>亮度</span>
+            <strong>{renderedState.brightness}%</strong>
           </div>
         </aside>
       </section>
@@ -204,6 +217,12 @@ export function TVLauncher(): ReactElement {
           <span>Home 回到這裡</span>
         </section>
       </footer>
+
+      {hudMessage && (
+        <div className="tv-hud-overlay" role="status" aria-live="assertive">
+          <span className="tv-hud-badge">{hudMessage}</span>
+        </div>
+      )}
 
       <div className="live-region" aria-live="polite" role="status">
         {renderedState.error_message ?? renderedState.status_message ?? lastError?.message ?? ''}

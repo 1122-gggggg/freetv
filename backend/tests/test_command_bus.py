@@ -47,6 +47,10 @@ class FakeApplications:
     next_context: NetflixContext | None = None
     next_rate: float = 1.25
     failure: CommandExecutionError | None = None
+    show_osd_calls: list[str] = field(default_factory=list)
+
+    async def show_osd(self, text: str) -> None:
+        self.show_osd_calls.append(text)
 
     async def open(self, app: ActiveApp) -> NetflixContext | None:
         self.opened.append(app)
@@ -159,6 +163,22 @@ class FakeVolume:
 
 
 @dataclass
+class FakeBrightness:
+    level: int = 100
+
+    async def increase(self) -> int:
+        self.level = min(100, self.level + 10)
+        return self.level
+
+    async def decrease(self) -> int:
+        self.level = max(10, self.level - 10)
+        return self.level
+
+    async def get_level(self) -> int:
+        return self.level
+
+
+@dataclass
 class FakeInput:
     pointers: list[PointerActionMessage] = field(default_factory=list)
     texts: list[str] = field(default_factory=list)
@@ -220,6 +240,7 @@ def make_bus(
         applications=applications,
         player=player,
         volume=FakeVolume(),
+        brightness=FakeBrightness(),
         input_controller=input_controller,
         power=FakePower(),
         news=news or FakeNews(),
@@ -241,15 +262,54 @@ def test_launcher_navigation_moves_focus_and_ok_launches_selected_tile() -> None
     asyncio.run(scenario())
 
 
-def test_launcher_down_stops_at_bottom_of_2x2_grid() -> None:
+def test_launcher_down_and_around_3_tile_grid() -> None:
     async def scenario() -> None:
         bus, _, _, _ = make_bus()
 
         first = await bus.dispatch_command(Command.NAV_DOWN)
-        second = await bus.dispatch_command(Command.NAV_DOWN)
-
         assert first.state.focused_tile is LauncherTile.NEWS
-        assert second.state.focused_tile is LauncherTile.NEWS
+
+        second = await bus.dispatch_command(Command.NAV_RIGHT)
+        assert second.state.focused_tile is LauncherTile.NETFLIX
+
+        third = await bus.dispatch_command(Command.NAV_LEFT)
+        assert third.state.focused_tile is LauncherTile.YOUTUBE
+
+    asyncio.run(scenario())
+
+
+def test_brightness_commands_adjust_level_and_show_osd() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus()
+
+        down = await bus.dispatch_command(Command.BRIGHTNESS_DOWN)
+        assert down.success
+        assert down.state.brightness == 90
+        assert down.state.status_message == "亮度 90%"
+        assert applications.show_osd_calls[-1] == "亮度 90%"
+
+        up = await bus.dispatch_command(Command.BRIGHTNESS_UP)
+        assert up.success
+        assert up.state.brightness == 100
+        assert up.state.status_message == "亮度 100%"
+        assert applications.show_osd_calls[-1] == "亮度 100%"
+
+    asyncio.run(scenario())
+
+
+def test_volume_commands_show_osd() -> None:
+    async def scenario() -> None:
+        bus, applications, _, _ = make_bus()
+
+        vol_up = await bus.dispatch_command(Command.VOLUME_UP)
+        assert vol_up.success
+        assert vol_up.state.status_message == "音量 47%"
+        assert applications.show_osd_calls[-1] == "音量 47%"
+
+        mute = await bus.dispatch_command(Command.MUTE)
+        assert mute.success
+        assert mute.state.status_message == "靜音"
+        assert applications.show_osd_calls[-1] == "靜音"
 
     asyncio.run(scenario())
 

@@ -63,7 +63,7 @@ class FakeConnections:
 def test_dispatch_publication_preserves_state_order_when_an_acknowledgement_stalls() -> None:
     async def scenario() -> None:
         first_state = ControllerState(focused_tile=LauncherTile.NETFLIX)
-        second_state = ControllerState(focused_tile=LauncherTile.SETTINGS)
+        second_state = ControllerState(focused_tile=LauncherTile.NEWS)
         app = SimpleNamespace(
             state=SimpleNamespace(
                 runtime=SimpleNamespace(
@@ -97,7 +97,7 @@ def test_dispatch_publication_preserves_state_order_when_an_acknowledgement_stal
 
         assert [state.focused_tile for state in app.state.connections.states] == [
             LauncherTile.NETFLIX.value,
-            LauncherTile.SETTINGS.value,
+            LauncherTile.NEWS.value,
         ]
 
     asyncio.run(scenario())
@@ -108,7 +108,7 @@ def test_stalled_acknowledgement_is_bounded_and_does_not_block_later_dispatch(
 ) -> None:
     async def scenario() -> None:
         first_state = ControllerState(focused_tile=LauncherTile.NETFLIX)
-        second_state = ControllerState(focused_tile=LauncherTile.SETTINGS)
+        second_state = ControllerState(focused_tile=LauncherTile.NEWS)
         connections = FakeConnections()
         app = SimpleNamespace(
             state=SimpleNamespace(
@@ -149,7 +149,7 @@ def test_stalled_acknowledgement_is_bounded_and_does_not_block_later_dispatch(
         assert results == [False, True]
         assert [state.focused_tile for state in connections.states] == [
             LauncherTile.NETFLIX.value,
-            LauncherTile.SETTINGS.value,
+            LauncherTile.NEWS.value,
         ]
         assert [payload["request_id"] for payload in responsive_socket.sent] == ["responsive"]
 

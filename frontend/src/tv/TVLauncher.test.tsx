@@ -13,6 +13,7 @@ vi.mock('../api/useControllerSocket', () => ({
       focused_tile: 'youtube',
       volume: 50,
       muted: false,
+      brightness: 100,
       channel_number: null,
       channel_name: null,
       status_message: null,
@@ -95,7 +96,7 @@ describe('TVLauncher pairing code', () => {
     expect(screen.getByRole('button', { name: '開啟 YouTube' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '開啟 Netflix' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '開啟 新聞' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '開啟 設定' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '開啟 設定' })).toBeNull()
     expect(screen.queryByRole('button', { name: '開啟 電視' })).toBeNull()
     expect(screen.queryByRole('button', { name: '開啟 瀏覽器' })).toBeNull()
   })

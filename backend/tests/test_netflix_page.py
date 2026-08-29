@@ -265,6 +265,8 @@ def test_netflix_actions_exactly_match_runtime_actions() -> None:
         "SPEED_DOWN",
         "SEEK_FORWARD_5",
         "SEEK_BACKWARD_5",
+        "SET_TEXT",
+        "SHOW_OSD",
         "READ_CONTEXT",
         "SUBMIT_PRIMARY",
     ]

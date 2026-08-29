@@ -21,7 +21,6 @@ class LauncherTile(StrEnum):
     YOUTUBE = "youtube"
     NETFLIX = "netflix"
     NEWS = "news"
-    SETTINGS = "settings"
 
 
 class ControllerState(BaseModel):
@@ -31,6 +30,7 @@ class ControllerState(BaseModel):
     focused_tile: LauncherTile = LauncherTile.YOUTUBE
     volume: int = Field(default=50, ge=0, le=100)
     muted: bool = False
+    brightness: int = Field(default=100, ge=10, le=100)
     channel_number: int | None = Field(default=None, ge=1)
     channel_name: str | None = Field(default=None, max_length=120)
     status_message: str | None = Field(default=None, max_length=256)
@@ -43,6 +43,7 @@ class ControllerState(BaseModel):
             focused_tile=self.focused_tile.value,
             volume=self.volume,
             muted=self.muted,
+            brightness=self.brightness,
             channel_number=self.channel_number,
             channel_name=self.channel_name,
             status_message=self.status_message,

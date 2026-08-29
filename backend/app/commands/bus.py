@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from app.applications.playback_rate import format_playback_rate
 from app.commands.ports import (
     ApplicationPort,
+    BrightnessPort,
     CommandExecutionError,
     InputPort,
     NewsPort,
@@ -42,12 +43,27 @@ _FOCUS_TRANSITIONS: dict[tuple[LauncherTile, Command], LauncherTile] = {
     (LauncherTile.YOUTUBE, Command.NAV_RIGHT): LauncherTile.NETFLIX,
     (LauncherTile.YOUTUBE, Command.NAV_DOWN): LauncherTile.NEWS,
     (LauncherTile.NETFLIX, Command.NAV_LEFT): LauncherTile.YOUTUBE,
-    (LauncherTile.NETFLIX, Command.NAV_DOWN): LauncherTile.SETTINGS,
+    (LauncherTile.NETFLIX, Command.NAV_DOWN): LauncherTile.NEWS,
     (LauncherTile.NEWS, Command.NAV_UP): LauncherTile.YOUTUBE,
-    (LauncherTile.NEWS, Command.NAV_RIGHT): LauncherTile.SETTINGS,
-    (LauncherTile.SETTINGS, Command.NAV_UP): LauncherTile.NETFLIX,
-    (LauncherTile.SETTINGS, Command.NAV_LEFT): LauncherTile.NEWS,
+    (LauncherTile.NEWS, Command.NAV_LEFT): LauncherTile.YOUTUBE,
+    (LauncherTile.NEWS, Command.NAV_RIGHT): LauncherTile.NETFLIX,
 }
+
+
+class _DefaultBrightnessController:
+    def __init__(self) -> None:
+        self._level = 100
+
+    async def increase(self) -> int:
+        self._level = min(100, self._level + 10)
+        return self._level
+
+    async def decrease(self) -> int:
+        self._level = max(10, self._level - 10)
+        return self._level
+
+    async def get_level(self) -> int:
+        return self._level
 
 
 class CommandBus:
@@ -58,6 +74,7 @@ class CommandBus:
         applications: ApplicationPort,
         player: PlayerPort,
         volume: VolumePort,
+        brightness: BrightnessPort | None = None,
         input_controller: InputPort,
         power: PowerPort,
         news: NewsPort,
@@ -66,6 +83,7 @@ class CommandBus:
         self._applications = applications
         self._player = player
         self._volume = volume
+        self._brightness = brightness or _DefaultBrightnessController()
         self._input = input_controller
         self._power = power
         self._news = news
@@ -331,15 +349,39 @@ class CommandBus:
             )
         if command is Command.VOLUME_UP:
             level, muted = await self._volume.increase()
-            return CommandOutcome(True, await self._success_state(volume=level, muted=muted))
+            text = f"音量 {level}%" if not muted else "靜音"
+            await self._applications.show_osd(text)
+            return CommandOutcome(
+                True, await self._success_state(volume=level, muted=muted, status_message=text)
+            )
 
         if command is Command.VOLUME_DOWN:
             level, muted = await self._volume.decrease()
-            return CommandOutcome(True, await self._success_state(volume=level, muted=muted))
+            text = f"音量 {level}%" if not muted else "靜音"
+            await self._applications.show_osd(text)
+            return CommandOutcome(
+                True, await self._success_state(volume=level, muted=muted, status_message=text)
+            )
 
         if command is Command.MUTE:
             level, muted = await self._volume.toggle_mute()
-            return CommandOutcome(True, await self._success_state(volume=level, muted=muted))
+            text = "靜音" if muted else f"音量 {level}%"
+            await self._applications.show_osd(text)
+            return CommandOutcome(
+                True, await self._success_state(volume=level, muted=muted, status_message=text)
+            )
+
+        if command in {Command.BRIGHTNESS_UP, Command.BRIGHTNESS_DOWN}:
+            level = (
+                await self._brightness.increase()
+                if command is Command.BRIGHTNESS_UP
+                else await self._brightness.decrease()
+            )
+            text = f"亮度 {level}%"
+            await self._applications.show_osd(text)
+            return CommandOutcome(
+                True, await self._success_state(brightness=level, status_message=text)
+            )
 
         if command in {Command.SPEED_UP, Command.SPEED_DOWN}:
             self._require_external_input_target(current)
@@ -350,7 +392,9 @@ class CommandBus:
                 )
             direction = 1 if command is Command.SPEED_UP else -1
             rate = await self._applications.adjust_playback_rate(direction)
-            state = await self._success_state(status_message=f"倍速 {format_playback_rate(rate)}×")
+            text = f"倍速 {format_playback_rate(rate)}×"
+            await self._applications.show_osd(text)
+            state = await self._success_state(status_message=text)
             return CommandOutcome(True, state)
 
         if command in {Command.SEEK_FORWARD_5, Command.SEEK_BACKWARD_5}:
@@ -363,9 +407,9 @@ class CommandBus:
             direction = 1 if command is Command.SEEK_FORWARD_5 else -1
             await self._applications.seek(direction)
             status = "快轉 5 秒" if direction > 0 else "倒退 5 秒"
+            await self._applications.show_osd(status)
             state = await self._success_state(status_message=status)
             return CommandOutcome(True, state)
-
         if current.active_app in {
             ActiveApp.YOUTUBE,
             ActiveApp.NETFLIX,

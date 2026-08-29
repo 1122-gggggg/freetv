@@ -12,6 +12,7 @@ from app.applications.youtube_fullscreen import (
     ShortCdpYoutubeProbe,
     YoutubeFullscreenController,
     _fullscreen_expression,
+    _show_osd_expression,
     extract_video_identity,
 )
 from app.commands.ports import CommandExecutionError
@@ -571,3 +572,24 @@ def test_short_cdp_probe_rejects_nonlocal_or_nonunique_top_level_targets(
 
     with pytest.raises(ValueError):
         asyncio.run(ShortCdpYoutubeProbe(timeout=0.8).inspect(9222))
+
+
+def test_youtube_show_osd_expression() -> None:
+    expression = _show_osd_expression("音量 50%")
+    assert "__freetv_osd__" in expression
+    assert json.dumps("音量 50%") in expression
+
+
+def test_youtube_probe_shows_osd(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeAsyncClient.payload = [_youtube_target("ws://127.0.0.1:9222/devtools/page/alpha")]
+    connect = FakeConnect()
+    connect.contexts = [FakeSocketContext(FakeSocket(True))]
+    monkeypatch.setattr(fullscreen_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(fullscreen_module.websockets, "connect", connect)
+
+    result = asyncio.run(ShortCdpYoutubeProbe(timeout=0.8).show_osd(9222, "倍速 1.5×"))
+
+    assert result is True
+    request = connect.contexts[0].socket.requests[0]
+    assert "__freetv_osd__" in request["params"]["expression"]
+    assert json.dumps("倍速 1.5×") in request["params"]["expression"]

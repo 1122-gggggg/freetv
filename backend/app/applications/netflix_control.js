@@ -1,7 +1,7 @@
 (() => {
   'use strict'
 
-  const VERSION = '7'
+  const VERSION = '8'
 
   const ACTIONS = new Set([
     'FOCUS_PRIMARY',
@@ -19,6 +19,8 @@
     'SPEED_DOWN',
     'SEEK_FORWARD_5',
     'SEEK_BACKWARD_5',
+    'SET_TEXT',
+    'SHOW_OSD',
     'READ_CONTEXT',
     'SUBMIT_PRIMARY',
   ])
@@ -339,6 +341,84 @@
     }
     if (type === 'search' || role === 'searchbox') return 'search'
     return 'none'
+  }
+
+  const setInputValue = (element, value) => {
+    if (!(element instanceof HTMLElement)) return false
+    element.focus()
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      const prototype =
+        element instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value')
+      if (descriptor && typeof descriptor.set === 'function') {
+        descriptor.set.call(element, value)
+      } else {
+        element.value = value
+      }
+    } else if (element.isContentEditable) {
+      element.textContent = value
+    } else {
+      element.setAttribute('value', value)
+    }
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  }
+
+  const showOsd = (text) => {
+    try {
+      const id = '__freetv_osd__'
+      let osd = document.getElementById(id)
+      if (!osd) {
+        osd = document.createElement('div')
+        osd.id = id
+        osd.style.cssText = [
+          'position: fixed',
+          'top: 48px',
+          'right: 48px',
+          'z-index: 2147483647',
+          'background: rgba(0, 0, 0, 0.84)',
+          'color: #ffffff',
+          'font-size: 32px',
+          'font-weight: 700',
+          'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          'padding: 16px 32px',
+          'border-radius: 16px',
+          'box-shadow: 0 8px 32px rgba(0,0,0,0.6)',
+          'pointer-events: none',
+          'transition: opacity 0.25s ease',
+          'opacity: 0',
+          'backdrop-filter: blur(12px)',
+          'display: flex',
+          'align-items: center',
+          'gap: 12px',
+          'border: 1px solid rgba(255, 255, 255, 0.22)',
+        ].join(';')
+      }
+      osd.textContent = text
+      const host =
+        document.fullscreenElement && document.fullscreenElement.tagName !== 'VIDEO'
+          ? document.fullscreenElement
+          : document.body || document.documentElement
+      if (osd.parentElement !== host) {
+        host.appendChild(osd)
+      }
+      requestAnimationFrame(() => {
+        osd.style.opacity = '1'
+      })
+      clearTimeout(window.__freetv_osd_timer__)
+      window.__freetv_osd_timer__ = setTimeout(() => {
+        osd.style.opacity = '0'
+        setTimeout(() => {
+          if (osd.parentElement && osd.style.opacity === '0') {
+            osd.remove()
+          }
+        }, 300)
+      }, 1800)
+      return true
+    } catch {
+      return false
+    }
   }
 
   const netflixContext = () => {
@@ -1095,9 +1175,10 @@
           Math.max(0, Math.min(SPEED_STEPS.length - 1, index + (action === 'SPEED_UP' ? 1 : -1)))
         ]
       video.playbackRate = next
+      const formatted = `${next}`.replace(/\.0$/, '')
+      showOsd(`倍速 ${formatted}×`)
       return success('speed', { rate: next })
     }
-
     if (action === 'SEEK_FORWARD_5' || action === 'SEEK_BACKWARD_5') {
       const direction = action === 'SEEK_FORWARD_5' ? 1 : -1
       const video = [...document.querySelectorAll('video')].find(
@@ -1136,6 +1217,20 @@
       )
       video.currentTime = target
       return success('seek')
+    }
+
+    if (action === 'SET_TEXT') {
+      const text = typeof previousFocus === 'string' ? previousFocus : String(previousFocus?.text ?? '')
+      const field = activeEditable()
+      if (!field) return error('netflix_focus_unavailable')
+      setInputValue(field, text)
+      return success('text', { focus: fingerprint(field, interactiveElements()) })
+    }
+
+    if (action === 'SHOW_OSD') {
+      const text = typeof previousFocus === 'string' ? previousFocus : String(previousFocus?.text ?? '')
+      if (text) showOsd(text)
+      return success('osd')
     }
 
     if (action === 'PLAY_PAUSE') {
@@ -1298,5 +1393,5 @@
       : success('boundary', { focus: fingerprint(current, elements) })
   }
 
-  globalThis.__freeTvNetflixControl = { version: VERSION, run }
+  globalThis.__freeTvNetflixControl = { version: VERSION, run, showOsd }
 })()

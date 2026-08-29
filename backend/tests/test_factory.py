@@ -2,17 +2,23 @@ from __future__ import annotations
 
 from app.system.factory import build_platform_controllers
 from app.system.input import WindowsInputController
-from app.system.posix import PosixInputController, PosixWindowController
-from app.system.windows import WindowsWindowController
+from app.system.posix import (
+    PosixBrightnessController,
+    PosixInputController,
+    PosixWindowController,
+)
+from app.system.windows import WindowsBrightnessController, WindowsWindowController
 
 
 def test_factory_selects_windows_controllers() -> None:
     controllers = build_platform_controllers(os_name="nt")
     assert isinstance(controllers.input, WindowsInputController)
     assert isinstance(controllers.windows, WindowsWindowController)
+    assert isinstance(controllers.brightness, WindowsBrightnessController)
 
 
 def test_factory_selects_posix_controllers() -> None:
     controllers = build_platform_controllers(os_name="posix")
     assert isinstance(controllers.input, PosixInputController)
     assert isinstance(controllers.windows, PosixWindowController)
+    assert isinstance(controllers.brightness, PosixBrightnessController)

@@ -21,36 +21,116 @@ _INSPECT_EXPRESSION = """(() => {
 })()"""
 
 
-def _fullscreen_expression(video_id: str) -> str:
+def _fullscreen_expression(video_id: str = "") -> str:
     expected = json.dumps(video_id, ensure_ascii=True)
     return f"""(async () => {{
   const expected = {expected};
-  const url = new URL(location.href);
-  const parts = url.pathname.split('/').filter(Boolean);
-  const youtubeHost =
-    url.hostname === 'youtube.com' || url.hostname.endsWith('.youtube.com');
-  if (!youtubeHost) return false;
-  let identity = null;
-  if (url.pathname.endsWith('/watch') && url.searchParams.get('v')) {{
-    identity = `watch:${{url.searchParams.get('v')}}`;
-  }} else if (url.hash.startsWith('#/watch?')) {{
-    const params = new URLSearchParams(url.hash.split('?')[1] || '');
-    if (params.get('v')) identity = `watch:${{params.get('v')}}`;
-  }} else if (parts.length >= 2 && ['shorts', 'live'].includes(parts.at(-2))) {{
-    identity = `${{parts.at(-2)}}:${{parts.at(-1)}}`;
+  if (expected) {{
+    const url = new URL(location.href);
+    const parts = url.pathname.split('/').filter(Boolean);
+    const youtubeHost =
+      url.hostname === 'youtube.com' || url.hostname.endsWith('.youtube.com');
+    if (!youtubeHost) return false;
+    let identity = null;
+    if (url.pathname.endsWith('/watch') && url.searchParams.get('v')) {{
+      identity = `watch:${{url.searchParams.get('v')}}`;
+    }} else if (url.hash.startsWith('#/watch?')) {{
+      const params = new URLSearchParams(url.hash.split('?')[1] || '');
+      if (params.get('v')) identity = `watch:${{params.get('v')}}`;
+    }} else if (parts.length >= 2 && ['shorts', 'live'].includes(parts.at(-2))) {{
+      identity = `${{parts.at(-2)}}:${{parts.at(-1)}}`;
+    }}
+    if (identity !== expected) return false;
   }}
-  const video = document.querySelector('video');
-  if (
-    identity !== expected ||
-    !video ||
-    video.readyState < 2 ||
-    document.fullscreenElement !== null
-  ) return false;
-  const target = document.querySelector('#movie_player') || video;
-  const request = target.requestFullscreen;
-  if (typeof request !== 'function') return false;
-  await request.call(target);
-  return true;
+  const video = [...document.querySelectorAll('video')].find(
+    (element) => element instanceof HTMLVideoElement && element.readyState >= 2
+  ) || document.querySelector('video');
+  if (!video) return false;
+
+  if (document.fullscreenElement !== null) {{
+    if (typeof document.exitFullscreen === 'function') {{
+      try {{
+        await document.exitFullscreen();
+        return true;
+      }} catch {{}}
+    }}
+  }}
+
+  const target = (
+    document.querySelector('#movie_player') ||
+    document.querySelector('.html5-video-player') ||
+    video
+  );
+  const request = (
+    target.requestFullscreen ||
+    target.webkitRequestFullscreen ||
+    video.webkitRequestFullscreen
+  );
+  if (typeof request === 'function') {{
+    try {{
+      await request.call(target);
+      return true;
+    }} catch {{}}
+  }}
+  return false;
+}})()"""
+
+
+def _show_osd_expression(text: str) -> str:
+    escaped_text = json.dumps(text, ensure_ascii=True)
+    return f"""(() => {{
+  try {{
+    const id = '__freetv_osd__';
+    let osd = document.getElementById(id);
+    if (!osd) {{
+      osd = document.createElement('div');
+      osd.id = id;
+      osd.style.cssText = [
+        'position: fixed',
+        'top: 48px',
+        'right: 48px',
+        'z-index: 2147483647',
+        'background: rgba(0, 0, 0, 0.84)',
+        'color: #ffffff',
+        'font-size: 32px',
+        'font-weight: 700',
+        'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        'padding: 16px 32px',
+        'border-radius: 16px',
+        'box-shadow: 0 8px 32px rgba(0,0,0,0.6)',
+        'pointer-events: none',
+        'transition: opacity 0.25s ease',
+        'opacity: 0',
+        'backdrop-filter: blur(12px)',
+        'display: flex',
+        'align-items: center',
+        'gap: 12px',
+        'border: 1px solid rgba(255, 255, 255, 0.22)',
+      ].join(';');
+    }}
+    osd.textContent = {escaped_text};
+    const host = (document.fullscreenElement && document.fullscreenElement.tagName !== 'VIDEO')
+      ? document.fullscreenElement
+      : (document.body || document.documentElement);
+    if (osd.parentElement !== host) {{
+      host.appendChild(osd);
+    }}
+    requestAnimationFrame(() => {{
+      osd.style.opacity = '1';
+    }});
+    clearTimeout(window.__freetv_osd_timer__);
+    window.__freetv_osd_timer__ = setTimeout(() => {{
+      osd.style.opacity = '0';
+      setTimeout(() => {{
+        if (osd.parentElement && osd.style.opacity === '0') {{
+          osd.remove();
+        }}
+      }}, 300);
+    }}, 1800);
+    return true;
+  }} catch {{
+    return false;
+  }}
 }})()"""
 
 
@@ -68,6 +148,56 @@ def _rate_expression(direction: int) -> str:
   if (index < 0) index = steps.indexOf(1);
   const next = steps[Math.max(0, Math.min(steps.length - 1, index + {step}))];
   video.playbackRate = next;
+  const formatted = `${next}`.replace(/\\.0$/, '');
+  try {{
+    const id = '__freetv_osd__';
+    let osd = document.getElementById(id);
+    if (!osd) {{
+      osd = document.createElement('div');
+      osd.id = id;
+      osd.style.cssText = [
+        'position: fixed',
+        'top: 48px',
+        'right: 48px',
+        'z-index: 2147483647',
+        'background: rgba(0, 0, 0, 0.84)',
+        'color: #ffffff',
+        'font-size: 32px',
+        'font-weight: 700',
+        'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        'padding: 16px 32px',
+        'border-radius: 16px',
+        'box-shadow: 0 8px 32px rgba(0,0,0,0.6)',
+        'pointer-events: none',
+        'transition: opacity 0.25s ease',
+        'opacity: 0',
+        'backdrop-filter: blur(12px)',
+        'display: flex',
+        'align-items: center',
+        'gap: 12px',
+        'border: 1px solid rgba(255, 255, 255, 0.22)',
+      ].join(';');
+    }}
+    osd.textContent = `倍速 ${{formatted}}×`;
+    const host = (document.fullscreenElement && document.fullscreenElement.tagName !== 'VIDEO')
+      ? document.fullscreenElement
+      : (document.body || document.documentElement);
+    if (osd.parentElement !== host) {{
+      host.appendChild(osd);
+    }}
+    requestAnimationFrame(() => {{
+      osd.style.opacity = '1';
+    }});
+    clearTimeout(window.__freetv_osd_timer__);
+    window.__freetv_osd_timer__ = setTimeout(() => {{
+      osd.style.opacity = '0';
+      setTimeout(() => {{
+        if (osd.parentElement && osd.style.opacity === '0') {{
+          osd.remove();
+        }}
+      }}, 300);
+    }}, 1800);
+  }} catch {{}}
   return next;
 }})()"""
 
@@ -96,6 +226,7 @@ class YoutubeProbe(Protocol):
     async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> bool: ...
     async def playback_rate(self, port: int, direction: int) -> float: ...
     async def seek(self, port: int, direction: int) -> bool: ...
+    async def show_osd(self, port: int, text: str) -> bool: ...
 
 
 def extract_video_identity(url: str) -> str | None:
@@ -139,9 +270,9 @@ class ShortCdpYoutubeProbe:
             raise ValueError("YouTube inspection result is invalid")
         return extract_video_identity(url), ready, fullscreen
 
-    async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> bool:
-        if not video_id or user_gesture is not True:
-            raise ValueError("A video identity and user gesture are required")
+    async def fullscreen(self, port: int, video_id: str = "", user_gesture: bool = True) -> bool:
+        if user_gesture is not True:
+            raise ValueError("A user gesture is required")
         debugger_url = await self._debugger_url(port)
         value = await self._evaluate(
             debugger_url,
@@ -151,6 +282,15 @@ class ShortCdpYoutubeProbe:
         if type(value) is not bool:
             raise ValueError("YouTube fullscreen result is invalid")
         return value
+
+    async def show_osd(self, port: int, text: str) -> bool:
+        debugger_url = await self._debugger_url(port)
+        value = await self._evaluate(
+            debugger_url,
+            _show_osd_expression(text),
+            user_gesture=True,
+        )
+        return bool(value)
 
     async def playback_rate(self, port: int, direction: int) -> float:
         if direction not in {1, -1}:
@@ -316,6 +456,15 @@ class YoutubeFullscreenController:
                     "目前沒有可切換為全螢幕的 YouTube 影片。",
                 )
             return True
+
+    async def show_osd(self, port: int, text: str) -> None:
+        show = getattr(self._probe, "show_osd", None)
+        if show is not None:
+            try:
+                async with self._probe_lock:
+                    await show(port, text)
+            except Exception:
+                pass
 
     async def adjust_playback_rate(self, port: int, direction: int) -> float:
         playback_rate = getattr(self._probe, "playback_rate", None)

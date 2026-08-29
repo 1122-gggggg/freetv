@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from app.commands.ports import CommandExecutionError
 from app.protocol import Command, NetflixContext, NetflixStage
 
-RUNTIME_VERSION = "7"
+RUNTIME_VERSION = "8"
 ERROR_MESSAGES = {
     "netflix_page_unavailable": "無法連到 Netflix 控制頁面，請稍後再試。",
     "netflix_controller_unavailable": "無法載入 Netflix 遙控控制，請稍後再試。",
@@ -53,6 +53,8 @@ RUNTIME_STATUSES = {
     "fullscreen",
     "speed",
     "seek",
+    "text",
+    "osd",
     "context",
     "submitted",
     "error",
@@ -64,6 +66,7 @@ FOCUS_REQUIRED_STATUSES = {
     "moved",
     "boundary",
     "clicked",
+    "text",
 }
 NO_FOCUS_STATUSES = {
     "closed",
@@ -72,6 +75,7 @@ NO_FOCUS_STATUSES = {
     "paused",
     "speed",
     "seek",
+    "osd",
     "context",
     "submitted",
 }
@@ -93,6 +97,8 @@ class NetflixAction(StrEnum):
     SPEED_DOWN = "SPEED_DOWN"
     SEEK_FORWARD_5 = "SEEK_FORWARD_5"
     SEEK_BACKWARD_5 = "SEEK_BACKWARD_5"
+    SET_TEXT = "SET_TEXT"
+    SHOW_OSD = "SHOW_OSD"
     READ_CONTEXT = "READ_CONTEXT"
     SUBMIT_PRIMARY = "SUBMIT_PRIMARY"
 
@@ -273,6 +279,20 @@ class NetflixPageController:
                 raise _OutcomeUnknownError from None
 
         return await self._run_transaction(operation)
+
+    async def show_osd(self, text: str) -> None:
+        async def operation(socket: Any) -> NetflixContext:
+            result = await self._run_runtime(
+                socket,
+                NetflixAction.SHOW_OSD,
+                previous_focus={"text": text},
+            )
+            return self._accept_runtime_result(result)
+
+        try:
+            await self._run_transaction(operation)
+        except Exception:
+            pass
 
     async def _run_transaction(self, operation: Operation) -> NetflixContext:
         failure_code = "netflix_page_unavailable"

@@ -122,6 +122,7 @@ function netflixState(
     focused_tile: 'netflix',
     volume: 50,
     muted: false,
+    brightness: 100,
     channel_number: null,
     channel_name: null,
     status_message: null,
@@ -567,9 +568,9 @@ describe('RemoteScreen', () => {
     act(() => {
       root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' }).props.onPress()
     })
-    latestMockSocket!.sendTextInput.mockResolvedValueOnce(
-      mockAck({ success: false, message: 'raw sensitive failure' }),
-    )
+    latestMockSocket!.sendTextInput
+      .mockResolvedValueOnce(mockAck())
+      .mockResolvedValueOnce(mockAck({ success: false, message: 'raw sensitive failure' }))
     const input = root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' })
     act(() => input.props.onChangeText('secret'))
 
@@ -608,9 +609,9 @@ describe('RemoteScreen', () => {
     act(() => {
       root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' }).props.onPress()
     })
-    latestMockSocket!.sendTextInput.mockRejectedValueOnce(
-      new Error('raw transport timeout'),
-    )
+    latestMockSocket!.sendTextInput
+      .mockResolvedValueOnce(mockAck())
+      .mockRejectedValueOnce(new Error('raw transport timeout'))
     const input = root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' })
     act(() => input.props.onChangeText('secret'))
 
@@ -787,7 +788,7 @@ describe('RemoteScreen', () => {
         'Netflix 尚未可送出',
       )
     })
-    expect(latestMockSocket!.sendTextInput).not.toHaveBeenCalled()
+    expect(latestMockSocket!.sendTextInput).not.toHaveBeenCalledWith('secret', true)
 
     act(() => {
       latestMockSocket!.simulateStateChange(
@@ -950,6 +951,7 @@ describe('RemoteScreen', () => {
       focused_tile: 'youtube',
       volume: 60,
       muted: false,
+      brightness: 100,
       channel_number: 7,
       channel_name: 'Documentary HD',
       status_message: 'Playing video stream',

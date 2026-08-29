@@ -102,6 +102,7 @@ def build_runtime(settings: Settings) -> ControllerRuntime:
         applications=applications,
         player=player,
         volume=platform.volume,
+        brightness=platform.brightness,
         input_controller=platform.input,
         power=platform.power,
         news=news,

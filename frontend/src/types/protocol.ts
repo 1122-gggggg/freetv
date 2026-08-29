@@ -20,6 +20,8 @@ export type Command =
   | 'VOLUME_UP'
   | 'VOLUME_DOWN'
   | 'MUTE'
+  | 'BRIGHTNESS_UP'
+  | 'BRIGHTNESS_DOWN'
   | 'CHANNEL_UP'
   | 'CHANNEL_DOWN'
   | 'OPEN_YOUTUBE'
@@ -47,9 +49,10 @@ export interface ControllerState {
   version: 1
   type: 'state'
   active_app: 'launcher' | 'youtube' | 'netflix' | 'live_tv' | 'browser' | 'news'
-  focused_tile: 'youtube' | 'netflix' | 'news' | 'settings'
+  focused_tile: 'youtube' | 'netflix' | 'news'
   volume: number
   muted: boolean
+  brightness: number
   channel_number: number | null
   channel_name: string | null
   status_message: string | null

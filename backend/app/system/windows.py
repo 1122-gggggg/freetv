@@ -135,3 +135,47 @@ class WindowsWindowController:
     def _require_windows() -> None:
         if os.name != "nt":
             raise RuntimeError("Windows window control is only available on Windows.")
+
+
+class WindowsBrightnessController:
+    def __init__(
+        self,
+        *,
+        step_percent: int = 10,
+        initial_level: int = 100,
+        os_name: str = os.name,
+    ) -> None:
+        self._step = step_percent
+        self._level = initial_level
+        self._os_name = os_name
+
+    async def increase(self) -> int:
+        self._level = min(100, self._level + self._step)
+        await self._apply_brightness(self._level)
+        return self._level
+
+    async def decrease(self) -> int:
+        self._level = max(10, self._level - self._step)
+        await self._apply_brightness(self._level)
+        return self._level
+
+    async def get_level(self) -> int:
+        return self._level
+
+    async def _apply_brightness(self, level: int) -> None:
+        if self._os_name == "nt":
+            try:
+                import subprocess
+
+                cmd = (
+                    "(Get-CimInstance -Namespace root/WMI -ClassName "
+                    f"WmiMonitorBrightnessMethods).WmiSetBrightness(1, {level})"
+                )
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd],
+                    check=False,
+                    capture_output=True,
+                    timeout=1.5,
+                )
+            except Exception:
+                pass

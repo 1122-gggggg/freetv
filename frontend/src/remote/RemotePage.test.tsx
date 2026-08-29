@@ -48,6 +48,7 @@ const netflixState = (context: NetflixContext | null): ControllerState => ({
   focused_tile: 'netflix',
   volume: 50,
   muted: false,
+  brightness: 100,
   channel_number: null,
   channel_name: null,
   status_message: null,
@@ -301,14 +302,14 @@ describe('RemotePage', () => {
       can_submit: true,
       focused_title: null,
     })
-    socketMock.sendText.mockReturnValueOnce(null)
+    socketMock.sendText.mockReturnValueOnce('req-live').mockReturnValueOnce(null)
     render(remoteElement())
     const input = screen.getByLabelText('Netflix 情境輸入') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'secret' } })
 
     fireEvent.click(screen.getByRole('button', { name: '送出 Netflix 輸入' }))
 
-    expect(socketMock.sendText).toHaveBeenCalledWith('secret', true)
+    expect(socketMock.sendText).toHaveBeenLastCalledWith('secret', true)
     expect(input.value).toBe('secret')
     expect(screen.getByText('無法送出，請重試')).toBeTruthy()
     expect(screen.queryByText('等待電視端回應...')).toBeNull()
@@ -340,8 +341,9 @@ describe('RemotePage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '送出 Netflix 輸入' }))
 
-    expect(socketMock.sendText).toHaveBeenCalledOnce()
-    expect(socketMock.sendText).toHaveBeenCalledWith('secret', true)
+    expect(socketMock.sendText).toHaveBeenCalledTimes(2)
+    expect(socketMock.sendText).toHaveBeenNthCalledWith(1, 'secret', false)
+    expect(socketMock.sendText).toHaveBeenNthCalledWith(2, 'secret', true)
     expect(input.value).toBe('')
     expect(screen.getByText('等待電視端回應...')).toBeTruthy()
 

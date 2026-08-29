@@ -91,6 +91,7 @@ def test_state_broadcast_continues_when_a_peer_disconnects() -> None:
                 "focused_tile": "youtube",
                 "volume": 50,
                 "muted": False,
+                "brightness": 100,
                 "channel_number": None,
                 "channel_name": None,
                 "status_message": None,

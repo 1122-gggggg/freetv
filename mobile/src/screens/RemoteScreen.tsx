@@ -184,6 +184,12 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
     }
   }
 
+  const handleLiveSync = (text: string) => {
+    if (socket && status === 'authenticated') {
+      void socket.sendTextInput(text, false).catch(() => {})
+    }
+  }
+
   const executeForget = async () => {
     if (isUnpairing) return
     setIsUnpairing(true)
@@ -475,6 +481,7 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
           }
           onClose={() => setTextInputSource(null)}
           onSend={handleSendText}
+          onLiveSync={handleLiveSync}
         />
       ) : null}
     </View>

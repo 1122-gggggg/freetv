@@ -1,7 +1,9 @@
-from pathlib import Path
 import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
+
 from app.applications.news import NewsChannelManager, load_news_channels
 from app.protocol import Command, parse_client_message
 from app.state import ActiveApp, LauncherTile
@@ -216,9 +218,9 @@ def test_news_manager_wraps_channels(tmp_path: Path) -> None:
 def test_controller_build_news_loads_example_when_config_absent(
     monkeypatch, tmp_path: Path
 ) -> None:
+    import app.controller as controller_module
     from app.config import Settings
     from app.controller import _build_news
-    import app.controller as controller_module
 
     fake_project_root = tmp_path
     (fake_project_root / "config").mkdir()
@@ -247,10 +249,10 @@ def test_controller_build_news_loads_example_when_config_absent(
 def test_controller_build_news_returns_unavailable_when_invalid(
     monkeypatch, tmp_path: Path
 ) -> None:
-    from app.config import Settings
-    from app.controller import _build_news, UnavailableNews
     import app.controller as controller_module
     from app.commands.ports import CommandExecutionError
+    from app.config import Settings
+    from app.controller import UnavailableNews, _build_news
 
     fake_project_root = tmp_path
     (fake_project_root / "config").mkdir()

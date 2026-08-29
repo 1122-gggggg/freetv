@@ -20,6 +20,7 @@ interface TextInputModalProps {
   canSubmit: boolean
   onClose: () => void
   onSend: (text: string, submit: boolean) => Promise<void>
+  onLiveSync?: (text: string) => void
 }
 
 export function TextInputModal({
@@ -29,6 +30,7 @@ export function TextInputModal({
   submit,
   onClose,
   onSend,
+  onLiveSync,
 }: TextInputModalProps): React.ReactElement {
   const insets = useSafeAreaInsets()
   const [text, setText] = useState('')
@@ -106,6 +108,7 @@ export function TextInputModal({
             onChangeText={(value) => {
               setText(value)
               if (errorMessage) setErrorMessage(null)
+              onLiveSync?.(value)
             }}
             maxLength={256}
             autoFocus

@@ -7,6 +7,7 @@ import pytest
 from app.commands.ports import CommandExecutionError
 from app.protocol import Command, PointerAction, PointerActionMessage
 from app.system.posix import (
+    PosixBrightnessController,
     PosixInputController,
     PosixPowerController,
     PosixVolumeController,
@@ -166,3 +167,19 @@ def test_posix_ydotool_is_not_used_as_keyboard_backend() -> None:
     with pytest.raises(CommandExecutionError) as caught:
         controller.send_command(Command.OK)
     assert caught.value.code == "input_unavailable"
+
+
+def test_posix_brightness_controller_adjusts_level_and_calls_tool() -> None:
+    calls: list[list[str]] = []
+    controller = PosixBrightnessController(
+        runner=lambda arguments: calls.append(list(arguments)) or "",
+        lookup=_lookup("brightnessctl"),
+    )
+
+    down = asyncio.run(controller.decrease())
+    assert down == 90
+    assert calls == [["brightnessctl", "set", "90%"]]
+
+    up = asyncio.run(controller.increase())
+    assert up == 100
+    assert calls == [["brightnessctl", "set", "90%"], ["brightnessctl", "set", "100%"]]

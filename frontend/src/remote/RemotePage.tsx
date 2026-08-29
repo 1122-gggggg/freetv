@@ -390,8 +390,10 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
                 disabled={controlsDisabled || waitingForNetflix}
                 value={netflixTyped}
                 onChange={(event) => {
-                  setNetflixTyped(event.target.value.slice(0, 256))
+                  const val = event.target.value.slice(0, 256)
+                  setNetflixTyped(val)
                   if (netflixLocalSendFailed) setNetflixLocalSendFailed(false)
+                  void sendText(val, false)
                 }}
               />
               <button
@@ -454,6 +456,8 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         <CommandButton command="SEEK_FORWARD_5" label="快轉 5 秒" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="SPEED_DOWN" label="倍速 −" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="SPEED_UP" label="倍速 +" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="BRIGHTNESS_DOWN" label="亮度 −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
+        <CommandButton command="BRIGHTNESS_UP" label="亮度 +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
         <CommandButton command="FULLSCREEN" label="全螢幕" onCommand={command} disabled={controlsDisabled} />
       </section>
 
@@ -489,7 +493,11 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
             autoComplete="off"
             spellCheck={false}
             value={typed}
-            onChange={(event) => setTyped(event.target.value.slice(0, 256))}
+            onChange={(event) => {
+              const val = event.target.value.slice(0, 256)
+              setTyped(val)
+              void sendText(val, false)
+            }}
           />
           <button className="remote-button search-submit" disabled={controlsDisabled || typed.length === 0} type="submit">
             送出

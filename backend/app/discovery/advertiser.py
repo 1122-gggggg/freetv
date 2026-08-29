@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import socket
-from typing import Mapping
+from collections.abc import Mapping
 
 from zeroconf import IPVersion
 from zeroconf.asyncio import AsyncServiceInfo, AsyncZeroconf

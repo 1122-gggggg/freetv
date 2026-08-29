@@ -34,6 +34,8 @@ class Command(StrEnum):
     VOLUME_UP = "VOLUME_UP"
     VOLUME_DOWN = "VOLUME_DOWN"
     MUTE = "MUTE"
+    BRIGHTNESS_UP = "BRIGHTNESS_UP"
+    BRIGHTNESS_DOWN = "BRIGHTNESS_DOWN"
     CHANNEL_UP = "CHANNEL_UP"
     CHANNEL_DOWN = "CHANNEL_DOWN"
     OPEN_YOUTUBE = "OPEN_YOUTUBE"
@@ -193,6 +195,7 @@ class StateMessage(WireModel):
     focused_tile: str
     volume: int = Field(ge=0, le=100)
     muted: bool
+    brightness: int = Field(default=100, ge=10, le=100)
     channel_number: int | None = None
     channel_name: str | None = Field(default=None, max_length=120)
     status_message: str | None = Field(default=None, max_length=256)

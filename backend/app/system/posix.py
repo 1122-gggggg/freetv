@@ -473,3 +473,51 @@ class PosixWindowController:
             self._run(["xdotool", action, window_id])
         except (CommandExecutionError, IndexError):
             return
+
+
+class PosixBrightnessController:
+    def __init__(
+        self,
+        *,
+        step_percent: int = 10,
+        initial_level: int = 100,
+        runner: CommandRunner | None = None,
+        lookup: ToolLookup | None = None,
+    ) -> None:
+        self._step = step_percent
+        self._level = initial_level
+        self._run = runner or run_command
+        self._lookup = lookup or which_first
+
+    async def increase(self) -> int:
+        self._level = min(100, self._level + self._step)
+        await self._apply_brightness(self._level)
+        return self._level
+
+    async def decrease(self) -> int:
+        self._level = max(10, self._level - self._step)
+        await self._apply_brightness(self._level)
+        return self._level
+
+    async def get_level(self) -> int:
+        return self._level
+
+    async def _apply_brightness(self, level: int) -> None:
+        if self._lookup("brightnessctl"):
+            try:
+                self._run(["brightnessctl", "set", f"{level}%"])
+                return
+            except Exception:
+                pass
+        if self._lookup("brightness"):
+            try:
+                self._run(["brightness", str(level / 100)])
+                return
+            except Exception:
+                pass
+        if self._lookup("xrandr"):
+            try:
+                self._run(["xrandr", "--brightness", str(level / 100)])
+                return
+            except Exception:
+                pass
