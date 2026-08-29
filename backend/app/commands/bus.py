@@ -415,6 +415,32 @@ class CommandBus:
             await self._applications.show_osd(status)
             state = await self._success_state(status_message=status)
             return CommandOutcome(True, state)
+        if command is Command.QUALITY:
+            self._require_external_input_target(current)
+            if current.active_app is ActiveApp.BROWSER:
+                raise CommandExecutionError(
+                    "command_not_supported",
+                    "目前應用程式不支援這個操作。",
+                )
+            quality = await self._applications.cycle_quality()
+            text = f"畫質 {quality}"
+            await self._applications.show_osd(text)
+            state = await self._success_state(status_message=text)
+            return CommandOutcome(True, state)
+
+        if command is Command.SUBTITLES:
+            self._require_external_input_target(current)
+            if current.active_app is ActiveApp.BROWSER:
+                raise CommandExecutionError(
+                    "command_not_supported",
+                    "目前應用程式不支援這個操作。",
+                )
+            sub = await self._applications.toggle_subtitles()
+            text = f"字幕 {sub}"
+            await self._applications.show_osd(text)
+            state = await self._success_state(status_message=text)
+            return CommandOutcome(True, state)
+
         if current.active_app in {
             ActiveApp.YOUTUBE,
             ActiveApp.NETFLIX,

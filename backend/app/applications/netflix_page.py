@@ -76,6 +76,8 @@ NO_FOCUS_STATUSES = {
     "speed",
     "seek",
     "osd",
+    "quality",
+    "subtitles",
     "context",
     "submitted",
 }
@@ -101,8 +103,8 @@ class NetflixAction(StrEnum):
     SHOW_OSD = "SHOW_OSD"
     READ_CONTEXT = "READ_CONTEXT"
     SUBMIT_PRIMARY = "SUBMIT_PRIMARY"
-
-
+    QUALITY = "QUALITY"
+    SUBTITLES = "SUBTITLES"
 IDEMPOTENT_ACTIONS = {
     NetflixAction.FOCUS_PRIMARY,
     NetflixAction.FOCUS_EDITABLE,
@@ -123,8 +125,9 @@ COMMAND_ACTIONS: dict[Command, NetflixAction] = {
     Command.SEEK_FORWARD_5: NetflixAction.SEEK_FORWARD_5,
     Command.SEEK_BACKWARD_5: NetflixAction.SEEK_BACKWARD_5,
     Command.TAB: NetflixAction.FOCUS_NEXT,
+    Command.QUALITY: NetflixAction.QUALITY,
+    Command.SUBTITLES: NetflixAction.SUBTITLES,
 }
-
 
 FocusFingerprint = dict[str, str | int]
 Operation = Callable[[Any], Awaitable[NetflixContext]]

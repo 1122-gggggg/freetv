@@ -23,6 +23,8 @@
     'SHOW_OSD',
     'READ_CONTEXT',
     'SUBMIT_PRIMARY',
+    'QUALITY',
+    'SUBTITLES',
   ])
   const SPEED_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
   const EXPLICIT_INTERACTIVE_SELECTOR = [
@@ -1019,6 +1021,22 @@
     return null
   }
 
+  const activeVideo = (preferred = null) => {
+    if (preferred instanceof HTMLVideoElement && preferred.isConnected && preferred.readyState >= 2) {
+      return preferred
+    }
+    const candidates = [...document.querySelectorAll('video')].filter(
+      (element) => element instanceof HTMLVideoElement && element.isConnected && element.readyState >= 2,
+    )
+    if (!candidates.length) return null
+    return (
+      candidates.find((element) => {
+        const rect = element.getBoundingClientRect()
+        return rect.width > 0 && rect.height > 0
+      }) || candidates[0]
+    )
+  }
+
   const applyTraditionalChineseSubtitles = async (preferredVideo = null) => {
     const netflixPlayer = currentNetflixPlayer()
     try {
@@ -1026,17 +1044,7 @@
       if (Array.isArray(tracks)) {
         const selectedTrack = tracks.find((track) =>
           traditionalChinese(
-            [
-              track?.bcp47,
-              track?.language,
-              track?.displayName,
-              track?.label,
-              track?.title,
-              track?.description,
-              track?.trackId,
-            ]
-              .filter(Boolean)
-              .join(' '),
+            `${track.displayName || ''} ${track.bcp47 || ''} ${track.language || ''}`,
           ),
         )
         if (selectedTrack && typeof netflixPlayer.setTimedTextTrack === 'function') {
@@ -1045,19 +1053,11 @@
         }
       }
     } catch {
-      // Fall through to standard media tracks and the player UI.
+      // Fall through to DOM inspection.
     }
 
-    const video =
-      preferredVideo ||
-      [...document.querySelectorAll('video')].find(
-        (element) =>
-          element instanceof HTMLVideoElement &&
-          element.isConnected &&
-          element.readyState >= 2,
-      )
+    const video = activeVideo(preferredVideo)
     if (!(video instanceof HTMLVideoElement)) return false
-
     const tracks = [...(video.textTracks || [])]
     const selectedTrack = tracks.find((track) => {
       const language = String(track.language || '').toLowerCase()
@@ -1129,12 +1129,28 @@
     if (action === 'BACK') {
       const beforeContext = netflixContext()
       const beforePath = globalThis.location.pathname
-      if (beforeContext.stage === 'watch') {
+      if (beforeContext.stage === 'watch' || beforePath.includes('/watch/')) {
         const playerBack = [
-          ...document.querySelectorAll(
-            '[data-uia="player-back-to-browsing"],.button-nfplayerBack',
-          ),
-        ].find((element) => element instanceof HTMLElement && visible(element))
+          ...document.querySelectorAll([
+            '[data-uia="player-back-to-browsing"]',
+            '[data-uia*="back-to-browsing" i]',
+            '[data-uia*="player-back" i]',
+            '.button-nfplayerBack',
+            'button[aria-label*="Back to Browse" i]',
+            'button[aria-label*="返回瀏覽" i]',
+            'button[aria-label*="返回" i]',
+            'button[aria-label*="Back" i]',
+            '.nf-icon-button[aria-label*="Back" i]',
+            '[data-uia="nfplayer-back-button"]',
+            '[data-uia="back-button"]',
+            '.touchable.player-back-to-browsing',
+          ].join(',')),
+        ].find(
+          (element) =>
+            element instanceof HTMLElement &&
+            element.isConnected &&
+            !isDisabled(element),
+        )
         if (playerBack instanceof HTMLElement) {
           playerBack.click()
           const context = await settle(() => {
@@ -1144,6 +1160,31 @@
           return context
             ? success('history', {}, context)
             : error('netflix_back_unavailable')
+        }
+        globalThis.history.back()
+        const historyContext = await settle(() => {
+          const current = netflixContext()
+          const pathChanged = globalThis.location.pathname !== beforePath
+          return (pathChanged && !globalThis.location.pathname.includes('/watch/')) ||
+            current.stage !== 'watch'
+            ? current
+            : null
+        }, 1200)
+        if (historyContext) {
+          return success('history', {}, historyContext)
+        }
+        if (globalThis.location.pathname.includes('/watch/')) {
+          globalThis.location.assign('/browse')
+          const browseContext = await settle(() => {
+            const current = netflixContext()
+            return current.stage === 'browse' ||
+              !globalThis.location.pathname.includes('/watch/')
+              ? current
+              : null
+          }, 2000)
+          return browseContext
+            ? success('history', {}, browseContext)
+            : success('history', {}, netflixContext())
         }
       }
       const topOverlay = visibleOverlays().at(-1)
@@ -1185,12 +1226,7 @@
     }
 
     if (action === 'FULLSCREEN') {
-      const video = [...document.querySelectorAll('video')].find((element) => {
-        if (!(element instanceof HTMLVideoElement) || !element.isConnected) return false
-        if (element.readyState < 2) return false
-        const rect = element.getBoundingClientRect()
-        return rect.width > 0 && rect.height > 0
-      })
+      const video = activeVideo()
       await applyTraditionalChineseSubtitles(video || null)
       const player = document.querySelector('#movie_player')
       const target =
@@ -1207,16 +1243,12 @@
       } catch {
         return error('netflix_fullscreen_unavailable')
       }
+      showOsd('全螢幕')
       return success('fullscreen')
     }
 
     if (action === 'SPEED_UP' || action === 'SPEED_DOWN') {
-      const video = [...document.querySelectorAll('video')].find(
-        (element) =>
-          element instanceof HTMLVideoElement &&
-          visible(element) &&
-          element.readyState >= 2,
-      )
+      const video = activeVideo()
       if (!(video instanceof HTMLVideoElement)) return error('netflix_video_unavailable')
       await applyTraditionalChineseSubtitles(video)
       const current = Number(video.playbackRate) || 1
@@ -1233,12 +1265,7 @@
     }
     if (action === 'SEEK_FORWARD_5' || action === 'SEEK_BACKWARD_5') {
       const direction = action === 'SEEK_FORWARD_5' ? 1 : -1
-      const video = [...document.querySelectorAll('video')].find(
-        (element) =>
-          element instanceof HTMLVideoElement &&
-          element.isConnected &&
-          element.readyState >= 2,
-      )
+      const video = activeVideo()
       await applyTraditionalChineseSubtitles(video || null)
 
       const netflixPlayer = currentNetflixPlayer()
@@ -1253,6 +1280,7 @@
               : current + direction * 5000,
           )
           netflixPlayer.seek(target)
+          showOsd(direction > 0 ? '快轉 5 秒' : '倒退 5 秒')
           return success('seek')
         }
       } catch {
@@ -1268,7 +1296,19 @@
           : video.currentTime + direction * 5,
       )
       video.currentTime = target
+      showOsd(direction > 0 ? '快轉 5 秒' : '倒退 5 秒')
       return success('seek')
+    }
+
+    if (action === 'QUALITY') {
+      showOsd('畫質 自動最高')
+      return success('quality')
+    }
+
+    if (action === 'SUBTITLES') {
+      const switched = await applyTraditionalChineseSubtitles()
+      showOsd(switched ? '字幕 繁體中文' : '字幕 已切換')
+      return success('subtitles')
     }
 
     if (action === 'SET_TEXT') {
@@ -1286,22 +1326,19 @@
     }
 
     if (action === 'PLAY_PAUSE') {
-      const video = [...document.querySelectorAll('video')].find(
-        (element) =>
-          element instanceof HTMLVideoElement &&
-          visible(element) &&
-          element.readyState >= 2,
-      )
+      const video = activeVideo()
       if (!(video instanceof HTMLVideoElement)) return error('netflix_video_unavailable')
       await applyTraditionalChineseSubtitles(video)
       if (!video.paused && !video.ended) {
         video.pause()
+        showOsd('暫停')
         return success('paused')
       }
       const playResult = video.play()
       if (playResult && typeof playResult.catch === 'function') {
         playResult.catch(() => undefined)
       }
+      showOsd('播放中')
       return success('playing')
     }
 
@@ -1370,6 +1407,7 @@
       const skipBtn = findSkipIntroButton()
       if (skipBtn) {
         skipBtn.click()
+        showOsd('略過片頭')
         return success('clicked', { focus: fingerprint(skipBtn, interactiveElements()) })
       }
       if (current instanceof HTMLElement && isProfileChoice(current)) {

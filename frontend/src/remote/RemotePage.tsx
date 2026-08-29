@@ -333,6 +333,42 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     }
   }
 
+  // Draggable slider pointer handlers
+  const createDragHandler = (onUp: () => void, onDown: () => void) => {
+    let startY: number | null = null
+    let accumulated = 0
+    const threshold = 20
+    return {
+      onPointerDown: (e: React.PointerEvent) => {
+        startY = e.clientY
+        accumulated = 0
+      },
+      onPointerMove: (e: React.PointerEvent) => {
+        if (startY === null) return
+        const diff = e.clientY - (startY + accumulated)
+        if (diff <= -threshold) {
+          accumulated += diff
+          onUp()
+        } else if (diff >= threshold) {
+          accumulated += diff
+          onDown()
+        }
+      },
+      onPointerUp: () => {
+        startY = null
+        accumulated = 0
+      },
+      onPointerCancel: () => {
+        startY = null
+        accumulated = 0
+      },
+    }
+  }
+
+  const volDrag = createDragHandler(() => void command('VOLUME_UP'), () => void command('VOLUME_DOWN'))
+  const speedDrag = createDragHandler(() => void command('SPEED_UP'), () => void command('SPEED_DOWN'))
+  const brightDrag = createDragHandler(() => void command('BRIGHTNESS_UP'), () => void command('BRIGHTNESS_DOWN'))
+
   return (
     <main className="remote-shell" aria-label="電視遙控器">
       <header className="remote-header">
@@ -435,6 +471,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         </section>
       ) : null}
 
+      {/* Direction Pad */}
       <section className="remote-direction-pad" aria-label="方向鍵">
         <CommandButton command="NAV_UP" label="上" onCommand={command} className="direction-up" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
         <CommandButton command="NAV_LEFT" label="左" onCommand={command} className="direction-left" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
@@ -443,25 +480,60 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         <CommandButton command="NAV_DOWN" label="下" onCommand={command} className="direction-down" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
       </section>
 
-      <section className="remote-grid two-column" aria-label="主要按鍵">
+      {/* 3 Vertical Draggable Slider Bars */}
+      <section className="remote-sliders-row" aria-label="調節滑桿">
+        {/* Volume Slider */}
+        <div className="slider-card" {...volDrag}>
+          <p className="slider-header">音量</p>
+          <div className="slider-track">
+            <div className="slider-fill vol-fill" style={{ height: `${state?.volume ?? 50}%` }} />
+            <CommandButton command="VOLUME_UP" label="音量 +" onCommand={command} disabled={controlsDisabled} repeatOnHold className="slider-step-btn" />
+            <CommandButton command="MUTE" label={state?.muted ? '靜音' : `${state?.volume ?? 50}%`} onCommand={command} disabled={controlsDisabled} className={`slider-pill ${state?.muted ? 'is-muted' : ''}`} />
+            <CommandButton command="VOLUME_DOWN" label="音量 −" onCommand={command} disabled={controlsDisabled} repeatOnHold className="slider-step-btn" />
+          </div>
+        </div>
+
+        {/* Speed Slider */}
+        <div className="slider-card" {...speedDrag}>
+          <p className="slider-header">倍速</p>
+          <div className="slider-track">
+            <CommandButton command="SPEED_UP" label="倍速 +" onCommand={command} disabled={controlsDisabled} className="slider-step-btn" />
+            <div className="slider-pill speed-pill">倍速</div>
+            <CommandButton command="SPEED_DOWN" label="倍速 −" onCommand={command} disabled={controlsDisabled} className="slider-step-btn" />
+          </div>
+        </div>
+
+        {/* Brightness Slider */}
+        <div className="slider-card" {...brightDrag}>
+          <p className="slider-header">亮度</p>
+          <div className="slider-track">
+            <div className="slider-fill bright-fill" style={{ height: `${state?.brightness ?? 100}%` }} />
+            <CommandButton command="BRIGHTNESS_UP" label="亮度 +" onCommand={command} disabled={controlsDisabled} repeatOnHold className="slider-step-btn" />
+            <div className="slider-pill">{state?.brightness ?? 100}%</div>
+            <CommandButton command="BRIGHTNESS_DOWN" label="亮度 −" onCommand={command} disabled={controlsDisabled} repeatOnHold className="slider-step-btn" />
+          </div>
+        </div>
+      </section>
+
+      {/* Navigation Row */}
+      <section className="remote-grid four-column nav-row" aria-label="導覽列">
         <CommandButton command="BACK" label="返回" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="HOME" label="主畫面" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="CHANNEL_UP" label="頻道 +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="CHANNEL_DOWN" label="頻道 −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="VOLUME_UP" label="音量 +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="VOLUME_DOWN" label="音量 −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="MUTE" label="靜音" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="PLAY_PAUSE" label="播放／暫停" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="SEEK_BACKWARD_5" label="倒退 5 秒" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="SEEK_FORWARD_5" label="快轉 5 秒" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="SPEED_DOWN" label="倍速 −" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="SPEED_UP" label="倍速 +" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="BRIGHTNESS_DOWN" label="亮度 −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
-        <CommandButton command="BRIGHTNESS_UP" label="亮度 +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
         <CommandButton command="FULLSCREEN" label="全螢幕" onCommand={command} disabled={controlsDisabled} />
       </section>
 
-      <section className="remote-voice-row" aria-label="語音搜尋">
+      {/* Playback Actions & Features Row */}
+      <section className="remote-grid four-column feature-row" aria-label="主要按鍵">
+        <CommandButton command="SEEK_BACKWARD_5" label="倒退 5 秒" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="SEEK_FORWARD_5" label="快轉 5 秒" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="QUALITY" label="畫質" onCommand={command} disabled={controlsDisabled} />
+        <CommandButton command="SUBTITLES" label="字幕" onCommand={command} disabled={controlsDisabled} />
+      </section>
+
+      {/* Channel Switchers & Voice Row */}
+      <section className="remote-grid three-column channel-voice-row" aria-label="頻道切換與語音">
+        <CommandButton command="CHANNEL_DOWN" label="頻道 −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
         <button
           className={`remote-button voice-button ${listening ? 'is-listening' : ''}`}
           disabled={controlsDisabled || !speechSupported}
@@ -470,6 +542,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         >
           {listening ? '聆聽中…' : '語音'}
         </button>
+        <CommandButton command="CHANNEL_UP" label="頻道 +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
       </section>
 
       {!netflixContext || netflixContext.stage === 'unknown' ? (

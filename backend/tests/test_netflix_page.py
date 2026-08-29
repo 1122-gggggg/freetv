@@ -269,8 +269,9 @@ def test_netflix_actions_exactly_match_runtime_actions() -> None:
         "SHOW_OSD",
         "READ_CONTEXT",
         "SUBMIT_PRIMARY",
+        "QUALITY",
+        "SUBTITLES",
     ]
-
 
 def test_select_netflix_target_requires_one_top_level_netflix_page() -> None:
     assert (

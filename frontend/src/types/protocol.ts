@@ -30,7 +30,8 @@ export type Command =
   | 'OPEN_BROWSER'
   | 'OPEN_NEWS'
   | 'POWER_SLEEP'
-
+  | 'QUALITY'
+  | 'SUBTITLES'
 export type PointerAction = 'move' | 'tap' | 'double_tap' | 'scroll'
 
 export type NetflixStage = 'login' | 'verification' | 'browse' | 'details' | 'watch' | 'unknown'

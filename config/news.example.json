@@ -61,5 +61,138 @@
     "name": "公視新聞網",
     "url": "https://www.youtube.com/@ptslivenews/live",
     "enabled": true
+  },
+  {
+    "id": "cti-news",
+    "number": 10,
+    "name": "中天新聞",
+    "url": "https://www.youtube.com/@ctitv/live",
+    "enabled": true
+  },
+  {
+    "id": "pts-sports",
+    "number": 11,
+    "name": "公視體育",
+    "url": "https://www.youtube.com/@pts_sports/live",
+    "enabled": true
+  },
+  {
+    "id": "moe-sports",
+    "number": 12,
+    "name": "體育署 MOE Sports",
+    "url": "https://www.youtube.com/@MOESPORTS/live",
+    "enabled": true
+  },
+  {
+    "id": "elta-sports",
+    "number": 13,
+    "name": "愛爾達體育家族",
+    "url": "https://www.youtube.com/@ELTASPORTSHD/live",
+    "enabled": true
+  },
+  {
+    "id": "vl-sports",
+    "number": 14,
+    "name": "緯來體育台",
+    "url": "https://www.youtube.com/@vlsports/live",
+    "enabled": true
+  },
+  {
+    "id": "ssutv-sports",
+    "number": 15,
+    "name": "SSUtv 大專體育",
+    "url": "https://www.youtube.com/@SSUtvSports/live",
+    "enabled": true
+  },
+  {
+    "id": "hop-sports",
+    "number": 16,
+    "name": "HOP Sports 運動直播",
+    "url": "https://www.youtube.com/@HOPSports/live",
+    "enabled": true
+  },
+  {
+    "id": "mr-player",
+    "number": 17,
+    "name": "綜藝玩很大",
+    "url": "https://www.youtube.com/@Mr.Player/live",
+    "enabled": true
+  },
+  {
+    "id": "hunger-games",
+    "number": 18,
+    "name": "飢餓遊戲",
+    "url": "https://www.youtube.com/@HungerGames123/live",
+    "enabled": true
+  },
+  {
+    "id": "hot-door-night",
+    "number": 19,
+    "name": "綜藝大熱門",
+    "url": "https://www.youtube.com/@HotDoorNight/live",
+    "enabled": true
+  },
+  {
+    "id": "eent-100",
+    "number": 20,
+    "name": "娛樂百分百",
+    "url": "https://www.youtube.com/@100eent/live",
+    "enabled": true
+  },
+  {
+    "id": "muyao4",
+    "number": 21,
+    "name": "木曜4超玩",
+    "url": "https://www.youtube.com/@Muyao4/live",
+    "enabled": true
+  },
+  {
+    "id": "kuokuang-gang",
+    "number": 22,
+    "name": "國光幫幫忙",
+    "url": "https://www.youtube.com/@TheGangofKuoKuang/live",
+    "enabled": true
+  },
+  {
+    "id": "gtv-drama",
+    "number": 23,
+    "name": "八大劇樂部",
+    "url": "https://www.youtube.com/@gtv-drama/live",
+    "enabled": true
+  },
+  {
+    "id": "cts-drama",
+    "number": 24,
+    "name": "華視戲劇頻道",
+    "url": "https://www.youtube.com/@ctsdrama/live",
+    "enabled": true
+  },
+  {
+    "id": "ctv-classic",
+    "number": 25,
+    "name": "中視經典戲劇",
+    "url": "https://www.youtube.com/@CTV_classic/live",
+    "enabled": true
+  },
+  {
+    "id": "set-drama",
+    "number": 26,
+    "name": "三立華劇",
+    "url": "https://www.youtube.com/@setdrama/live",
+    "enabled": true
+  },
+  {
+    "id": "muse-anime",
+    "number": 27,
+    "name": "木棉花動漫 Muse",
+    "url": "https://www.youtube.com/@MuseTW/live",
+    "enabled": true
+  },
+  {
+    "id": "rock-records",
+    "number": 28,
+    "name": "滾石唱片音樂",
+    "url": "https://www.youtube.com/@rockrecords/live",
+    "enabled": true
   }
 ]

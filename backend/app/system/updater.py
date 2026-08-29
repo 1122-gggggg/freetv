@@ -29,6 +29,15 @@ class UpdateInfo:
     release_notes: str
     download_url: str | None = None
 
+def parse_version(v: str) -> tuple[int, ...]:
+    cleaned = v.lstrip("vV").strip()
+    parts: list[int] = []
+    for chunk in cleaned.split("."):
+        digits = "".join(ch for ch in chunk if ch.isdigit())
+        if digits:
+            parts.append(int(digits))
+    return tuple(parts) if parts else (0,)
+
 
 def get_current_commit() -> str | None:
     try:
@@ -45,7 +54,6 @@ def get_current_commit() -> str | None:
     except Exception:
         pass
     return None
-
 
 async def check_for_update(*, client: httpx.AsyncClient | None = None) -> UpdateInfo | None:
     headers = {"User-Agent": "FreeTV-Appliance"}
@@ -69,7 +77,7 @@ async def check_for_update(*, client: httpx.AsyncClient | None = None) -> Update
                         if isinstance(asset, dict) and str(asset.get("name", "")).endswith(".zip"):
                             zip_url = str(asset.get("browser_download_url") or "")
                             break
-                if tag_name and tag_name != CURRENT_VERSION and tag_name != f"v{CURRENT_VERSION}":
+                if tag_name and parse_version(tag_name) > parse_version(CURRENT_VERSION):
                     return UpdateInfo(
                         available=True,
                         version=tag_name,
@@ -77,7 +85,6 @@ async def check_for_update(*, client: httpx.AsyncClient | None = None) -> Update
                         release_notes=body[:500],
                         download_url=zip_url,
                     )
-
         # Fallback to checking latest commit on main branch
         commit_res = await http.get(GITHUB_COMMITS_URL)
         if commit_res.status_code == 200:
@@ -87,6 +94,20 @@ async def check_for_update(*, client: httpx.AsyncClient | None = None) -> Update
                 local_sha = get_current_commit()
                 message = str(commit_payload.get("commit", {}).get("message") or "").split("\n")[0]
                 if remote_sha and local_sha and remote_sha != local_sha:
+                    # Check if remote_sha is already an ancestor of HEAD
+                    try:
+                        ancestor_check = subprocess.run(
+                            ["git", "merge-base", "--is-ancestor", remote_sha, "HEAD"],
+                            cwd=project_root(),
+                            capture_output=True,
+                            text=True,
+                            check=False,
+                            timeout=2.0,
+                        )
+                        if ancestor_check.returncode == 0:
+                            return None
+                    except Exception:
+                        pass
                     return UpdateInfo(
                         available=True,
                         version=remote_sha,
@@ -94,7 +115,6 @@ async def check_for_update(*, client: httpx.AsyncClient | None = None) -> Update
                         release_notes=message[:200],
                         download_url=None,
                     )
-        return None
     except Exception as error:
         log_event(logger, "update_check_failed", error=str(error))
         return None

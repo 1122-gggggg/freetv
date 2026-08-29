@@ -333,9 +333,12 @@ def _start_cloudflare_tunnel(cloudflared: str, *, port: int, log_directory: Path
     log_path = log_directory / "cloudflared.log"
     out_path = log_directory / "cloudflared.out.log"
     for path in (log_path, out_path):
-        if path.exists():
-            path.unlink()
-    with log_path.open("wb") as error_log, out_path.open("wb") as output_log:
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError:
+            pass
+    with log_path.open("ab") as error_log, out_path.open("ab") as output_log:
         subprocess.Popen(
             [cloudflared, "tunnel", "--url", f"http://127.0.0.1:{port}"],
             stdout=output_log,

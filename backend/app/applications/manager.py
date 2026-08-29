@@ -464,6 +464,29 @@ class ApplicationManager:
             "目前應用程式不支援這個操作。",
         )
 
+    async def cycle_quality(self) -> str:
+        self.require_input_target(self._active_app)
+        if self._active_app in {ActiveApp.YOUTUBE, ActiveApp.NEWS}:
+            return await self._youtube_fullscreen.cycle_quality(self._debug_port)
+        if self._active_app is ActiveApp.NETFLIX:
+            await self._netflix_page.execute(Command.QUALITY)
+            return "最高畫質"
+        raise CommandExecutionError(
+            "command_not_supported",
+            "目前應用程式不支援這個操作。",
+        )
+
+    async def toggle_subtitles(self) -> str:
+        self.require_input_target(self._active_app)
+        if self._active_app in {ActiveApp.YOUTUBE, ActiveApp.NEWS}:
+            return await self._youtube_fullscreen.toggle_subtitles(self._debug_port)
+        if self._active_app is ActiveApp.NETFLIX:
+            await self._netflix_page.execute(Command.SUBTITLES)
+            return "繁體中文"
+        raise CommandExecutionError(
+            "command_not_supported",
+            "目前應用程式不支援這個操作。",
+        )
     async def show_osd(self, text: str) -> None:
         if self._active_app in {ActiveApp.YOUTUBE, ActiveApp.NEWS}:
             show = getattr(self._youtube_fullscreen, "show_osd", None)

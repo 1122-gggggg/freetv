@@ -25,22 +25,40 @@ def _fullscreen_expression(video_id: str = "") -> str:
     expected = json.dumps(video_id, ensure_ascii=True)
     return f"""(async () => {{
   const expected = {expected};
-  if (expected) {{
+  const getIdentity = () => {{
     const url = new URL(location.href);
-    const parts = url.pathname.split('/').filter(Boolean);
     const youtubeHost =
       url.hostname === 'youtube.com' || url.hostname.endsWith('.youtube.com');
-    if (!youtubeHost) return false;
-    let identity = null;
-    if (url.pathname.endsWith('/watch') && url.searchParams.get('v')) {{
-      identity = `watch:${{url.searchParams.get('v')}}`;
-    }} else if (url.hash.startsWith('#/watch?')) {{
-      const params = new URLSearchParams(url.hash.split('?')[1] || '');
-      if (params.get('v')) identity = `watch:${{params.get('v')}}`;
-    }} else if (parts.length >= 2 && ['shorts', 'live'].includes(parts.at(-2))) {{
-      identity = `${{parts.at(-2)}}:${{parts.at(-1)}}`;
+    if (!youtubeHost) return null;
+    const queryId = url.searchParams.get('v');
+    if ((url.pathname.endsWith('/watch') || url.pathname.includes('/watch')) && queryId) {{
+      return `watch:${{queryId}}`;
     }}
-    if (identity !== expected) return false;
+    if (url.hash.startsWith('#/watch?')) {{
+      const params = new URLSearchParams(url.hash.split('?')[1] || '');
+      if (params.get('v')) return `watch:${{params.get('v')}}`;
+    }}
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (parts.length >= 2 && ['shorts', 'live'].includes(parts[parts.length - 2])) {{
+      return `${{parts[parts.length - 2]}}:${{parts[parts.length - 1]}}`;
+    }}
+    if (parts.length >= 2 && parts[parts.length - 1] === 'live') {{
+      return `live:${{parts[parts.length - 2]}}`;
+    }}
+    if (parts.length >= 1 && parts[parts.length - 1] === 'live') {{
+      return 'live:default';
+    }}
+    if (url.pathname.startsWith('/live/')) {{
+      return `live:${{url.pathname.slice(6)}}`;
+    }}
+    if (url.pathname.startsWith('/shorts/')) {{
+      return `shorts:${{url.pathname.slice(8)}}`;
+    }}
+    return null;
+  }};
+  if (expected) {{
+    const identity = getIdentity();
+    if (identity && identity !== expected) return false;
   }}
   const video = [...document.querySelectorAll('video')].find(
     (element) => element instanceof HTMLVideoElement && element.readyState >= 2
@@ -221,13 +239,161 @@ def _seek_expression(direction: int) -> str:
 }})()"""
 
 
+def _quality_expression() -> str:
+    return """(() => {
+  const player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
+  const labels = {
+    'highres': '4K 最高畫質',
+    'hd2160': '4K (2160p)',
+    'hd1440': '2K (1440p)',
+    'hd1080': '1080p 高畫質',
+    'hd720': '720p',
+    'large': '480p',
+    'medium': '360p',
+    'small': '240p',
+    'tiny': '144p',
+    'auto': '自動 (最佳)',
+  };
+  let resultLabel = '自動';
+  if (player && typeof player.getAvailableQualityLevels === 'function') {
+    try {
+      const levels = player.getAvailableQualityLevels();
+      const current = player.getPlaybackQuality ? player.getPlaybackQuality() : 'auto';
+      if (Array.isArray(levels) && levels.length > 0) {
+        let index = levels.indexOf(current);
+        let next = levels[(index + 1) % levels.length];
+        if (typeof player.setPlaybackQualityRange === 'function') {
+          player.setPlaybackQualityRange(next, next);
+        }
+        if (typeof player.setPlaybackQuality === 'function') {
+          player.setPlaybackQuality(next);
+        }
+        resultLabel = labels[next] || next;
+      }
+    } catch {}
+  }
+  try {
+    const id = '__freetv_osd__';
+    let osd = document.getElementById(id);
+    if (!osd) {
+      osd = document.createElement('div');
+      osd.id = id;
+      osd.style.cssText = [
+        'position: fixed',
+        'top: 48px',
+        'right: 48px',
+        'z-index: 2147483647',
+        'background: rgba(0, 0, 0, 0.84)',
+        'color: #ffffff',
+        'font-size: 32px',
+        'font-weight: 700',
+        'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        'padding: 16px 32px',
+        'border-radius: 16px',
+        'box-shadow: 0 8px 32px rgba(0,0,0,0.6)',
+        'pointer-events: none',
+        'transition: opacity 0.25s ease',
+        'opacity: 0',
+        'backdrop-filter: blur(12px)',
+        'display: flex',
+        'align-items: center',
+        'gap: 12px',
+        'border: 1px solid rgba(255, 255, 255, 0.22)',
+      ].join(';');
+    }
+    osd.textContent = `畫質 ${resultLabel}`;
+    const host = (document.fullscreenElement && document.fullscreenElement.tagName !== 'VIDEO')
+      ? document.fullscreenElement
+      : (document.body || document.documentElement);
+    if (osd.parentElement !== host) {
+      host.appendChild(osd);
+    }
+    requestAnimationFrame(() => {
+      osd.style.opacity = '1';
+    });
+    clearTimeout(window.__freetv_osd_timer__);
+    window.__freetv_osd_timer__ = setTimeout(() => {
+      osd.style.opacity = '0';
+      setTimeout(() => {
+        if (osd.parentElement && osd.style.opacity === '0') {
+          osd.remove();
+        }
+      }, 300);
+    }, 1800);
+  } catch {}
+  return resultLabel;
+})()"""
+
+
+def _subtitles_expression() -> str:
+    return """(() => {
+  const player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
+  let result = '切換';
+  if (player && typeof player.toggleSubtitles === 'function') {
+    try {
+      player.toggleSubtitles();
+      result = '已切換';
+    } catch {}
+  }
+  try {
+    const id = '__freetv_osd__';
+    let osd = document.getElementById(id);
+    if (!osd) {
+      osd = document.createElement('div');
+      osd.id = id;
+      osd.style.cssText = [
+        'position: fixed',
+        'top: 48px',
+        'right: 48px',
+        'z-index: 2147483647',
+        'background: rgba(0, 0, 0, 0.84)',
+        'color: #ffffff',
+        'font-size: 32px',
+        'font-weight: 700',
+        'font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        'padding: 16px 32px',
+        'border-radius: 16px',
+        'box-shadow: 0 8px 32px rgba(0,0,0,0.6)',
+        'pointer-events: none',
+        'transition: opacity 0.25s ease',
+        'opacity: 0',
+        'backdrop-filter: blur(12px)',
+        'display: flex',
+        'align-items: center',
+        'gap: 12px',
+        'border: 1px solid rgba(255, 255, 255, 0.22)',
+      ].join(';');
+    }
+    osd.textContent = `字幕 ${result}`;
+    const host = (document.fullscreenElement && document.fullscreenElement.tagName !== 'VIDEO')
+      ? document.fullscreenElement
+      : (document.body || document.documentElement);
+    if (osd.parentElement !== host) {
+      host.appendChild(osd);
+    }
+    requestAnimationFrame(() => {
+      osd.style.opacity = '1';
+    });
+    clearTimeout(window.__freetv_osd_timer__);
+    window.__freetv_osd_timer__ = setTimeout(() => {
+      osd.style.opacity = '0';
+      setTimeout(() => {
+        if (osd.parentElement && osd.style.opacity === '0') {
+          osd.remove();
+        }
+      }, 300);
+    }, 1800);
+  } catch {}
+  return result;
+})()"""
 class YoutubeProbe(Protocol):
     async def inspect(self, port: int) -> tuple[str | None, bool, bool]: ...
     async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> bool: ...
     async def playback_rate(self, port: int, direction: int) -> float: ...
     async def seek(self, port: int, direction: int) -> bool: ...
+    async def cycle_quality(self, port: int) -> str: ...
+    async def toggle_subtitles(self, port: int) -> str: ...
     async def show_osd(self, port: int, text: str) -> bool: ...
-
 
 def extract_video_identity(url: str) -> str | None:
     try:
@@ -325,6 +491,15 @@ class ShortCdpYoutubeProbe:
             raise ValueError("YouTube seek result is invalid")
         return value
 
+    async def cycle_quality(self, port: int) -> str:
+        debugger_url = await self._debugger_url(port)
+        value = await self._evaluate(debugger_url, _quality_expression(), user_gesture=True)
+        return str(value or "自動")
+
+    async def toggle_subtitles(self, port: int) -> str:
+        debugger_url = await self._debugger_url(port)
+        value = await self._evaluate(debugger_url, _subtitles_expression(), user_gesture=True)
+        return str(value or "已切換")
     async def _debugger_url(self, port: int) -> str:
         if type(port) is not int or not 1 <= port <= 65535:
             raise ValueError("CDP port is invalid")
@@ -463,7 +638,6 @@ class YoutubeFullscreenController:
                     "目前沒有可切換為全螢幕的 YouTube 影片。",
                 )
             return True
-
     async def show_osd(self, port: int, text: str) -> None:
         show = getattr(self._probe, "show_osd", None)
         if show is not None:
@@ -513,6 +687,20 @@ class YoutubeFullscreenController:
                 "youtube_video_unavailable",
                 "目前沒有可快轉或倒退的影片。",
             )
+
+    async def cycle_quality(self, port: int) -> str:
+        try:
+            async with self._probe_lock:
+                return await self._probe.cycle_quality(port)
+        except Exception:
+            return "自動"
+
+    async def toggle_subtitles(self, port: int) -> str:
+        try:
+            async with self._probe_lock:
+                return await self._probe.toggle_subtitles(port)
+        except Exception:
+            return "切換"
 
     async def _run(self, port: int) -> None:
         while True:
