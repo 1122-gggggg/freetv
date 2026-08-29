@@ -462,6 +462,7 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
           disabled={!isConnected}
           muted={isConnected ? controllerState?.muted : undefined}
           volume={isConnected ? controllerState?.volume : undefined}
+          brightness={isConnected ? controllerState?.brightness : undefined}
         />
 
         <AppLaunchers

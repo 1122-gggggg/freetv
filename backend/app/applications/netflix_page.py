@@ -366,7 +366,9 @@ class NetflixPageController:
             raise _CdpCallError
         return remote.get("value")
 
-    async def _run_runtime(self, socket: Any, action: NetflixAction) -> Any:
+    async def _run_runtime(
+        self, socket: Any, action: NetflixAction, previous_focus: Any = None
+    ) -> Any:
         try:
             version = await self._evaluate(socket, self.VERSION_EXPRESSION)
             if version != RUNTIME_VERSION:
@@ -374,7 +376,7 @@ class NetflixPageController:
                 version = await self._evaluate(socket, self.VERSION_EXPRESSION)
                 if version != RUNTIME_VERSION:
                     raise _RetryableControllerError
-            return await self._run_action(socket, action)
+            return await self._run_action(socket, action, previous_focus=previous_focus)
         except CommandExecutionError:
             raise
         except _OutcomeUnknownError:
@@ -384,12 +386,14 @@ class NetflixPageController:
         except Exception:
             raise _RetryableControllerError from None
 
-    async def _run_action(self, socket: Any, action: NetflixAction) -> Any:
-        previous_focus = None
-        if self._focus is not None:
-            previous_focus = {field: self._focus[field] for field in FINGERPRINT_FIELDS}
+    async def _run_action(
+        self, socket: Any, action: NetflixAction, previous_focus: Any = None
+    ) -> Any:
+        focus_payload = previous_focus
+        if focus_payload is None and self._focus is not None:
+            focus_payload = {field: self._focus[field] for field in FINGERPRINT_FIELDS}
         action_json = json.dumps(action.value, ensure_ascii=True)
-        focus_json = json.dumps(previous_focus, ensure_ascii=True)
+        focus_json = json.dumps(focus_payload, ensure_ascii=True)
         expression = f"globalThis.__freeTvNetflixControl.run({action_json}, {focus_json})"
         return await self._evaluate(
             socket,
