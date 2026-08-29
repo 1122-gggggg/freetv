@@ -2,11 +2,29 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app import main
 from app.config import Settings
-from app.main import create_app
+from app.main import create_app, frontend_dist
+
+
+@pytest.fixture(autouse=True)
+def _ensure_frontend_index():
+    dist = frontend_dist()
+    index = dist / "index.html"
+    created = False
+    if not index.is_file():
+        dist.mkdir(parents=True, exist_ok=True)
+        index.write_text(
+            '<!DOCTYPE html><html><body><div id="root"></div></body></html>',
+            encoding="utf-8",
+        )
+        created = True
+    yield
+    if created and index.is_file():
+        index.unlink(missing_ok=True)
 
 
 def test_tv_and_remote_routes_serve_the_production_single_page_application() -> None:

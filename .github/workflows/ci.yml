@@ -46,9 +46,15 @@ jobs:
 
   backend-posix:
     name: Portable backend tests
+    needs: frontend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Download production frontend
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
       - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
