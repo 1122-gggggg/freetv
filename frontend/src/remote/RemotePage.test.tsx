@@ -128,6 +128,7 @@ describe('RemotePage', () => {
   })
 
   it('sends the existing Netflix navigation and 256-character text contracts', () => {
+    vi.useFakeTimers()
     render(
       <RemotePage
         token="paired-token-value-that-is-long-enough"
@@ -155,6 +156,7 @@ describe('RemotePage', () => {
     }
     const text = 'x'.repeat(256)
     fireEvent.change(screen.getByLabelText('遙控輸入'), { target: { value: text } })
+    vi.advanceTimersByTime(125)
     fireEvent.click(screen.getByRole('button', { name: '送出' }))
 
     expect(socketMock.sendCommand.mock.calls.map(([command]) => command)).toEqual([
@@ -228,6 +230,7 @@ describe('RemotePage', () => {
   })
 
   it('types into Netflix from the remote keyboard', () => {
+    vi.useFakeTimers()
     render(
       <RemotePage
         token="paired-token-value-that-is-long-enough"
@@ -238,6 +241,7 @@ describe('RemotePage', () => {
     )
 
     fireEvent.change(screen.getByLabelText('遙控輸入'), { target: { value: 'user@example.com' } })
+    vi.advanceTimersByTime(125)
     fireEvent.click(screen.getByRole('button', { name: '送出' }))
     expect(socketMock.sendText).toHaveBeenCalledWith('user@example.com', false)
 
@@ -302,7 +306,7 @@ describe('RemotePage', () => {
       can_submit: true,
       focused_title: null,
     })
-    socketMock.sendText.mockReturnValueOnce('req-live').mockReturnValueOnce(null)
+    socketMock.sendText.mockReturnValueOnce(null)
     render(remoteElement())
     const input = screen.getByLabelText('Netflix 情境輸入') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'secret' } })
@@ -341,9 +345,8 @@ describe('RemotePage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '送出 Netflix 輸入' }))
 
-    expect(socketMock.sendText).toHaveBeenCalledTimes(2)
-    expect(socketMock.sendText).toHaveBeenNthCalledWith(1, 'secret', false)
-    expect(socketMock.sendText).toHaveBeenNthCalledWith(2, 'secret', true)
+    expect(socketMock.sendText).toHaveBeenCalledOnce()
+    expect(socketMock.sendText).toHaveBeenCalledWith('secret', true)
     expect(input.value).toBe('')
     expect(screen.getByText('等待電視端回應...')).toBeTruthy()
 
@@ -632,6 +635,53 @@ describe('RemotePage', () => {
     expect((screen.getByRole('button', { name: '搜片' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: '語音' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText('電視盒重新連線後，按鍵會自動解鎖。')).toBeTruthy()
+  })
+
+  it('coalesces rapid generic live text changes', () => {
+    vi.useFakeTimers()
+    render(remoteElement())
+    const input = screen.getByLabelText('遙控輸入')
+    fireEvent.change(input, { target: { value: 'a' } })
+    fireEvent.change(input, { target: { value: 'ab' } })
+    fireEvent.change(input, { target: { value: 'abc' } })
+    expect(socketMock.sendText).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(125)
+    expect(socketMock.sendText).toHaveBeenCalledOnce()
+    expect(socketMock.sendText).toHaveBeenCalledWith('abc', false)
+  })
+
+  it('cancels a pending generic live send when submitted', () => {
+    vi.useFakeTimers()
+    render(remoteElement())
+    fireEvent.change(screen.getByLabelText('遙控輸入'), { target: { value: 'final' } })
+    fireEvent.click(screen.getByRole('button', { name: '送出' }))
+    expect(socketMock.sendText).toHaveBeenCalledOnce()
+    expect(socketMock.sendText).toHaveBeenCalledWith('final', false)
+    vi.advanceTimersByTime(125)
+    expect(socketMock.sendText).toHaveBeenCalledOnce()
+  })
+
+  it('cancels a pending Netflix live send when submitted', () => {
+    vi.useFakeTimers()
+    socketMock.state = netflixState({
+      stage: 'login', input_kind: 'email', has_error: false, can_submit: true, focused_title: null,
+    })
+    render(remoteElement())
+    fireEvent.change(screen.getByLabelText('Netflix 情境輸入'), { target: { value: 'user@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '送出 Netflix 輸入' }))
+    expect(socketMock.sendText).toHaveBeenCalledOnce()
+    expect(socketMock.sendText).toHaveBeenCalledWith('user@example.com', true)
+    vi.advanceTimersByTime(125)
+    expect(socketMock.sendText).toHaveBeenCalledOnce()
+  })
+
+  it('cancels pending live text when unmounted', () => {
+    vi.useFakeTimers()
+    const view = render(remoteElement())
+    fireEvent.change(screen.getByLabelText('遙控輸入'), { target: { value: 'stale' } })
+    view.unmount()
+    vi.advanceTimersByTime(125)
+    expect(socketMock.sendText).not.toHaveBeenCalled()
   })
 
 })

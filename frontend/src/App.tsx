@@ -1,8 +1,20 @@
-import { type ReactElement, useEffect, useState } from 'react'
+import { lazy, Suspense, type ReactElement, useEffect, useState } from 'react'
 
-import { RemotePage } from './remote/RemotePage'
 import { forgetStoredRemoteToken, revokeRemoteToken, storedRemoteToken } from './remote/tokenStorage'
-import { TVLauncher } from './tv/TVLauncher'
+
+const RemotePage = lazy(async () => {
+  const route = await import('./remote/RemotePage')
+  return { default: route.RemotePage }
+})
+
+const TVLauncher = lazy(async () => {
+  const route = await import('./tv/TVLauncher')
+  return { default: route.TVLauncher }
+})
+
+function RouteFallback(): ReactElement {
+  return <div aria-live="polite">載入中…</div>
+}
 
 export function App(): ReactElement {
   const [token, setToken] = useState<string | null>(() => storedRemoteToken())
@@ -14,7 +26,13 @@ export function App(): ReactElement {
     }
   }, [])
 
-  if (!remoteRoute) return <TVLauncher />
+  if (!remoteRoute) {
+    return (
+      <Suspense fallback={<RouteFallback />}>
+        <TVLauncher />
+      </Suspense>
+    )
+  }
   const discardRemoteToken = () => {
     forgetStoredRemoteToken()
     setToken(null)
@@ -28,11 +46,13 @@ export function App(): ReactElement {
 
 
   return (
-    <RemotePage
-      token={token}
-      onPaired={setToken}
-      onForget={unpairRemote}
-      onAuthenticationFailed={discardRemoteToken}
-    />
+    <Suspense fallback={<RouteFallback />}>
+      <RemotePage
+        token={token}
+        onPaired={setToken}
+        onForget={unpairRemote}
+        onAuthenticationFailed={discardRemoteToken}
+      />
+    </Suspense>
   )
 }
