@@ -3,6 +3,7 @@ import { Alert, Text, TextInput, TouchableOpacity, View } from 'react-native'
 import ReactTestRenderer, { act } from 'react-test-renderer'
 import { RemoteScreen } from './RemoteScreen'
 import { ControllerSocket, type SocketOptions, type SocketStatus } from '../api/controllerSocket'
+import { applyControllerUpdate, fetchControllerVersion } from '../api/controllerUpdate'
 import { revokeDeviceToken } from '../discovery/deviceScanner'
 import { forgetCurrentDevice, type SavedDevice } from '../storage/tokenStorage'
 import type {
@@ -95,12 +96,25 @@ jest.mock('../discovery/deviceScanner', () => ({
   revokeDeviceToken: jest.fn().mockResolvedValue(undefined),
 }))
 
+jest.mock('../api/controllerUpdate', () => ({
+  applyControllerUpdate: jest.fn(),
+  fetchControllerVersion: jest.fn(),
+  sameControllerVersion: (left: string, right: string) =>
+    left.replace(/^v/i, '') === right.replace(/^v/i, ''),
+}))
+
 jest.mock('../storage/tokenStorage', () => ({
   forgetCurrentDevice: jest.fn().mockResolvedValue(undefined),
 }))
 
 const mockRevokeDeviceToken = revokeDeviceToken as jest.MockedFunction<typeof revokeDeviceToken>
 const mockForgetCurrentDevice = forgetCurrentDevice as jest.MockedFunction<typeof forgetCurrentDevice>
+const mockApplyControllerUpdate = applyControllerUpdate as jest.MockedFunction<
+  typeof applyControllerUpdate
+>
+const mockFetchControllerVersion = fetchControllerVersion as jest.MockedFunction<
+  typeof fetchControllerVersion
+>
 
 const mockDevice: SavedDevice = {
   id: '192.168.1.100:8765',
@@ -201,6 +215,13 @@ describe('RemoteScreen', () => {
     alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => {})
     mockRevokeDeviceToken.mockResolvedValue(undefined)
     mockForgetCurrentDevice.mockResolvedValue(undefined)
+    mockApplyControllerUpdate.mockResolvedValue({
+      success: true,
+      message: '更新已下載。',
+      version: 'v0.3.0',
+      restartRequired: true,
+    })
+    mockFetchControllerVersion.mockResolvedValue(null)
   })
 
   afterEach(() => {
@@ -995,6 +1016,56 @@ describe('RemoteScreen', () => {
     expect(mockForgetCurrentDevice).toHaveBeenCalled()
     expect(latestMockSocket!.disconnect).toHaveBeenCalled()
     expect(mockOnDisconnect).toHaveBeenCalled()
+  })
+
+  it('stages an advertised update over authenticated HTTPS and explains restart', async () => {
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+      )
+    })
+    const root = renderer!.root
+    act(() => {
+      latestMockSocket!.simulateStatusChange('authenticated')
+      latestMockSocket!.simulateStateChange({
+        ...netflixState(null, 'youtube'),
+        update_available: 'v0.3.0',
+      })
+    })
+
+    await act(async () => {
+      await root.findByProps({ accessibilityLabel: '安裝 FreeTV 更新' }).props.onPress()
+    })
+
+    expect(mockApplyControllerUpdate).toHaveBeenCalledWith(
+      mockDevice.host,
+      mockDevice.port,
+      mockDevice.token,
+    )
+    expect(alertSpy).toHaveBeenCalledWith(
+      '更新已下載',
+      '更新已下載。\n請重新啟動 FreeTV 完成安裝。',
+    )
+    expect(findTextNodes(root, '已下載')).toHaveLength(1)
+    expect(
+      root.findByProps({ accessibilityLabel: '安裝 FreeTV 更新' }).props.disabled,
+    ).toBe(true)
+
+    mockFetchControllerVersion.mockResolvedValue('0.3.0')
+    act(() => {
+      latestMockSocket!.simulateStatusChange('disconnected')
+    })
+    await act(async () => {
+      latestMockSocket!.simulateStatusChange('authenticated')
+      latestMockSocket!.simulateStateChange({
+        ...netflixState(null, 'youtube'),
+        update_available: 'v0.3.0',
+      })
+      await Promise.resolve()
+    })
+
+    expect(alertSpy).toHaveBeenCalledWith('更新完成', 'FreeTV 0.3.0 已開始執行。')
+    expect(findTextNodes(root, '已安裝')).toHaveLength(1)
   })
 
   it('cleans up socket connection upon unmount', async () => {

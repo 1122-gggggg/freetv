@@ -5,6 +5,25 @@ $ModulePath = Join-Path $PSScriptRoot '..\TVBox.Startup.psm1'
 Import-Module (Resolve-Path $ModulePath).Path -Force
 
 Describe 'TVBox.Startup Module Tests' {
+    Context 'Installer script syntax' {
+        It 'parses both local and standalone PowerShell installers' {
+            $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+            foreach ($Path in @(
+                (Join-Path $Root 'Install-FreeTV.ps1'),
+                (Join-Path $Root 'scripts\install.ps1')
+            )) {
+                $Tokens = $null
+                $Errors = $null
+                [System.Management.Automation.Language.Parser]::ParseFile(
+                    $Path,
+                    [ref]$Tokens,
+                    [ref]$Errors
+                ) | Out-Null
+                @($Errors).Count | Should -Be 0
+            }
+        }
+    }
+
     Context 'Settings extraction' {
         It 'handles optional application settings under StrictMode' {
             $MissingApplications = '{"server":{"host":"0.0.0.0","port":8765}}' | ConvertFrom-Json

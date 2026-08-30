@@ -7,13 +7,30 @@ venv interpreter, so `python freetv.py setup` works on a clean machine.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import subprocess
 import sys
 from pathlib import Path
 
+
+_INSTALLER_SPEC = importlib.util.spec_from_file_location(
+    "freetv_installer", Path(__file__).resolve().parent / "backend" / "app" / "installer.py"
+)
+assert _INSTALLER_SPEC and _INSTALLER_SPEC.loader
+_INSTALLER = importlib.util.module_from_spec(_INSTALLER_SPEC)
+_INSTALLER_SPEC.loader.exec_module(_INSTALLER)
+apply_pending_update = _INSTALLER.apply_pending_update
+copy_release_files = _INSTALLER.copy_release_files
+user_install_directory = _INSTALLER.user_install_directory
+create_user_launcher = _INSTALLER.create_user_launcher
+
 MINIMUM_PYTHON = (3, 11)
 ROOT = Path(__file__).resolve().parent
+
+# Keep this import/bootstrap stdlib-only so updates can be applied before the
+# virtual environment (and its dependencies) are loaded.
+UPDATE_APPLIED = apply_pending_update(ROOT)
 
 
 def venv_python() -> Path:
@@ -26,6 +43,7 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="把這台電腦變成可攜式電視機上盒。")
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("setup", help="建立虛擬環境、安裝依賴並準備設定檔")
+    subparsers.add_parser("install", help="安裝到目前使用者的應用程式目錄")
     start = subparsers.add_parser("start", help="啟動控制器並開啟電視畫面")
     start.add_argument("--no-browser", action="store_true")
     start.add_argument("--no-tunnel", action="store_true")
@@ -49,6 +67,21 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     arguments = parse_arguments(list(argv) if argv is not None else sys.argv[1:])
     command = arguments.command or "run"
+    if command == "install":
+        target = user_install_directory()
+        print(f"Installing FreeTV for this user into {target}")
+        if ROOT.resolve() != target.resolve():
+            copy_release_files(ROOT, target)
+        code = _run([sys.executable, str(target / "freetv.py"), "setup"])
+        if code == 0:
+            print(f"Launcher: {create_user_launcher(target)}")
+            return _run([sys.executable, str(target / "freetv.py"), "start"])
+        return code
+    if UPDATE_APPLIED and command != "setup":
+        print("Finishing the verified FreeTV update...")
+        code = _run([sys.executable, str(ROOT / "freetv.py"), "setup"])
+        if code != 0:
+            return code
     python = venv_python()
 
     if sys.prefix == getattr(sys, "base_prefix", sys.prefix):

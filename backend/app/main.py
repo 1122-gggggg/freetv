@@ -36,6 +36,7 @@ from app.security.pairing import AuthenticatedRemoteSession, PairingCodeExpired,
 from app.security.request_limits import BoundedPairingRequestBodyMiddleware
 from app.state import ActiveApp
 from app.system.network import eligible_lan_interface_names, is_eligible_lan_peer
+from app.system.updater import CURRENT_VERSION, UpdateWatcher
 from app.websocket.registry import ConnectionRegistry
 
 logger = logging.getLogger(__name__)
@@ -177,7 +178,7 @@ def create_app(
         (frontend / "index.html").is_file() if frontend_available is None else frontend_available
     )
 
-    app = FastAPI(title="PC TV Controller", version="0.1.0", lifespan=controller_lifespan)
+    app = FastAPI(title="PC TV Controller", version=CURRENT_VERSION, lifespan=controller_lifespan)
     app.add_middleware(BoundedPairingRequestBodyMiddleware)
     app.state.settings = resolved_settings
     app.state.capabilities = resolved_capabilities
@@ -186,9 +187,14 @@ def create_app(
     app.state.pairing_attempts = PairingAttemptGuard()
     app.state.remote_authentication_guard = RemoteAuthenticationGuard()
     app.state.dispatch_lock = asyncio.Lock()
-    from app.system.updater import UpdateWatcher
+    async def publish_update(info: object) -> None:
+        await app.state.connections.broadcast_state(
+            (await app.state.runtime.bus._state.snapshot()).to_wire(),
+            session_is_valid=app.state.runtime.pairing.session_is_valid,
+        )
 
-    app.state.update_watcher = UpdateWatcher(app.state.runtime.bus._state)
+    app.state.update_watcher = UpdateWatcher(app.state.runtime.bus._state, on_change=publish_update)
+    app.state.update_in_progress = False
 
     async def handle_application_exit(exited_app: ActiveApp) -> None:
         async with app.state.dispatch_lock:
@@ -211,6 +217,7 @@ def create_app(
     async def health() -> dict[str, bool | str]:
         return {
             "status": "ok",
+            "version": CURRENT_VERSION,
             "backend": True,
             "frontend": resolved_frontend_available,
             "chrome_available": bool(app.state.capabilities.get("chrome_available", False)),
@@ -281,9 +288,10 @@ def create_app(
         log_event(logger, "remote_token_revoked", client=_client_host(request))
 
     @app.get("/api/update/check")
-    async def update_check() -> dict[str, object]:
+    async def update_check(request: Request) -> dict[str, object]:
         from app.system.updater import check_for_update
 
+        await _authorize_update_request(request, app)
         info = await check_for_update()
         if info and info.available:
             return {
@@ -295,17 +303,25 @@ def create_app(
         return {"available": False, "version": None, "release_name": None, "release_notes": None}
 
     @app.post("/api/update/apply")
-    async def update_apply() -> dict[str, object]:
+    async def update_apply(request: Request) -> dict[str, object]:
         from app.system.updater import apply_update
 
-        success, message = await apply_update()
-        if success:
-            try:
-                await app.state.runtime.bus._applications.show_osd("更新完成，正在重新載入...")
-            except Exception:
-                pass
-            return {"success": True, "message": message}
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
+        await _authorize_update_request(request, app)
+        if app.state.update_in_progress:
+            raise HTTPException(status_code=409, detail="更新正在處理中。")
+        app.state.update_in_progress = True
+        try:
+            result = await apply_update()
+        finally:
+            app.state.update_in_progress = False
+        if result.success:
+            return {
+                "success": True,
+                "message": result.message,
+                "version": result.version,
+                "restart_required": result.restart_required,
+            }
+        raise HTTPException(status_code=500, detail=result.message)
 
     @app.websocket("/ws/remote")
     async def remote_socket(websocket: WebSocket) -> None:
@@ -590,6 +606,26 @@ def _require_loopback_request(request: Request) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="這個端點僅供本機電視啟動器使用。",
         )
+
+
+async def _authorize_update_request(request: Request, app: FastAPI) -> None:
+    """Permit the local TV origin, or an authenticated trusted remote origin."""
+    origin = request.headers.get("origin")
+    port = app.state.settings.server.port
+    scheme = app.state.settings.server.transport
+    local_origin = origin in {
+        f"{scheme}://{host}:{port}"
+        for host in ("127.0.0.1", "localhost", "[::1]")
+    }
+    if _is_loopback(_client_host(request)) and (
+        local_origin or (request.method == "GET" and origin is None)
+    ):
+        _require_local_tv_host(request, port)
+        return
+    _require_trusted_remote_origin(request, port, app.state.settings.server.transport)
+    token = _bearer_token(request)
+    if token is None or not await app.state.runtime.pairing.verify_token_async(token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="遙控器權杖無效。")
 
 
 def _is_loopback(host: str) -> bool:

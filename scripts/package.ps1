@@ -39,6 +39,10 @@ try {
     Copy-Item (Join-Path $Root 'config\news.example.json') (Join-Path $Stage 'config\')
     Copy-Item (Join-Path $Root 'README.md') $Stage
     Copy-Item (Join-Path $Root 'freetv.py') $Stage
+    Copy-Item (Join-Path $Root 'VERSION') $Stage
+    Copy-Item (Join-Path $Root 'install.sh') $Stage
+    Copy-Item (Join-Path $Root 'Install-FreeTV.cmd') $Stage
+    Copy-Item (Join-Path $Root 'Install-FreeTV.ps1') $Stage
     Copy-Item (Join-Path $Root 'run.sh') $Stage
     Copy-Item (Join-Path $Root 'run.cmd') $Stage
     Copy-Item (Join-Path $Root 'run.ps1') $Stage
