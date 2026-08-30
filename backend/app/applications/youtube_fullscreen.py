@@ -241,7 +241,9 @@ def _seek_expression(direction: int) -> str:
 
 def _quality_expression() -> str:
     return """(() => {
-  const player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
+  const player =
+    document.querySelector('#movie_player') ||
+    document.querySelector('.html5-video-player');
   const labels = {
     'highres': '4K 最高畫質',
     'hd2160': '4K (2160p)',
@@ -327,7 +329,9 @@ def _quality_expression() -> str:
 
 def _subtitles_expression() -> str:
     return """(() => {
-  const player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
+  const player =
+    document.querySelector('#movie_player') ||
+    document.querySelector('.html5-video-player');
   let result = '切換';
   if (player && typeof player.toggleSubtitles === 'function') {
     try {
