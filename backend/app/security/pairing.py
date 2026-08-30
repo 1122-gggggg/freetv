@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -39,23 +40,49 @@ class PairingService:
         self._code_factory = code_factory or self._generate_code
         self._code: str | None = None
         self._expires_at: datetime | None = None
+        self._lock = threading.RLock()
+
+    async def pair_async(self, submitted_code: str) -> str:
+        """Consume a valid code synchronously, then issue its token off-loop."""
+        with self._lock:
+            self._validate_and_consume(submitted_code)
+        return await self._tokens.issue_token_async()
+
+    async def verify_token_async(self, token: str) -> bool:
+        return await self._tokens.verify_async(token)
+
+    async def authenticate_token_async(self, token: str) -> AuthenticatedRemoteSession | None:
+        expires_at = await self._tokens.token_expires_at_async(token)
+        if expires_at is None:
+            return None
+        return AuthenticatedRemoteSession(self._token_key(token), expires_at)
+
+    async def revoke_token_async(self, token: str) -> bool:
+        return await self._tokens.revoke_async(token)
 
     def rotate_code(self) -> str:
-        code = self._code_factory()
-        if not _is_ascii_pairing_code(code):
-            raise ValueError("Pairing codes must be exactly six ASCII digits.")
-        self._code = code
-        self._expires_at = self.now() + self._ttl
-        return code
+        with self._lock:
+            code = self._code_factory()
+            if not _is_ascii_pairing_code(code):
+                raise ValueError("Pairing codes must be exactly six ASCII digits.")
+            self._code = code
+            self._expires_at = self.now() + self._ttl
+            return code
 
     def current_code(self) -> tuple[str, datetime]:
-        if self._code is None or self._expires_at is None or self.now() >= self._expires_at:
-            self.rotate_code()
-        assert self._code is not None
-        assert self._expires_at is not None
-        return self._code, self._expires_at
+        with self._lock:
+            if self._code is None or self._expires_at is None or self.now() >= self._expires_at:
+                self.rotate_code()
+            assert self._code is not None
+            assert self._expires_at is not None
+            return self._code, self._expires_at
 
     def pair(self, submitted_code: str) -> str:
+        with self._lock:
+            self._validate_and_consume(submitted_code)
+        return self._tokens.issue_token()
+
+    def _validate_and_consume(self, submitted_code: str) -> None:
         if self._code is None or self._expires_at is None:
             raise PairingCodeInvalid("No pairing code has been generated.")
         if self.now() >= self._expires_at:
@@ -69,7 +96,6 @@ class PairingService:
 
         self._code = None
         self._expires_at = None
-        return self._tokens.issue_token()
 
     def verify_token(self, token: str) -> bool:
         return self._tokens.verify(token)

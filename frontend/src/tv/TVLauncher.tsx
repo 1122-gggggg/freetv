@@ -1,4 +1,4 @@
-import { type ReactElement, useEffect, useRef, useState } from 'react'
+import { type ReactElement, useCallback, useEffect, useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useControllerSocket } from '../api/useControllerSocket'
 import type { Command } from '../types/protocol'
@@ -36,6 +36,40 @@ interface PairingInfo {
   remote_url?: string | null
 }
 
+interface LocalHudMessage {
+  id: number
+  text: string
+}
+
+interface TransientHudProps {
+  localMessageId: number | null
+  message: string
+  onDismissLocal: (id: number | null) => void
+}
+
+function TransientHud({
+  localMessageId,
+  message,
+  onDismissLocal,
+}: TransientHudProps): ReactElement | null {
+  const [visible, setVisible] = useState(true)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setVisible(false)
+      onDismissLocal(localMessageId)
+    }, 2_200)
+    return () => window.clearTimeout(timer)
+  }, [localMessageId, onDismissLocal])
+
+  if (!visible) return null
+  return (
+    <div className="tv-hud-overlay" role="status" aria-live="assertive">
+      <span className="tv-hud-badge">{message}</span>
+    </div>
+  )
+}
+
 function pairingQrValue(pairing: PairingInfo): string | null {
   if (!pairing.remote_url) return null
   try {
@@ -54,9 +88,9 @@ function isTileId(value: string): value is TileId {
 export function TVLauncher(): ReactElement {
   const { status, state, lastError, sendCommand } = useControllerSocket('/ws/tv')
   const [pairing, setPairing] = useState<PairingInfo | null>(null)
-  const [hudMessage, setHudMessage] = useState<string | null>(null)
+  const [localHudMessage, setLocalHudMessage] = useState<LocalHudMessage | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
-  const hudTimerRef = useRef<number | undefined>(undefined)
+  const localHudSequenceRef = useRef(0)
   const tileRefs = useRef<Partial<Record<TileId, HTMLButtonElement>>>({})
   const focusedTile = state && isTileId(state.focused_tile) ? state.focused_tile : 'youtube'
   const pairingQr = pairing ? pairingQrValue(pairing) : null
@@ -114,10 +148,18 @@ export function TVLauncher(): ReactElement {
     fetch('/api/update/apply', { method: 'POST' })
       .then(async (res) => {
         if (!res.ok) throw new Error('更新失敗')
-        setHudMessage('更新成功，正在重啟電視盒...')
+        localHudSequenceRef.current += 1
+        setLocalHudMessage({
+          id: localHudSequenceRef.current,
+          text: '更新成功，正在重啟電視盒...',
+        })
       })
       .catch(() => {
-        setHudMessage('更新失敗，請檢查網路。')
+        localHudSequenceRef.current += 1
+        setLocalHudMessage({
+          id: localHudSequenceRef.current,
+          text: '更新失敗，請檢查網路。',
+        })
         setIsUpdating(false)
       })
   }
@@ -133,15 +175,20 @@ export function TVLauncher(): ReactElement {
     update_available: null,
   }
 
-  useEffect(() => {
-    const msg = renderedState.status_message || renderedState.error_message
-    if (!msg) return
-    setHudMessage(msg)
-    if (hudTimerRef.current !== undefined) window.clearTimeout(hudTimerRef.current)
-    hudTimerRef.current = window.setTimeout(() => {
-      setHudMessage(null)
-    }, 2200)
-  }, [renderedState.status_message, renderedState.error_message, renderedState.volume, renderedState.muted, renderedState.brightness])
+  const dismissLocalHud = useCallback((id: number | null) => {
+    if (id === null) return
+    setLocalHudMessage((current) => (current?.id === id ? null : current))
+  }, [])
+  const controllerHudMessage = renderedState.status_message || renderedState.error_message
+  const displayedHudMessage = localHudMessage?.text ?? controllerHudMessage
+  const hudCacheKey = localHudMessage
+    ? `local-${localHudMessage.id}`
+    : [
+        controllerHudMessage,
+        renderedState.volume,
+        renderedState.muted,
+        renderedState.brightness,
+      ].join(':')
   return (
     <main className="tv-shell" aria-label="電視主畫面">
       <header className="tv-header">
@@ -248,10 +295,13 @@ export function TVLauncher(): ReactElement {
         </section>
       </footer>
 
-      {hudMessage && (
-        <div className="tv-hud-overlay" role="status" aria-live="assertive">
-          <span className="tv-hud-badge">{hudMessage}</span>
-        </div>
+      {displayedHudMessage && (
+        <TransientHud
+          key={hudCacheKey}
+          localMessageId={localHudMessage?.id ?? null}
+          message={displayedHudMessage}
+          onDismissLocal={dismissLocalHud}
+        />
       )}
 
       <div className="live-region" aria-live="polite" role="status">

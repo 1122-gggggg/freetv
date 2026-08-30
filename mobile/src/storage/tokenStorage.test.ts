@@ -70,6 +70,41 @@ describe('tokenStorage', () => {
     await expect(getCurrentDevice()).resolves.toEqual(pairedDevice)
   })
 
+  it('starts independent secure-token and saved-device reads together', async () => {
+    const deviceMetadata = {
+      id: pairedDevice.id,
+      name: pairedDevice.name,
+      host: pairedDevice.host,
+      port: pairedDevice.port,
+      lastConnected: pairedDevice.lastConnected,
+    }
+    let releaseTokens!: (value: string) => void
+    let releaseSavedDevices!: (value: string) => void
+    const tokenRecord = new Promise<string>((resolve) => {
+      releaseTokens = resolve
+    })
+    const savedDevices = new Promise<string>((resolve) => {
+      releaseSavedDevices = resolve
+    })
+    mockAsyncStorage.getItem.mockImplementation(async (key: string) => {
+      if (key === '@pctv/current_device') return JSON.stringify(deviceMetadata)
+      if (key === '@pctv/saved_devices') return savedDevices
+      return null
+    })
+    mockSecureStore.getItemAsync.mockImplementation(() => tokenRecord)
+
+    const restored = getCurrentDevice()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(mockSecureStore.getItemAsync).toHaveBeenCalledTimes(1)
+    expect(mockAsyncStorage.getItem).toHaveBeenCalledWith('@pctv/saved_devices')
+
+    releaseTokens(JSON.stringify({ [pairedDevice.id]: pairedDevice.token }))
+    releaseSavedDevices(JSON.stringify([deviceMetadata]))
+    await expect(restored).resolves.toEqual(pairedDevice)
+  })
+
   it('removes legacy plaintext tokens from every persisted device record', async () => {
     const legacyPayload = JSON.stringify(pairedDevice)
     mockAsyncStorage.getItem.mockImplementation(async (key: string) => {

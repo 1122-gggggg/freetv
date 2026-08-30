@@ -568,9 +568,9 @@ describe('RemoteScreen', () => {
     act(() => {
       root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' }).props.onPress()
     })
-    latestMockSocket!.sendTextInput
-      .mockResolvedValueOnce(mockAck())
-      .mockResolvedValueOnce(mockAck({ success: false, message: 'raw sensitive failure' }))
+    latestMockSocket!.sendTextInput.mockResolvedValueOnce(
+      mockAck({ success: false, message: 'raw sensitive failure' }),
+    )
     const input = root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' })
     act(() => input.props.onChangeText('secret'))
 
@@ -609,9 +609,9 @@ describe('RemoteScreen', () => {
     act(() => {
       root.findByProps({ accessibilityLabel: '開啟 Netflix 情境輸入' }).props.onPress()
     })
-    latestMockSocket!.sendTextInput
-      .mockResolvedValueOnce(mockAck())
-      .mockRejectedValueOnce(new Error('raw transport timeout'))
+    latestMockSocket!.sendTextInput.mockRejectedValueOnce(
+      new Error('raw transport timeout'),
+    )
     const input = root.findByProps({ accessibilityLabel: 'Netflix 情境輸入' })
     act(() => input.props.onChangeText('secret'))
 

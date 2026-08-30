@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -16,6 +18,74 @@ from app.protocol import (
 )
 from app.security.pairing import PairingCodeExpired, PairingCodeInvalid, PairingService
 from app.security.tokens import TokenStore
+
+
+def test_async_token_issue_does_not_block_event_loop(tmp_path, monkeypatch) -> None:
+    tokens = TokenStore(tmp_path / "remotes.json")
+    original_digest = tokens._digest
+    digest_started = threading.Event()
+    release_digest = threading.Event()
+    watchdog = threading.Timer(1, release_digest.set)
+
+    def paused_digest(token: str, salt: bytes) -> bytes:
+        digest_started.set()
+        release_digest.wait()
+        return original_digest(token, salt)
+
+    monkeypatch.setattr(tokens, "_digest", paused_digest)
+
+    async def run() -> None:
+        issue = asyncio.create_task(tokens.issue_token_async())
+        for _ in range(100):
+            if digest_started.is_set():
+                break
+            await asyncio.sleep(0.001)
+
+        assert digest_started.is_set()
+        assert not issue.done()
+        release_digest.set()
+        await issue
+
+    watchdog.start()
+    try:
+        asyncio.run(run())
+    finally:
+        release_digest.set()
+        watchdog.cancel()
+
+
+def test_pair_async_consumes_code_once_when_called_concurrently(tmp_path) -> None:
+    pairing = PairingService(
+        TokenStore(tmp_path / "remotes.json"), code_factory=lambda: "482731"
+    )
+    code = pairing.rotate_code()
+
+    async def race() -> list[object]:
+        return await asyncio.gather(
+            pairing.pair_async(code), pairing.pair_async(code), return_exceptions=True
+        )
+
+    results = asyncio.run(race())
+
+    assert sum(isinstance(result, str) for result in results) == 1
+    assert sum(isinstance(result, PairingCodeInvalid) for result in results) == 1
+
+
+def test_async_authentication_primes_session_validation_cache(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "remotes.json"
+    token = TokenStore(path).issue_token()
+    tokens = TokenStore(path)
+    pairing = PairingService(tokens)
+
+    session = asyncio.run(pairing.authenticate_token_async(token))
+    monkeypatch.setattr(
+        tokens,
+        "_load_records",
+        lambda: (_ for _ in ()).throw(AssertionError("session validation touched disk")),
+    )
+
+    assert session is not None
+    assert pairing.session_is_valid(session)
 
 
 def test_command_message_accepts_only_whitelisted_command() -> None:

@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { TVLauncher } from './TVLauncher'
 
+const socketState = vi.hoisted(() => ({ statusMessage: null as string | null }))
+
 vi.mock('../api/useControllerSocket', () => ({
   useControllerSocket: () => ({
     status: 'connected',
@@ -16,7 +18,7 @@ vi.mock('../api/useControllerSocket', () => ({
       brightness: 100,
       channel_number: null,
       channel_name: null,
-      status_message: null,
+      status_message: socketState.statusMessage,
       error_message: null,
     },
     lastAcknowledgement: null,
@@ -45,6 +47,7 @@ describe('TVLauncher pairing code', () => {
   })
 
   afterEach(() => {
+    socketState.statusMessage = null
     vi.useRealTimers()
     vi.unstubAllGlobals()
   })
@@ -99,5 +102,23 @@ describe('TVLauncher pairing code', () => {
     expect(screen.queryByRole('button', { name: '開啟 設定' })).toBeNull()
     expect(screen.queryByRole('button', { name: '開啟 電視' })).toBeNull()
     expect(screen.queryByRole('button', { name: '開啟 瀏覽器' })).toBeNull()
+  })
+
+  it('shows a controller status in the transient HUD and then dismisses it', async () => {
+    socketState.statusMessage = '音量 60%'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(pairingResponse('111111', '2026-08-13T00:01:00.000Z')),
+    )
+
+    const view = render(<TVLauncher />)
+    await act(async () => {})
+    expect(view.container.querySelector('.tv-hud-badge')?.textContent).toBe('音量 60%')
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_200)
+    })
+
+    expect(view.container.querySelector('.tv-hud-badge')).toBeNull()
   })
 })

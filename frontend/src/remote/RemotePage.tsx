@@ -198,6 +198,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   const [forgetting, setForgetting] = useState(false)
   const [listening, setListening] = useState(false)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
+  const liveTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const controlsDisabled = status !== 'connected'
   const canTypeIntoApp =
     state?.active_app === 'youtube' ||
@@ -231,6 +232,27 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     !lastAcknowledgement.success
   const waitingForNetflix =
     pendingNetflixRequest !== null && !netflixAcknowledgementFailed
+
+  const cancelLiveText = () => {
+    if (liveTextTimerRef.current !== null) {
+      clearTimeout(liveTextTimerRef.current)
+      liveTextTimerRef.current = null
+    }
+  }
+
+  const scheduleLiveText = (value: string) => {
+    cancelLiveText()
+    liveTextTimerRef.current = setTimeout(() => {
+      liveTextTimerRef.current = null
+      if (value.length > 0) sendText(value, false)
+    }, 125)
+  }
+
+  useEffect(() => {
+    cancelLiveText()
+  }, [status, netflixSemanticKey])
+
+  useEffect(() => cancelLiveText, [])
 
 
 
@@ -298,6 +320,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   const submitTyped = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (controlsDisabled || typed.length === 0) return
+    cancelLiveText()
     if (sendText(typed, false)) setTyped('')
   }
 
@@ -311,6 +334,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     ) {
       return
     }
+    cancelLiveText()
     setNetflixLocalSendFailed(false)
     const requestId = sendText(netflixTyped, true)
     if (!requestId) {
@@ -429,7 +453,8 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
                   const val = event.target.value.slice(0, 256)
                   setNetflixTyped(val)
                   if (netflixLocalSendFailed) setNetflixLocalSendFailed(false)
-                  void sendText(val, false)
+                  if (val.length > 0) scheduleLiveText(val)
+                  else cancelLiveText()
                 }}
               />
               <button
@@ -569,7 +594,8 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
             onChange={(event) => {
               const val = event.target.value.slice(0, 256)
               setTyped(val)
-              void sendText(val, false)
+              if (val.length > 0) scheduleLiveText(val)
+              else cancelLiveText()
             }}
           />
           <button className="remote-button search-submit" disabled={controlsDisabled || typed.length === 0} type="submit">

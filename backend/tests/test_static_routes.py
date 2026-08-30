@@ -46,6 +46,46 @@ def test_tv_and_remote_routes_serve_the_production_single_page_application() -> 
     assert remote.headers["cache-control"] == "no-store"
 
 
+def test_hashed_frontend_assets_are_served_with_immutable_caching() -> None:
+    asset = frontend_dist() / "assets" / "cache-test-deadbeef.js"
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_text("export const cached = true\n", encoding="utf-8")
+    try:
+        app = create_app(settings=Settings())
+
+        with TestClient(
+            app,
+            base_url="https://127.0.0.1:8765",
+            client=("127.0.0.1", 50_000),
+        ) as client:
+            response = client.get("/assets/cache-test-deadbeef.js")
+    finally:
+        asset.unlink(missing_ok=True)
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_unhashed_frontend_assets_are_not_cached_as_immutable() -> None:
+    asset = frontend_dist() / "assets" / "runtime.js"
+    asset.parent.mkdir(parents=True, exist_ok=True)
+    asset.write_text("export const mutable = true\n", encoding="utf-8")
+    try:
+        app = create_app(settings=Settings())
+
+        with TestClient(
+            app,
+            base_url="https://127.0.0.1:8765",
+            client=("127.0.0.1", 50_000),
+        ) as client:
+            response = client.get("/assets/runtime.js")
+    finally:
+        asset.unlink(missing_ok=True)
+
+    assert response.status_code == 200
+    assert "cache-control" not in response.headers
+
+
 def test_remote_route_rejects_an_untrusted_host() -> None:
     app = create_app(settings=Settings())
 
