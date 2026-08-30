@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -162,7 +163,8 @@ def test_user_launcher_runs_the_installed_virtual_environment(tmp_path: Path) ->
 
     assert str(target / ".venv" / "bin" / "python") in content
     assert str(target / "freetv.py") in content
-    assert launcher.stat().st_mode & 0o111
+    if os.name != "nt":
+        assert launcher.stat().st_mode & 0o111
 
 
 def test_install_command_sets_up_launcher_and_starts_installed_copy(
