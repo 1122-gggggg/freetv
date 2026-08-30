@@ -1,7 +1,7 @@
+import importlib.util
 import json
 from pathlib import Path
 
-import freetv
 import pytest
 
 from app import installer
@@ -12,6 +12,12 @@ from app.installer import (
     managed_files,
     user_install_directory,
 )
+
+FREETV_PATH = Path(__file__).resolve().parents[2] / "freetv.py"
+FREETV_SPEC = importlib.util.spec_from_file_location("freetv_bootstrap_test", FREETV_PATH)
+assert FREETV_SPEC is not None and FREETV_SPEC.loader is not None
+freetv = importlib.util.module_from_spec(FREETV_SPEC)
+FREETV_SPEC.loader.exec_module(freetv)
 
 
 def test_copy_release_files_preserves_user_data(tmp_path: Path) -> None:
