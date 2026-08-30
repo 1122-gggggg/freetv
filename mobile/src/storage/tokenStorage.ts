@@ -29,8 +29,8 @@ export async function getCurrentDevice(): Promise<SavedDevice | null> {
     const current = await readStoredDevice(STORAGE_KEYS.CURRENT_DEVICE)
     if (!current) return null
 
-    const tokens = await readTokenRecord()
-    const storedDevices = await readStoredDevices()
+    // These reads touch independent stores; migration and writes below remain ordered.
+    const [tokens, storedDevices] = await Promise.all([readTokenRecord(), readStoredDevices()])
     const currentMigrated = migrateLegacyToken(current, tokens)
     let savedDevicesMigrated = false
     for (const storedDevice of storedDevices) {

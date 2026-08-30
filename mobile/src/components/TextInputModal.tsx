@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   KeyboardAvoidingView,
   Modal,
@@ -36,8 +36,24 @@ export function TextInputModal({
   const [text, setText] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const liveSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const liveSyncCallback = useRef(onLiveSync)
+
+  const cancelLiveSync = useCallback(() => {
+    if (liveSyncTimer.current !== null) {
+      clearTimeout(liveSyncTimer.current)
+      liveSyncTimer.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    liveSyncCallback.current = onLiveSync
+  }, [onLiveSync])
+
+  useEffect(() => () => cancelLiveSync(), [cancelLiveSync])
 
   const handleClose = () => {
+    cancelLiveSync()
     setText('')
     setErrorMessage(null)
     setIsSending(false)
@@ -46,6 +62,7 @@ export function TextInputModal({
 
   const handleSend = async () => {
     if (!text.trim() || isSending || (submit && !canSubmit)) return
+    cancelLiveSync()
     const value = text
     setText('')
     setIsSending(true)
@@ -108,7 +125,13 @@ export function TextInputModal({
             onChangeText={(value) => {
               setText(value)
               if (errorMessage) setErrorMessage(null)
-              onLiveSync?.(value)
+              cancelLiveSync()
+              if (liveSyncCallback.current) {
+                liveSyncTimer.current = setTimeout(() => {
+                  liveSyncTimer.current = null
+                  liveSyncCallback.current?.(value)
+                }, 120)
+              }
             }}
             maxLength={256}
             autoFocus
