@@ -35,6 +35,24 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  mobile:
+    name: Mobile checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Typecheck and test mobile client
+        run: npm ci && npm run typecheck && npm test -- --runInBand
+
   backend:
     name: Backend and startup tests
     needs: frontend
@@ -71,7 +89,7 @@ jobs:
 
   package:
     name: Package appliance
-    needs: [frontend, backend]
+    needs: [frontend, backend, mobile]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -84,12 +102,42 @@ jobs:
           path: frontend/dist
       - name: Build appliance zip
         shell: pwsh
-        run: ./scripts/package.ps1 -OutputPath ./pc-tv-box.zip
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -Raw -LiteralPath ./VERSION).Trim()
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Release tag $env:GITHUB_REF_NAME does not match VERSION $version."
+          }
+          ./scripts/package.ps1 -OutputPath ./pc-tv-box.zip
+          $hash = (Get-FileHash -LiteralPath ./pc-tv-box.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD 'pc-tv-box.zip.sha256'),
+            "$hash  pc-tv-box.zip`n",
+            [System.Text.UTF8Encoding]::new($false)
+          )
+          $manifest = [ordered]@{
+            version = $version
+            tag = $env:GITHUB_REF_NAME
+            asset = 'pc-tv-box.zip'
+            sha256 = $hash
+            size = (Get-Item -LiteralPath ./pc-tv-box.zip).Length
+          } | ConvertTo-Json
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD 'release-manifest.json'),
+            $manifest,
+            [System.Text.UTF8Encoding]::new($false)
+          )
       - name: Upload appliance zip
         uses: actions/upload-artifact@v7
         with:
           name: pc-tv-box-${{ github.sha }}
-          path: pc-tv-box.zip
+          path: |
+            pc-tv-box.zip
+            pc-tv-box.zip.sha256
+            release-manifest.json
+            Install-FreeTV.cmd
+            Install-FreeTV.ps1
+            install.sh
           if-no-files-found: error
           retention-days: 7
 
@@ -235,6 +283,11 @@ jobs:
           fi
           gh release create "$GITHUB_REF_NAME" \
             release-artifact/pc-tv-box.zip \
+            release-artifact/pc-tv-box.zip.sha256 \
+            release-artifact/release-manifest.json \
+            release-artifact/Install-FreeTV.cmd \
+            release-artifact/Install-FreeTV.ps1 \
+            release-artifact/install.sh \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "$GITHUB_REF_NAME" \

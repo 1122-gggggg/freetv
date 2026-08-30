@@ -5,7 +5,7 @@ A local controller that turns an HDMI-connected Windows, macOS, or Linux PC into
 ## Requirements
 
 - Windows 10/11, macOS, or Linux, signed in as the user who will run the TV controller.
-- Python 3.11+ on `PATH` (`python` / `python3`, or the Windows `py` launcher).
+- Python 3.11+ on `PATH` (`python` / `python3`, or the Windows `py` launcher). The Windows installer can install a user-scoped Python through `winget`; macOS/Linux installers fail closed and ask for Python instead of changing the system package manager.
 - Google Chrome or Chromium for YouTube/News TV playback and the Netflix standalone app window. Netflix still relies on Chrome/Widevine and the user's normal Netflix authorization.
 - [mpv](https://mpv.io/installation/) for Live TV.
 - Laptop/PC on a private LAN. Phone may be on another network if `cloudflared` is installed.
@@ -15,7 +15,16 @@ A local controller that turns an HDMI-connected Windows, macOS, or Linux PC into
 
 ## Installation
 
-### Any computer (recommended)
+### One-click per-user install (recommended)
+
+Download the installer entry for your platform from the latest GitHub Release:
+
+- **Windows 10/11:** download and double-click `Install-FreeTV.cmd`. It verifies and installs the official release under `%LOCALAPPDATA%\FreeTV`, creates a current-user Start Menu launcher, and starts FreeTV. If Python is missing, this explicit installer action may use `winget` with `--scope user`.
+- **macOS/Linux:** download `install.sh`, then run `sh install.sh`. It verifies the release checksum, installs under the current user's application-data directory, creates a user launcher, and starts FreeTV. Python 3.11+, `curl`, and `unzip` must already be available.
+
+The installer never replaces `config`, `.venv`, `vendor`, or `logs` during upgrades. Chrome/Chromium remains required for browser playback; mpv and cloudflared remain optional capabilities rather than silently installed system dependencies.
+
+### Portable folder
 
 Copy this repository or unzip `pc-tv-box.zip` from GitHub Releases, then:
 
@@ -34,12 +43,19 @@ That single command creates `.venv`, installs Python dependencies, verifies the 
 
 ```bash
 python freetv.py setup       # install only
+python freetv.py install     # copy to this user's app directory, create launcher, start
 python freetv.py start       # start only
 python freetv.py doctor      # print Chrome/mpv/Python/OS readiness
 python freetv.py autostart   # start at login (Task Scheduler / systemd / launchd)
 ```
 
 Skip the browser window with `python freetv.py start --no-browser`. Skip Cloudflare with `--no-tunnel`.
+
+## Updates
+
+FreeTV checks GitHub Release metadata in the background. When a newer tagged release contains the exact `pc-tv-box.zip` and `pc-tv-box.zip.sha256` assets, the TV, web Remote, and native Remote receive an update notice through controller state.
+
+Select **立即更新** from a paired client to download and verify the archive. The controller stages it under `config/updates` and leaves the running version untouched. Restart FreeTV once to apply the staged managed files; personal configuration, the virtual environment, extensions, and logs are preserved. Invalid checksums, unsafe ZIP paths, oversized archives, unauthenticated remotes, and concurrent update attempts are rejected.
 
 ### Appliance (Release zip, Windows PowerShell)
 
@@ -280,6 +296,7 @@ For HTTPS mode, verify the same instance with its generated controller CA:
 | TV Launcher does not foreground on Home | Keep the 我的電視 tab/window open. The launcher title is used to restore its specific browser window. |
 | Phone cannot install PWA | A trusted HTTPS controller origin is required for service workers and install prompts. HTTP mode serves Remote as a normal web page. |
 | Native Remote cannot connect | Native app is HTTPS-only. Set `server.transport` to `"https"`, install the controller CA as an app CA on Android or enable full trust on iOS, then confirm the numeric IP matches the QR code or `start.ps1` output. Native Remote does not accept PC names. |
+| Update says restart required | Close and reopen FreeTV once. The verified staged release is applied before backend dependencies load. If applying it fails, the previous managed files are restored and the pending marker is retained for diagnosis. |
 
 ## Security
 
@@ -290,12 +307,14 @@ For HTTPS mode, verify the same instance with its generated controller CA:
 - Remote sockets must authenticate within 10 seconds. Production launch limits concurrent work, pending pre-authentication sockets, and WebSocket message size.
 - Tokens are random, stored only as salted PBKDF2 hashes on PC, and are never logged. Expired, revoked, or evicted Remote sessions are closed and receive no further state.
 - A remote can use **Forget** to revoke its persisted token at the controller, immediately closing its paired WebSocket session. Pair it again from the TV code to reconnect.
+- Update check/apply accepts only the exact loopback TV origin or a trusted Remote Origin with a valid paired bearer token. Release archives are streamed with size limits, checked against SHA-256, validated against traversal/symlink attacks, and staged before restart.
 - Input is validated with versioned Pydantic protocol models at the transport boundary.
 - Browser/mpv paths and URLs come only from local typed configuration; subprocess calls use argument arrays, never shell strings.
 - The controller binds only to `0.0.0.0` for paired LAN remotes; `scripts/start.ps1` rejects another server host. Do not expose port `8765` to the internet or configure router port forwarding.
 
 ## Known limitations
 
+- The current installers are user-scoped bootstrap scripts, not signed MSI/PKG/AppImage bundles. Windows can bootstrap Python through `winget`; macOS/Linux still require Python 3.11+, `curl`, and `unzip`. SHA-256 detects download corruption, while publisher trust remains rooted in the HTTPS GitHub Release account rather than a separately pinned signing key.
 - The TV Launcher is a browser window, not a native OS shell replacement. Use `python freetv.py autostart` and Chrome/Chromium fullscreen for the closest appliance flow. Linux D-pad/volume need xdotool/ydotool and wpctl/pactl.
 - HTTP mode cannot install the Remote as a PWA (service workers require a secure context). HTTPS mode requires explicit trust of the controller local CA; the certificate contains literal current IP addresses, so `start.ps1` refreshes it after LAN-address changes.
 - Native Remote pairing uses QR or a manually entered numeric IP and remains HTTPS-only. The controller advertises mDNS metadata only in HTTPS mode, but the current native app does not yet provide automatic mDNS discovery.
