@@ -25,6 +25,8 @@ from app.protocol import (
 from app.security.pairing import PairingService
 from app.security.tokens import TokenStore
 from app.state import ActiveApp, ControllerState, StateStore
+from app.system import updater
+from app.system.updater import UpdateResult
 
 TRUSTED_REMOTE_HEADERS = {"host": "127.0.0.1:8765", "origin": "https://127.0.0.1:8765"}
 REMOTE_SOCKET_URL = "wss://127.0.0.1:8765/ws/remote"
@@ -888,6 +890,115 @@ def test_remote_token_revocation_rejects_an_invalid_bearer_token(tmp_path) -> No
         )
 
     assert response.status_code == 401
+
+
+def test_update_apply_requires_a_valid_remote_bearer_token(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    lan_ip = "192.168.1.44"
+    monkeypatch.setattr(
+        main.psutil,
+        "net_if_addrs",
+        lambda: {
+            "Wi-Fi": [
+                SimpleNamespace(
+                    family=main.socket.AF_INET,
+                    address=lan_ip,
+                    netmask="255.255.255.0",
+                )
+            ]
+        },
+    )
+    headers = {"host": f"{lan_ip}:8765", "origin": f"http://{lan_ip}:8765"}
+
+    with TestClient(
+        app,
+        base_url=f"http://{lan_ip}:8765",
+        client=("192.168.1.87", 50_000),
+    ) as client:
+        response = client.post("/api/update/apply", headers=headers)
+
+    assert response.status_code == 401
+
+
+def test_authenticated_remote_can_stage_an_update(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    token = app.state.runtime.pairing.pair("482731")
+    lan_ip = "192.168.1.44"
+    monkeypatch.setattr(
+        main.psutil,
+        "net_if_addrs",
+        lambda: {
+            "Wi-Fi": [
+                SimpleNamespace(
+                    family=main.socket.AF_INET,
+                    address=lan_ip,
+                    netmask="255.255.255.0",
+                )
+            ]
+        },
+    )
+
+    async def staged_update() -> UpdateResult:
+        return UpdateResult(True, "更新已下載。", "v0.3.0", True)
+
+    monkeypatch.setattr(updater, "apply_update", staged_update)
+    headers = {
+        "host": f"{lan_ip}:8765",
+        "origin": f"http://{lan_ip}:8765",
+        "authorization": f"Bearer {token}",
+    }
+    with TestClient(
+        app,
+        base_url=f"http://{lan_ip}:8765",
+        client=("192.168.1.87", 50_000),
+    ) as client:
+        response = client.post("/api/update/apply", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "success": True,
+        "message": "更新已下載。",
+        "version": "v0.3.0",
+        "restart_required": True,
+    }
+
+
+def test_local_tv_origin_can_stage_update_without_remote_token(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+
+    async def staged_update() -> UpdateResult:
+        return UpdateResult(True, "更新已下載。", "v0.3.0", True)
+
+    monkeypatch.setattr(updater, "apply_update", staged_update)
+    headers = {"host": "127.0.0.1:8765", "origin": "http://127.0.0.1:8765"}
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8765",
+        client=("127.0.0.1", 50_000),
+    ) as client:
+        response = client.post("/api/update/apply", headers=headers)
+
+    assert response.status_code == 200
+
+
+def test_update_apply_rejects_a_second_in_progress_request(tmp_path, monkeypatch) -> None:
+    app = make_app(tmp_path)
+    app.state.update_in_progress = True
+
+    async def unexpected_update() -> UpdateResult:
+        raise AssertionError("a concurrent update must not start")
+
+    monkeypatch.setattr(updater, "apply_update", unexpected_update)
+    headers = {"host": "127.0.0.1:8765", "origin": "http://127.0.0.1:8765"}
+
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8765",
+        client=("127.0.0.1", 50_000),
+    ) as client:
+        response = client.post("/api/update/apply", headers=headers)
+
+    assert response.status_code == 409
 
 
 def test_authenticated_remote_cannot_dispatch_after_its_token_is_revoked(tmp_path) -> None:

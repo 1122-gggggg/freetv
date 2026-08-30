@@ -10,6 +10,11 @@ import {
 import * as Haptics from 'expo-haptics'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ControllerSocket, type SocketStatus } from '../api/controllerSocket'
+import {
+  applyControllerUpdate,
+  fetchControllerVersion,
+  sameControllerVersion,
+} from '../api/controllerUpdate'
 import { revokeDeviceToken } from '../discovery/deviceScanner'
 
 import { AppLaunchers } from '../components/AppLaunchers'
@@ -70,6 +75,8 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
   const [waitingForNetflix, setWaitingForNetflix] = useState(false)
   const [netflixSendFailed, setNetflixSendFailed] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [stagedUpdateVersion, setStagedUpdateVersion] = useState<string | null>(null)
+  const [verifiedUpdateVersion, setVerifiedUpdateVersion] = useState<string | null>(null)
   useEffect(() => {
     const client = new ControllerSocket({
       host: device.host,
@@ -108,6 +115,31 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
       client.disconnect()
     }
   }, [device])
+
+  useEffect(() => {
+    if (
+      status !== 'authenticated' ||
+      stagedUpdateVersion === null ||
+      verifiedUpdateVersion === stagedUpdateVersion
+    ) {
+      return
+    }
+    let cancelled = false
+    void fetchControllerVersion(device.host, device.port).then((installedVersion) => {
+      if (
+        cancelled ||
+        installedVersion === null ||
+        !sameControllerVersion(stagedUpdateVersion, installedVersion)
+      ) {
+        return
+      }
+      setVerifiedUpdateVersion(stagedUpdateVersion)
+      Alert.alert('更新完成', `FreeTV ${installedVersion} 已開始執行。`)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [device.host, device.port, stagedUpdateVersion, status, verifiedUpdateVersion])
 
   const netflixContext =
     controllerState?.active_app === 'netflix'
@@ -215,13 +247,23 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
     if (isUpdating) return
     setIsUpdating(true)
     try {
-      const res = await fetch(`http://${device.host}:${device.port}/api/update/apply`, {
-        method: 'POST',
-      })
-      if (!res.ok) throw new Error('更新失敗')
-      Alert.alert('更新成功', '電視盒正在更新並重新載入。')
-    } catch {
-      Alert.alert('更新失敗', '請確認電視盒與網路連線。')
+      const result = await applyControllerUpdate(
+        device.host,
+        device.port,
+        device.token,
+      )
+      setStagedUpdateVersion(result.version ?? controllerState?.update_available ?? null)
+      Alert.alert(
+        '更新已下載',
+        result.restartRequired
+          ? `${result.message}\n請重新啟動 FreeTV 完成安裝。`
+          : result.message,
+      )
+    } catch (error) {
+      Alert.alert(
+        '更新失敗',
+        error instanceof Error ? error.message : '請確認電視盒與網路連線。',
+      )
     } finally {
       setIsUpdating(false)
     }
@@ -289,11 +331,29 @@ export function RemoteScreen({ device, onDisconnect }: RemoteScreenProps): React
             🚀 發現新版本 FreeTV ({controllerState.update_available})
           </Text>
           <TouchableOpacity
-            style={[styles.updateBtn, isUpdating && styles.disabledBtn]}
+            style={[
+              styles.updateBtn,
+              (isUpdating || stagedUpdateVersion === controllerState.update_available) &&
+                styles.disabledBtn,
+            ]}
             onPress={() => void handleApplyUpdate()}
-            disabled={isUpdating}
+            disabled={isUpdating || stagedUpdateVersion === controllerState.update_available}
+            accessibilityRole="button"
+            accessibilityLabel="安裝 FreeTV 更新"
+            accessibilityState={{
+              disabled: isUpdating || stagedUpdateVersion === controllerState.update_available,
+              busy: isUpdating,
+            }}
           >
-            <Text style={styles.updateBtnText}>{isUpdating ? '更新中…' : '立即更新'}</Text>
+            <Text style={styles.updateBtnText}>
+              {isUpdating
+                ? '更新中…'
+                : verifiedUpdateVersion === controllerState.update_available
+                  ? '已安裝'
+                  : stagedUpdateVersion === controllerState.update_available
+                  ? '已下載'
+                  : '立即更新'}
+            </Text>
           </TouchableOpacity>
         </View>
       ) : null}

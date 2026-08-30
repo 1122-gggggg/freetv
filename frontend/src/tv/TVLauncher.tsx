@@ -90,6 +90,7 @@ export function TVLauncher(): ReactElement {
   const [pairing, setPairing] = useState<PairingInfo | null>(null)
   const [localHudMessage, setLocalHudMessage] = useState<LocalHudMessage | null>(null)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [stagedUpdateVersion, setStagedUpdateVersion] = useState<string | null>(null)
   const localHudSequenceRef = useRef(0)
   const tileRefs = useRef<Partial<Record<TileId, HTMLButtonElement>>>({})
   const focusedTile = state && isTileId(state.focused_tile) ? state.focused_tile : 'youtube'
@@ -147,12 +148,33 @@ export function TVLauncher(): ReactElement {
     setIsUpdating(true)
     fetch('/api/update/apply', { method: 'POST' })
       .then(async (res) => {
-        if (!res.ok) throw new Error('更新失敗')
+        let payload: {
+          success?: boolean
+          message?: string
+          detail?: string
+          restart_required?: boolean
+        }
+        try {
+          payload = (await res.json()) as typeof payload
+        } catch {
+          throw new Error(
+            res.ok
+              ? '更新服務回應格式錯誤。'
+              : `更新服務暫時無法使用（HTTP ${res.status}）。`,
+          )
+        }
+        if (!res.ok || !payload.success) {
+          throw new Error(payload.detail ?? payload.message ?? '更新失敗')
+        }
         localHudSequenceRef.current += 1
         setLocalHudMessage({
           id: localHudSequenceRef.current,
-          text: '更新成功，正在重啟電視盒...',
+          text: payload.restart_required
+            ? '更新已下載，請重新啟動 FreeTV 完成安裝。'
+            : (payload.message ?? '更新完成。'),
         })
+        setStagedUpdateVersion(state?.update_available ?? null)
+        setIsUpdating(false)
       })
       .catch(() => {
         localHudSequenceRef.current += 1
@@ -180,6 +202,8 @@ export function TVLauncher(): ReactElement {
     setLocalHudMessage((current) => (current?.id === id ? null : current))
   }, [])
   const controllerHudMessage = renderedState.status_message || renderedState.error_message
+  const updateStaged =
+    stagedUpdateVersion !== null && stagedUpdateVersion === renderedState.update_available
   const displayedHudMessage = localHudMessage?.text ?? controllerHudMessage
   const hudCacheKey = localHudMessage
     ? `local-${localHudMessage.id}`
@@ -208,10 +232,10 @@ export function TVLauncher(): ReactElement {
           <button
             className="update-action-btn"
             type="button"
-            disabled={isUpdating}
+            disabled={isUpdating || updateStaged}
             onClick={applyUpdate}
           >
-            {isUpdating ? '正在更新…' : '立即更新'}
+            {isUpdating ? '正在更新…' : updateStaged ? '已下載' : '立即更新'}
           </button>
         </div>
       )}

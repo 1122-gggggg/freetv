@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { TVLauncher } from './TVLauncher'
 
-const socketState = vi.hoisted(() => ({ statusMessage: null as string | null }))
+const socketState = vi.hoisted(() => ({
+  statusMessage: null as string | null,
+  updateAvailable: null as string | null,
+}))
 
 vi.mock('../api/useControllerSocket', () => ({
   useControllerSocket: () => ({
@@ -20,6 +23,7 @@ vi.mock('../api/useControllerSocket', () => ({
       channel_name: null,
       status_message: socketState.statusMessage,
       error_message: null,
+      update_available: socketState.updateAvailable,
     },
     lastAcknowledgement: null,
     lastError: null,
@@ -48,6 +52,7 @@ describe('TVLauncher pairing code', () => {
 
   afterEach(() => {
     socketState.statusMessage = null
+    socketState.updateAvailable = null
     vi.useRealTimers()
     vi.unstubAllGlobals()
   })
@@ -120,5 +125,36 @@ describe('TVLauncher pairing code', () => {
     })
 
     expect(view.container.querySelector('.tv-hud-badge')).toBeNull()
+  })
+
+  it('stages an advertised update and explains that restart is required', async () => {
+    socketState.updateAvailable = 'v0.3.0'
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url === '/api/update/apply') {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            message: '更新已下載。',
+            version: 'v0.3.0',
+            restart_required: true,
+          }),
+          { status: 200 },
+        )
+      }
+      return pairingResponse('111111', '2026-08-13T00:01:00.000Z')
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const view = render(<TVLauncher />)
+    await act(async () => {})
+    await act(async () => {
+      screen.getByRole('button', { name: '立即更新' }).click()
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/update/apply', { method: 'POST' })
+    expect(view.container.querySelector('.tv-hud-badge')?.textContent).toBe(
+      '更新已下載，請重新啟動 FreeTV 完成安裝。',
+    )
   })
 })
