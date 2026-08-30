@@ -1,9 +1,17 @@
-import { type FormEvent, type ReactElement, useEffect, useRef, useState } from 'react'
+import {
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 
 import { useControllerSocket } from '../api/useControllerSocket'
 import { CommandButton } from '../components/CommandButton'
-import type { Command, NetflixInputKind } from '../types/protocol'
+import type { Command, ControllerState, NetflixInputKind } from '../types/protocol'
 import { rememberRemoteToken } from './tokenStorage'
+import './remote.css'
 
 interface SpeechRecognitionResultItem {
   transcript: string
@@ -58,6 +66,35 @@ interface RemoteControlProps {
   token: string
   onForget: () => Promise<void>
   onAuthenticationFailed: () => void
+}
+
+const REMOTE_PANELS = [
+  ['home', '首頁'],
+  ['remote', '遙控'],
+  ['adjust', '調整'],
+  ['input', '輸入'],
+] as const
+
+type RemotePanel = (typeof REMOTE_PANELS)[number][0]
+
+const PANEL_CONTROLS: Record<RemotePanel, string> = {
+  home: 'remote-panel-home remote-panel-search',
+  remote:
+    'remote-panel-remote remote-panel-navigation remote-panel-playback remote-panel-channel',
+  adjust: 'remote-panel-adjust',
+  input: 'remote-panel-input',
+}
+
+function activeAppLabel(app: ControllerState['active_app'] | undefined): string {
+  const labels: Record<ControllerState['active_app'], string> = {
+    launcher: '首頁',
+    youtube: 'YouTube',
+    netflix: 'Netflix',
+    news: '新聞',
+    live_tv: '電視',
+    browser: '瀏覽器',
+  }
+  return app ? labels[app] : '等待電視盒'
 }
 
 
@@ -193,9 +230,17 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   const [netflixTyped, setNetflixTyped] = useState('')
   const [pendingNetflixRequest, setPendingNetflixRequest] = useState<string | null>(null)
   const [netflixLocalSendFailed, setNetflixLocalSendFailed] = useState(false)
-  const [hideSecret, setHideSecret] = useState(false)
+  const [hideSecret, setHideSecret] = useState(true)
   const [forgetError, setForgetError] = useState<string | null>(null)
   const [forgetting, setForgetting] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState<string | null>(null)
+  const [updating, setUpdating] = useState(false)
+  const [stagedUpdateVersion, setStagedUpdateVersion] = useState<string | null>(null)
+  const [activePanel, setActivePanel] = useState<RemotePanel>(() =>
+    state?.active_app === 'netflix' && state.netflix_context?.stage !== 'unknown'
+      ? 'input'
+      : 'home',
+  )
   const [listening, setListening] = useState(false)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const liveTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -225,6 +270,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     setNetflixTyped('')
     setPendingNetflixRequest(null)
     setNetflixLocalSendFailed(false)
+    if (netflixContext && netflixContext.stage !== 'unknown') setActivePanel('input')
   }
   const netflixAcknowledgementFailed =
     pendingNetflixRequest !== null &&
@@ -357,41 +403,70 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     }
   }
 
-  // Draggable slider pointer handlers
-  const createDragHandler = (onUp: () => void, onDown: () => void) => {
-    let startY: number | null = null
-    let accumulated = 0
-    const threshold = 20
-    return {
-      onPointerDown: (e: React.PointerEvent) => {
-        startY = e.clientY
-        accumulated = 0
-      },
-      onPointerMove: (e: React.PointerEvent) => {
-        if (startY === null) return
-        const diff = e.clientY - (startY + accumulated)
-        if (diff <= -threshold) {
-          accumulated += diff
-          onUp()
-        } else if (diff >= threshold) {
-          accumulated += diff
-          onDown()
-        }
-      },
-      onPointerUp: () => {
-        startY = null
-        accumulated = 0
-      },
-      onPointerCancel: () => {
-        startY = null
-        accumulated = 0
-      },
+  const applyUpdate = async () => {
+    if (!state?.update_available || updating || controlsDisabled) return
+    setUpdating(true)
+    setUpdateStatus('正在下載更新…')
+    try {
+      const response = await fetch('/api/update/apply', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      let payload: {
+        success?: boolean
+        message?: string
+        detail?: string
+        version?: string
+        restart_required?: boolean
+      }
+      try {
+        payload = (await response.json()) as typeof payload
+      } catch {
+        throw new Error(
+          response.ok
+            ? '更新服務回應格式錯誤。'
+            : `更新服務暫時無法使用（HTTP ${response.status}）。`,
+        )
+      }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.detail ?? payload.message ?? '更新失敗，請稍後再試。')
+      }
+      setUpdateStatus(
+        payload.restart_required
+          ? '更新已下載，重新啟動電視盒後生效'
+          : (payload.message ?? '更新完成。'),
+      )
+      setStagedUpdateVersion(payload.version ?? state.update_available)
+    } catch (reason) {
+      setUpdateStatus(
+        reason instanceof TypeError
+          ? '無法連上電視盒，請確認網路連線後重試。'
+          : reason instanceof Error
+            ? reason.message
+            : '更新失敗，請稍後再試。',
+      )
+    } finally {
+      setUpdating(false)
     }
   }
 
-  const volDrag = createDragHandler(() => void command('VOLUME_UP'), () => void command('VOLUME_DOWN'))
-  const speedDrag = createDragHandler(() => void command('SPEED_UP'), () => void command('SPEED_DOWN'))
-  const brightDrag = createDragHandler(() => void command('BRIGHTNESS_UP'), () => void command('BRIGHTNESS_DOWN'))
+  const navigatePanels = (event: ReactKeyboardEvent<HTMLButtonElement>, panel: RemotePanel) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const current = REMOTE_PANELS.findIndex(([id]) => id === panel)
+    const next =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? REMOTE_PANELS.length - 1
+          : (current + (event.key === 'ArrowRight' ? 1 : -1) + REMOTE_PANELS.length) %
+            REMOTE_PANELS.length
+    setActivePanel(REMOTE_PANELS[next][0])
+    const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+      '[role="tab"]',
+    )
+    tabs?.[next]?.focus()
+  }
 
   return (
     <main className="remote-shell" aria-label="電視遙控器">
@@ -405,17 +480,56 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         </button>
       </header>
 
-      <div className={`connection-chip connection-${status}`} aria-live="polite">
-        <span className="status-dot" aria-hidden="true" />
-        {status === 'connected' ? '已連線' : status === 'authenticating' ? '驗證中' : status === 'connecting' ? '連線中' : status === 'disconnected' ? '已斷線' : '連線失敗'}
+      <div className="remote-summary" aria-label="電視狀態摘要" aria-live="polite">
+        <span className={`remote-summary-status connection-${status}`}>
+          <span className="status-dot" aria-hidden="true" />
+          {status === 'connected' ? '已連線' : status === 'authenticating' ? '驗證中' : status === 'connecting' ? '連線中' : status === 'disconnected' ? '已斷線' : '連線失敗'}
+        </span>
+        <span>目前：<strong>{activeAppLabel(state?.active_app)}</strong></span>
       </div>
-      <p className="remote-connection-note" aria-live="polite">
-        {controlsDisabled
-          ? '電視盒重新連線後，按鍵會自動解鎖。'
-          : '長按方向、音量或頻道鍵可連續送出。'}
-      </p>
+      <nav className="remote-tabs" role="tablist" aria-label="遙控器功能">
+        {REMOTE_PANELS.map(([id, label]) => (
+          <button
+            key={id}
+            id={`remote-tab-${id}`}
+            role="tab"
+            aria-selected={activePanel === id}
+            aria-controls={PANEL_CONTROLS[id]}
+            tabIndex={activePanel === id ? 0 : -1}
+            type="button"
+            onClick={() => setActivePanel(id)}
+            onKeyDown={(event) => navigatePanels(event, id)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
 
-      <section className="remote-grid three-column apps-row" aria-label="應用程式">
+      {state?.update_available ? <section className="remote-update-card" aria-labelledby="remote-update-title">
+        <div><strong id="remote-update-title">有新的 FreeTV 更新</strong><span>版本 {state.update_available}</span></div>
+        <button
+          type="button"
+          onClick={() => void applyUpdate()}
+          disabled={
+            controlsDisabled || updating || stagedUpdateVersion === state.update_available
+          }
+        >
+          {updating
+            ? '更新中…'
+            : stagedUpdateVersion === state.update_available
+              ? '已下載'
+              : '立即更新'}
+        </button>
+        {updateStatus ? <p aria-live="polite">{updateStatus}</p> : null}
+      </section> : null}
+
+      {controlsDisabled ? (
+        <p className="remote-connection-note" aria-live="polite">
+          電視盒重新連線後，按鍵會自動解鎖。
+        </p>
+      ) : null}
+
+      <section id="remote-panel-home" role="tabpanel" aria-labelledby="remote-tab-home" className="remote-grid three-column apps-row" hidden={activePanel !== 'home'}>
         <CommandButton command="OPEN_YOUTUBE" label="YouTube" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="OPEN_NETFLIX" label="Netflix" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="OPEN_NEWS" label="新聞" onCommand={command} disabled={controlsDisabled} />
@@ -423,8 +537,11 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
 
       {netflixContext && netflixContext.stage !== 'unknown' ? (
         <section
+          id="remote-panel-input"
+          role="tabpanel"
+          aria-labelledby="remote-tab-input"
+          hidden={activePanel !== 'input'}
           className={`netflix-context-card ${netflixContext.has_error ? 'is-error' : ''}`}
-          aria-labelledby="netflix-context-title"
         >
           <p className="eyebrow">Netflix 電視情境</p>
           <h2 id="netflix-context-title">
@@ -497,7 +614,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       ) : null}
 
       {/* Direction Pad */}
-      <section className="remote-direction-pad" aria-label="方向鍵">
+      <section id="remote-panel-remote" role="tabpanel" aria-labelledby="remote-tab-remote" className="remote-direction-pad" hidden={activePanel !== 'remote'}>
         <CommandButton command="NAV_UP" label="上" onCommand={command} className="direction-up" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
         <CommandButton command="NAV_LEFT" label="左" onCommand={command} className="direction-left" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
         <CommandButton command="OK" label="確定" onCommand={command} className="direction-ok" disabled={controlsDisabled} />
@@ -506,42 +623,42 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       </section>
 
       {/* 3 Vertical Draggable Slider Bars */}
-      <section className="remote-sliders-row" aria-label="調節滑桿">
+      <section id="remote-panel-adjust" role="tabpanel" aria-labelledby="remote-tab-adjust" className="remote-sliders-row" hidden={activePanel !== 'adjust'}>
         {/* Volume Slider */}
-        <div className="slider-card" {...volDrag}>
+        <div className="slider-card">
           <p className="slider-header">音量</p>
           <div className="slider-track">
             <div className="slider-fill vol-fill" style={{ height: `${state?.volume ?? 50}%` }} />
-            <CommandButton command="VOLUME_UP" label="音量 +" onCommand={command} disabled={controlsDisabled} repeatOnHold className="slider-step-btn" />
+            <CommandButton command="VOLUME_UP" label="音量 +" onCommand={command} disabled={controlsDisabled} repeatOnHold className="slider-step-btn slider-increase" />
             <CommandButton command="MUTE" label={state?.muted ? '靜音' : `${state?.volume ?? 50}%`} onCommand={command} disabled={controlsDisabled} className={`slider-pill ${state?.muted ? 'is-muted' : ''}`} />
-            <CommandButton command="VOLUME_DOWN" label="音量 −" onCommand={command} disabled={controlsDisabled} repeatOnHold className="slider-step-btn" />
+            <CommandButton command="VOLUME_DOWN" label="音量 −" onCommand={command} disabled={controlsDisabled} repeatOnHold className="slider-step-btn slider-decrease" />
           </div>
         </div>
 
         {/* Speed Slider */}
-        <div className="slider-card" {...speedDrag}>
+        <div className="slider-card">
           <p className="slider-header">倍速</p>
           <div className="slider-track">
-            <CommandButton command="SPEED_UP" label="倍速 +" onCommand={command} disabled={controlsDisabled} className="slider-step-btn" />
+            <CommandButton command="SPEED_UP" label="倍速 +" onCommand={command} disabled={controlsDisabled} className="slider-step-btn slider-increase" />
             <div className="slider-pill speed-pill">倍速</div>
-            <CommandButton command="SPEED_DOWN" label="倍速 −" onCommand={command} disabled={controlsDisabled} className="slider-step-btn" />
+            <CommandButton command="SPEED_DOWN" label="倍速 −" onCommand={command} disabled={controlsDisabled} className="slider-step-btn slider-decrease" />
           </div>
         </div>
 
         {/* Brightness Slider */}
-        <div className="slider-card" {...brightDrag}>
+        <div className="slider-card">
           <p className="slider-header">亮度</p>
           <div className="slider-track">
             <div className="slider-fill bright-fill" style={{ height: `${state?.brightness ?? 100}%` }} />
-            <CommandButton command="BRIGHTNESS_UP" label="亮度 +" onCommand={command} disabled={controlsDisabled} repeatOnHold className="slider-step-btn" />
+            <CommandButton command="BRIGHTNESS_UP" label="亮度 +" onCommand={command} disabled={controlsDisabled} repeatOnHold className="slider-step-btn slider-increase" />
             <div className="slider-pill">{state?.brightness ?? 100}%</div>
-            <CommandButton command="BRIGHTNESS_DOWN" label="亮度 −" onCommand={command} disabled={controlsDisabled} repeatOnHold className="slider-step-btn" />
+            <CommandButton command="BRIGHTNESS_DOWN" label="亮度 −" onCommand={command} disabled={controlsDisabled} repeatOnHold className="slider-step-btn slider-decrease" />
           </div>
         </div>
       </section>
 
       {/* Navigation Row */}
-      <section className="remote-grid four-column nav-row" aria-label="導覽列">
+      <section id="remote-panel-navigation" className="remote-grid four-column nav-row" aria-label="導覽列" hidden={activePanel !== 'remote'}>
         <CommandButton command="BACK" label="返回" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="HOME" label="主畫面" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="PLAY_PAUSE" label="播放／暫停" onCommand={command} disabled={controlsDisabled} />
@@ -549,7 +666,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       </section>
 
       {/* Playback Actions & Features Row */}
-      <section className="remote-grid four-column feature-row" aria-label="主要按鍵">
+      <section id="remote-panel-playback" className="remote-grid four-column feature-row" aria-label="主要按鍵" hidden={activePanel !== 'remote'}>
         <CommandButton command="SEEK_BACKWARD_5" label="倒退 5 秒" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="SEEK_FORWARD_5" label="快轉 5 秒" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="QUALITY" label="畫質" onCommand={command} disabled={controlsDisabled} />
@@ -557,21 +674,27 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       </section>
 
       {/* Channel Switchers & Voice Row */}
-      <section className="remote-grid three-column channel-voice-row" aria-label="頻道切換與語音">
+      <section id="remote-panel-channel" className="remote-grid three-column channel-voice-row" aria-label="頻道切換與語音" hidden={activePanel !== 'remote'}>
         <CommandButton command="CHANNEL_DOWN" label="頻道 −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
         <button
           className={`remote-button voice-button ${listening ? 'is-listening' : ''}`}
           disabled={controlsDisabled || !speechSupported}
           type="button"
           onClick={handleVoice}
+          aria-describedby={!speechSupported ? 'voice-support-note' : undefined}
         >
           {listening ? '聆聽中…' : '語音'}
         </button>
         <CommandButton command="CHANNEL_UP" label="頻道 +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
+        {!speechSupported ? (
+          <p id="voice-support-note" className="remote-hint">
+            此瀏覽器不支援語音輸入。
+          </p>
+        ) : null}
       </section>
 
       {!netflixContext || netflixContext.stage === 'unknown' ? (
-      <section className="search-card" aria-labelledby="keyboard-title">
+      <section id="remote-panel-input" role="tabpanel" aria-labelledby="remote-tab-input" className="search-card" hidden={activePanel !== 'input'}>
         <p className="eyebrow">鍵盤</p>
         <h2 id="keyboard-title">輸入帳號或密碼</h2>
         <p className="keyboard-description">
@@ -608,6 +731,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
             disabled={controlsDisabled}
             type="button"
             onClick={() => setHideSecret((current) => !current)}
+            aria-pressed={!hideSecret}
           >
             {hideSecret ? '顯示文字' : '隱藏文字'}
           </button>
@@ -616,7 +740,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       </section>
       ) : null}
 
-      <section className="search-card" aria-labelledby="search-title">
+      <section id="remote-panel-search" className="search-card" aria-labelledby="search-title" hidden={activePanel !== 'home'}>
         <p className="eyebrow">影片搜尋</p>
         <h2 id="search-title">搜尋影片</h2>
         <form onSubmit={submitSearch}>
