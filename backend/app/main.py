@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import socket
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
@@ -13,9 +14,10 @@ from urllib.parse import urlsplit
 
 import psutil
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from starlette.types import Scope
 
 from app.config import Settings, detect_capabilities, load_settings, project_root
 from app.controller import ControllerRuntime, build_runtime
@@ -42,6 +44,7 @@ logger = logging.getLogger(__name__)
 REMOTE_AUTHENTICATION_TIMEOUT_SECONDS = 10.0
 REMOTE_AUTHENTICATION_FAILED_CLOSE_CODE = 4401
 ACKNOWLEDGEMENT_SEND_TIMEOUT_SECONDS = 2.0
+HASHED_ASSET_NAME = re.compile(r".+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$")
 
 
 HTML_SECURITY_HEADERS = {
@@ -49,6 +52,18 @@ HTML_SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
     "Cache-Control": "no-store",
 }
+
+
+class ImmutableStaticFiles(StaticFiles):
+    """Serve Vite's content-hashed assets with a durable browser cache."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if response.status_code == status.HTTP_200_OK and HASHED_ASSET_NAME.fullmatch(
+            Path(path).name
+        ):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
 
 
 class RemoteAuthenticationGuard:
@@ -229,7 +244,7 @@ def create_app(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="配對嘗試次數過多。"
             )
         try:
-            token = app.state.runtime.pairing.pair(payload.code)
+            token = await app.state.runtime.pairing.pair_async(payload.code)
         except PairingCodeExpired as error:
             attempts.record_failure(client_host)
             log_event(logger, "pair_failure", client=client_host, reason="expired_code")
@@ -256,11 +271,11 @@ def create_app(
             request, app.state.settings.server.port, app.state.settings.server.transport
         )
         token = _bearer_token(request)
-        if token is None or not app.state.runtime.pairing.verify_token(token):
+        if token is None or not await app.state.runtime.pairing.verify_token_async(token):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="遙控器權杖無效。")
         connections: ConnectionRegistry = app.state.connections
         async with app.state.dispatch_lock:
-            app.state.runtime.pairing.revoke_token(token)
+            await app.state.runtime.pairing.revoke_token_async(token)
             sessions = await connections.remove_token_sessions(token)
         await connections.close_connections(sessions)
         log_event(logger, "remote_token_revoked", client=_client_host(request))
@@ -345,7 +360,9 @@ def create_app(
                 )
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
                 return
-            remote_session = app.state.runtime.pairing.authenticate_token(first_message.token)
+            remote_session = await app.state.runtime.pairing.authenticate_token_async(
+                first_message.token
+            )
             if remote_session is None or not app.state.runtime.pairing.session_is_valid(
                 remote_session
             ):
@@ -414,7 +431,7 @@ def create_app(
             await connections.remove(websocket)
 
     if (frontend / "assets").is_dir():
-        app.mount("/assets", StaticFiles(directory=frontend / "assets"), name="assets")
+        app.mount("/assets", ImmutableStaticFiles(directory=frontend / "assets"), name="assets")
 
     @app.get("/manifest.webmanifest")
     @app.get("/service-worker.js")

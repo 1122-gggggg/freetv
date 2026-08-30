@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
 import json
 import os
 import secrets
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -29,22 +31,38 @@ class TokenStore:
         self._max_tokens = max_tokens
         self._token_ttl = token_ttl
         self._now = now or (lambda: datetime.now(UTC))
+        # ``None`` means not yet populated; session checks must never populate it
+        # synchronously because they run on the FastAPI event loop.
         self._active_keys: set[bytes] | None = None
+        self._lock = threading.RLock()
+
+    async def issue_token_async(self) -> str:
+        return await asyncio.to_thread(self.issue_token)
+
+    async def verify_async(self, token: str) -> bool:
+        return await asyncio.to_thread(self.verify, token)
+
+    async def token_expires_at_async(self, token: str) -> datetime | None:
+        return await asyncio.to_thread(self.token_expires_at, token)
+
+    async def revoke_async(self, token: str) -> bool:
+        return await asyncio.to_thread(self.revoke, token)
 
     def issue_token(self) -> str:
-        token = secrets.token_urlsafe(self._token_bytes)
-        token_key = self._token_key(token)
-        salt = secrets.token_bytes(16)
-        record = {
-            "token_key": token_key.hex(),
-            "salt": base64.b64encode(salt).decode("ascii"),
-            "digest": base64.b64encode(self._digest(token, salt)).decode("ascii"),
-            "created_at": self._now().isoformat(),
-        }
-        records = self._active_records()
-        records.append(record)
-        self._write_records(records[-self._max_tokens :])
-        return token
+        with self._lock:
+            token = secrets.token_urlsafe(self._token_bytes)
+            token_key = self._token_key(token)
+            salt = secrets.token_bytes(16)
+            record = {
+                "token_key": token_key.hex(),
+                "salt": base64.b64encode(salt).decode("ascii"),
+                "digest": base64.b64encode(self._digest(token, salt)).decode("ascii"),
+                "created_at": self._now().isoformat(),
+            }
+            records = self._active_records()
+            records.append(record)
+            self._write_records(records[-self._max_tokens :])
+            return token
 
     def verify(self, token: str) -> bool:
         return self.token_expires_at(token) is not None
@@ -53,33 +71,43 @@ class TokenStore:
         return token_key in self._active_token_keys()
 
     def token_expires_at(self, token: str) -> datetime | None:
-        if not self._is_token_shape_valid(token):
+        with self._lock:
+            if not self._is_token_shape_valid(token):
+                return None
+            token_key = self._token_key(token)
+            records = self._active_records()
+            # Authentication runs this method in a worker; prime the cache so
+            # the subsequent synchronous session check never touches disk.
+            self._active_keys = {
+                record_token_key
+                for record in records
+                if (record_token_key := self._record_token_key(record)) is not None
+            }
+            for record in records:
+                if self._record_matches(token, record, token_key):
+                    if self._record_token_key(record) is None:
+                        record["token_key"] = token_key.hex()
+                        self._write_records(records)
+                    return self._record_expires_at(record)
             return None
-        token_key = self._token_key(token)
-        records = self._active_records()
-        for record in records:
-            if self._record_matches(token, record, token_key):
-                if self._record_token_key(record) is None:
-                    record["token_key"] = token_key.hex()
-                    self._write_records(records)
-                return self._record_expires_at(record)
-        return None
 
     def revoke(self, token: str) -> bool:
-        if not self._is_token_shape_valid(token):
-            return False
-        token_key = self._token_key(token)
-        records = self._active_records()
-        remaining = [
-            record for record in records if not self._record_matches(token, record, token_key)
-        ]
-        if len(remaining) == len(records):
-            return False
-        self._write_records(remaining)
-        return True
+        with self._lock:
+            if not self._is_token_shape_valid(token):
+                return False
+            token_key = self._token_key(token)
+            records = self._active_records()
+            remaining = [
+                record for record in records if not self._record_matches(token, record, token_key)
+            ]
+            if len(remaining) == len(records):
+                return False
+            self._write_records(remaining)
+            return True
 
     def revoke_all(self) -> None:
-        self._write_records([])
+        with self._lock:
+            self._write_records([])
 
     def _active_records(self) -> list[dict[str, str]]:
         records = self._load_records()
