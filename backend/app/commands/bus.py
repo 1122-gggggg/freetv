@@ -162,6 +162,8 @@ class CommandBus:
                             active_app=ActiveApp.LAUNCHER,
                             channel_number=None,
                             channel_name=None,
+                            previous_channel_name=None,
+                            next_channel_name=None,
                             status_message=None,
                             netflix_context=None,
                         )
@@ -172,6 +174,8 @@ class CommandBus:
                     active_app=ActiveApp.YOUTUBE,
                     channel_number=None,
                     channel_name=None,
+                    previous_channel_name=None,
+                    next_channel_name=None,
                     netflix_context=None,
                     error_message=None,
                     status_message=None,
@@ -200,6 +204,8 @@ class CommandBus:
                 active_app=ActiveApp.LAUNCHER,
                 channel_number=None,
                 channel_name=None,
+                previous_channel_name=None,
+                next_channel_name=None,
                 netflix_context=None,
                 error_message=f"{labels.get(app, '應用程式')} 已意外關閉。",
                 status_message=None,
@@ -216,6 +222,8 @@ class CommandBus:
                 active_app=ActiveApp.LAUNCHER,
                 channel_number=None,
                 channel_name=None,
+                previous_channel_name=None,
+                next_channel_name=None,
                 netflix_context=None,
                 error_message=None,
                 status_message=None,
@@ -240,6 +248,8 @@ class CommandBus:
                         active_app=ActiveApp.LAUNCHER,
                         channel_number=None,
                         channel_name=None,
+                        previous_channel_name=None,
+                        next_channel_name=None,
                         netflix_context=None,
                         status_message=None,
                     )
@@ -250,6 +260,8 @@ class CommandBus:
                 active_app=target,
                 channel_number=None,
                 channel_name=None,
+                previous_channel_name=None,
+                next_channel_name=None,
                 netflix_context=context if target is ActiveApp.NETFLIX else None,
                 error_message=None,
                 status_message=None,
@@ -262,6 +274,8 @@ class CommandBus:
                 active_app=ActiveApp.LIVE_TV,
                 channel_number=channel_number,
                 channel_name=channel_name,
+                previous_channel_name=None,
+                next_channel_name=None,
                 netflix_context=None,
                 error_message=None,
                 status_message=None,
@@ -279,6 +293,8 @@ class CommandBus:
                         active_app=ActiveApp.LAUNCHER,
                         channel_number=None,
                         channel_name=None,
+                        previous_channel_name=None,
+                        next_channel_name=None,
                         netflix_context=None,
                         status_message=None,
                     )
@@ -287,10 +303,13 @@ class CommandBus:
                 await self._applications.open_news(channel.url)
             channel_text = f"頻道 {channel.number:02d} · {channel.name}"
             await self._applications.show_osd(channel_text)
+            previous_channel_name, next_channel_name = self._news_neighbor_names()
             state = await self._state.update(
                 active_app=ActiveApp.NEWS,
                 channel_number=channel.number,
                 channel_name=channel.name,
+                previous_channel_name=previous_channel_name,
+                next_channel_name=next_channel_name,
                 netflix_context=None,
                 error_message=None,
                 status_message=channel_text,
@@ -331,9 +350,12 @@ class CommandBus:
                 await self._applications.open_news(channel.url)
                 channel_text = f"頻道 {channel.number:02d} · {channel.name}"
                 await self._applications.show_osd(channel_text)
+                previous_channel_name, next_channel_name = self._news_neighbor_names()
                 state = await self._state.update(
                     channel_number=channel.number,
                     channel_name=channel.name,
+                    previous_channel_name=previous_channel_name,
+                    next_channel_name=next_channel_name,
                     netflix_context=None,
                     error_message=None,
                     status_message=channel_text,
@@ -344,6 +366,8 @@ class CommandBus:
                 state = await self._state.update(
                     channel_number=channel_number,
                     channel_name=channel_name,
+                    previous_channel_name=None,
+                    next_channel_name=None,
                     netflix_context=None,
                     error_message=None,
                     status_message=None,
@@ -496,6 +520,12 @@ class CommandBus:
                 "請先開啟控制器管理的瀏覽器再使用遙控輸入。",
             )
         self._applications.require_input_target(current.active_app)
+
+    def _news_neighbor_names(self) -> tuple[str, str]:
+        return (
+            self._news.preview_move(-1).name,
+            self._news.preview_move(1).name,
+        )
 
     async def _success_state(self, **changes: object) -> ControllerState:
         return await self._state.update(error_message=None, **changes)

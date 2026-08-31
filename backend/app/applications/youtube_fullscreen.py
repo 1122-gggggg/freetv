@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Protocol
+import re
+from typing import Any, Protocol, TypedDict
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -10,6 +11,27 @@ import websockets
 
 from app.applications.playback_rate import PLAYBACK_RATE_STEPS
 from app.commands.ports import CommandExecutionError
+
+
+class YoutubeQualityInfo(TypedDict):
+    video_id: str
+    current: str
+    available: list[str]
+
+
+_QUALITY_RANK = {
+    "auto": -1,
+    "tiny": 0,
+    "small": 1,
+    "medium": 2,
+    "large": 3,
+    "hd720": 4,
+    "hd1080": 5,
+    "hd1440": 6,
+    "hd2160": 7,
+    "highres": 8,
+}
+_QUALITY_CODE = re.compile(r"^[a-z0-9_-]{1,32}$")
 
 _INSPECT_EXPRESSION = """(() => {
   const video = document.querySelector('video');
@@ -239,6 +261,95 @@ def _seek_expression(direction: int) -> str:
 }})()"""
 
 
+def _quality_info_expression() -> str:
+    return """(() => {
+  const player =
+    document.querySelector('#movie_player') ||
+    document.querySelector('.html5-video-player');
+  if (!player || typeof player.getAvailableQualityLevels !== 'function') return null;
+  try {
+    const levels = player.getAvailableQualityLevels();
+    const current = typeof player.getPlaybackQuality === 'function'
+      ? player.getPlaybackQuality()
+      : '';
+    const videoData = typeof player.getVideoData === 'function' ? player.getVideoData() : null;
+    const urlVideoId = new URL(location.href).searchParams.get('v') || '';
+    const videoId = typeof videoData?.video_id === 'string' && videoData.video_id
+      ? videoData.video_id
+      : urlVideoId;
+    if (!videoId || !Array.isArray(levels) || levels.length === 0) return null;
+    return {
+      video_id: videoId,
+      current,
+      available: [...new Set(levels)],
+    };
+  } catch {
+    return null;
+  }
+})()"""
+
+
+def _set_quality_expression(quality: str) -> str:
+    requested = json.dumps(quality, ensure_ascii=True)
+    return f"""(() => {{
+  const requested = {requested};
+  const player =
+    document.querySelector('#movie_player') ||
+    document.querySelector('.html5-video-player');
+  if (!player || typeof player.getAvailableQualityLevels !== 'function') return null;
+  try {{
+    const levels = player.getAvailableQualityLevels();
+    if (!Array.isArray(levels) || !levels.includes(requested)) return null;
+    if (typeof player.setPlaybackQualityRange === 'function') {{
+      player.setPlaybackQualityRange(requested, requested);
+    }}
+    if (typeof player.setPlaybackQuality === 'function') {{
+      player.setPlaybackQuality(requested);
+    }}
+    const videoData = typeof player.getVideoData === 'function' ? player.getVideoData() : null;
+    const urlVideoId = new URL(location.href).searchParams.get('v') || '';
+    const videoId = typeof videoData?.video_id === 'string' && videoData.video_id
+      ? videoData.video_id
+      : urlVideoId;
+    if (!videoId) return null;
+    return {{
+      video_id: videoId,
+      current: requested,
+      available: [...new Set(levels)],
+    }};
+  }} catch {{
+    return null;
+  }}
+}})()"""
+
+
+def _quality_info(value: Any) -> YoutubeQualityInfo:
+    if not isinstance(value, dict) or set(value) != {"video_id", "current", "available"}:
+        raise ValueError("YouTube quality result must contain the expected fields")
+    video_id = value["video_id"]
+    current = value["current"]
+    available = value["available"]
+    if (
+        not isinstance(video_id, str)
+        or not 1 <= len(video_id) <= 128
+        or not isinstance(current, str)
+        or _QUALITY_CODE.fullmatch(current) is None
+        or not isinstance(available, list)
+        or not 1 <= len(available) <= 20
+        or any(
+            not isinstance(level, str) or _QUALITY_CODE.fullmatch(level) is None
+            for level in available
+        )
+    ):
+        raise ValueError("YouTube quality result is invalid")
+    levels = set(available)
+    ordered = sorted(
+        levels,
+        key=lambda level: (_QUALITY_RANK.get(level, len(_QUALITY_RANK)), level),
+    )
+    return {"video_id": video_id, "current": current, "available": ordered}
+
+
 def _quality_expression() -> str:
     return """(() => {
   const player =
@@ -395,6 +506,8 @@ class YoutubeProbe(Protocol):
     async def fullscreen(self, port: int, video_id: str, user_gesture: bool) -> bool: ...
     async def playback_rate(self, port: int, direction: int) -> float: ...
     async def seek(self, port: int, direction: int) -> bool: ...
+    async def quality_info(self, port: int) -> YoutubeQualityInfo: ...
+    async def set_quality(self, port: int, quality: str) -> YoutubeQualityInfo: ...
     async def cycle_quality(self, port: int) -> str: ...
     async def toggle_subtitles(self, port: int) -> str: ...
     async def show_osd(self, port: int, text: str) -> bool: ...
@@ -495,6 +608,22 @@ class ShortCdpYoutubeProbe:
             raise ValueError("YouTube seek result is invalid")
         return value
 
+    async def quality_info(self, port: int) -> YoutubeQualityInfo:
+        debugger_url = await self._debugger_url(port)
+        value = await self._evaluate(debugger_url, _quality_info_expression())
+        return _quality_info(value)
+
+    async def set_quality(self, port: int, quality: str) -> YoutubeQualityInfo:
+        if not isinstance(quality, str) or _QUALITY_CODE.fullmatch(quality) is None:
+            raise ValueError("YouTube quality code is invalid")
+        debugger_url = await self._debugger_url(port)
+        value = await self._evaluate(
+            debugger_url,
+            _set_quality_expression(quality),
+            user_gesture=True,
+        )
+        return _quality_info(value)
+
     async def cycle_quality(self, port: int) -> str:
         debugger_url = await self._debugger_url(port)
         value = await self._evaluate(debugger_url, _quality_expression(), user_gesture=True)
@@ -589,6 +718,7 @@ class YoutubeFullscreenController:
         self._task: asyncio.Task[None] | None = None
         self._port: int | None = None
         self._last_fullscreen_video_id: str | None = None
+        self._last_quality_video_id: str | None = None
         self._probe_lock = asyncio.Lock()
 
     async def start(self, port: int) -> None:
@@ -597,12 +727,14 @@ class YoutubeFullscreenController:
         await self.stop()
         self._port = port
         self._last_fullscreen_video_id = None
+        self._last_quality_video_id = None
         self._task = asyncio.create_task(self._run(port))
 
     async def stop(self) -> None:
         task, self._task = self._task, None
         self._port = None
         self._last_fullscreen_video_id = None
+        self._last_quality_video_id = None
         if task is None:
             return
         task.cancel()
@@ -617,12 +749,38 @@ class YoutubeFullscreenController:
 
     async def _probe_once_locked(self, port: int) -> bool:
         video_id, ready, fullscreen = await self._probe.inspect(port)
-        if video_id is None or not ready or fullscreen:
+        if video_id is None or not ready:
+            return False
+        await self._select_highest_quality(port, video_id)
+        if fullscreen:
             return False
         if video_id == self._last_fullscreen_video_id:
             return False
         self._last_fullscreen_video_id = video_id
         return await self._probe.fullscreen(port, video_id, True)
+
+    async def _select_highest_quality(self, port: int, video_id: str) -> None:
+        if video_id == self._last_quality_video_id:
+            return
+        expected_video_id = video_id.partition(":")[2] or video_id
+        try:
+            info = await self._probe.quality_info(port)
+            if (
+                expected_video_id != "default"
+                and info["video_id"] not in {video_id, expected_video_id}
+            ):
+                return
+            highest = info["available"][-1]
+            if info["current"] != highest:
+                selected = await self._probe.set_quality(port, highest)
+                if (
+                    expected_video_id != "default"
+                    and selected["video_id"] not in {video_id, expected_video_id}
+                ):
+                    return
+        except Exception:
+            return
+        self._last_quality_video_id = video_id
 
     async def force_fullscreen(self, port: int) -> bool:
         async with self._probe_lock:
@@ -691,6 +849,35 @@ class YoutubeFullscreenController:
                 "youtube_video_unavailable",
                 "目前沒有可快轉或倒退的影片。",
             )
+
+    async def quality_info(self, port: int) -> YoutubeQualityInfo:
+        try:
+            async with self._probe_lock:
+                return await self._probe.quality_info(port)
+        except CommandExecutionError:
+            raise
+        except Exception as error:
+            raise CommandExecutionError(
+                "youtube_video_unavailable",
+                "目前沒有可調整畫質的 YouTube 影片。",
+            ) from error
+
+    async def set_quality(self, port: int, quality: str) -> YoutubeQualityInfo:
+        if not isinstance(quality, str) or _QUALITY_CODE.fullmatch(quality) is None:
+            raise CommandExecutionError(
+                "youtube_quality_unavailable",
+                "選擇的 YouTube 畫質目前無法使用。",
+            )
+        try:
+            async with self._probe_lock:
+                return await self._probe.set_quality(port, quality)
+        except CommandExecutionError:
+            raise
+        except Exception as error:
+            raise CommandExecutionError(
+                "youtube_quality_unavailable",
+                "選擇的 YouTube 畫質目前無法使用。",
+            ) from error
 
     async def cycle_quality(self, port: int) -> str:
         try:

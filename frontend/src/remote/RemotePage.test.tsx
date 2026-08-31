@@ -41,9 +41,6 @@ const remoteElement = () => (
   />
 )
 
-function openPanel(name: '首頁' | '遙控' | '調整' | '輸入'): void {
-  fireEvent.click(screen.getByRole('tab', { name }))
-}
 
 const netflixState = (context: NetflixContext | null): ControllerState => ({
   version: 1,
@@ -55,6 +52,8 @@ const netflixState = (context: NetflixContext | null): ControllerState => ({
   brightness: 100,
   channel_number: null,
   channel_name: null,
+  previous_channel_name: null,
+  next_channel_name: null,
   status_message: null,
   error_message: null,
   netflix_context: context,
@@ -97,7 +96,7 @@ describe('RemotePage', () => {
     expect((screen.getByRole('button', { name: '解除配對' }) as HTMLButtonElement).disabled).toBe(false)
   })
 
-  it('is a handset with YouTube, Netflix, news, voice, and search', () => {
+  it('places search first and keeps playback actions in the direction pad', () => {
     render(
       <RemotePage
         token="paired-token-value-that-is-long-enough"
@@ -111,18 +110,22 @@ describe('RemotePage', () => {
     expect(screen.getByRole('button', { name: 'Netflix' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '新聞' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '搜片' })).toBeTruthy()
-    openPanel('調整')
+
     expect(screen.getByRole('button', { name: '倍速 +' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '倍速 −' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '音量 +' })).toBeTruthy()
-    openPanel('遙控')
+
     expect(screen.getByRole('button', { name: '頻道 +' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '語音' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '返回' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '主畫面' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '全螢幕' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '倒退 5 秒' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: '快轉 5 秒' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '語音' })).toBeNull()
+    expect(screen.getByRole('button', { name: '返回' }).closest('section')?.getAttribute('aria-label')).toBe('方向鍵')
+    expect(screen.getByRole('button', { name: '播放／暫停' }).closest('section')?.getAttribute('aria-label')).toBe('方向鍵')
+    expect(screen.getByRole('button', { name: '倒退 5 秒' }).closest('section')?.getAttribute('aria-label')).toBe('方向鍵')
+    expect(screen.getByRole('button', { name: '快轉 5 秒' }).closest('section')?.getAttribute('aria-label')).toBe('方向鍵')
+    expect(screen.queryByRole('button', { name: '主畫面' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '全螢幕' })).toBeNull()
+    const searchTitle = screen.getByRole('heading', { name: '搜尋影片' })
+    const homeTitle = screen.getByRole('heading', { name: '首頁' })
+    expect(searchTitle.compareDocumentPosition(homeTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Live TV' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Browser' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Sleep PC' })).toBeNull()
@@ -133,8 +136,55 @@ describe('RemotePage', () => {
     expect(screen.queryByLabelText(/觸控板/)).toBeNull()
   })
 
+  it('hides controls that do not apply to the active video app', () => {
+    socketMock.state = netflixState({
+      stage: 'browse',
+      input_kind: 'none',
+      has_error: false,
+      can_submit: false,
+      focused_title: null,
+    })
+    const view = render(remoteElement())
+
+    expect(screen.queryByRole('button', { name: '畫質' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '頻道 +' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '頻道 −' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '字幕' })).toBeNull()
+    expect(screen.queryByLabelText('搜片')).toBeNull()
+    expect(screen.queryByLabelText('遙控輸入')).toBeNull()
+    expect(screen.queryByRole('button', { name: '語音' })).toBeNull()
+
+    socketMock.state = {
+      ...netflixState(null),
+      active_app: 'youtube',
+      focused_tile: 'youtube',
+    }
+    view.rerender(remoteElement())
+
+    expect(screen.queryByRole('button', { name: '畫質' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '頻道 +' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '頻道 −' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '語音' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '字幕' })).toBeNull()
+    expect(screen.getByLabelText('搜片')).toBeTruthy()
+    expect(screen.queryByLabelText('遙控輸入')).toBeNull()
+
+    socketMock.state = {
+      ...netflixState(null),
+      active_app: 'news',
+      focused_tile: 'news',
+      previous_channel_name: '公視新聞網',
+      next_channel_name: '台視新聞',
+    }
+    view.rerender(remoteElement())
+
+    expect(screen.getByRole('button', { name: '下一台：台視新聞' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '上一台：公視新聞網' })).toBeTruthy()
+  })
+
   it('sends the existing Netflix navigation and 256-character text contracts', () => {
     vi.useFakeTimers()
+    socketMock.state = netflixState(null)
     render(
       <RemotePage
         token="paired-token-value-that-is-long-enough"
@@ -144,18 +194,18 @@ describe('RemotePage', () => {
       />,
     )
 
-    openPanel('遙控')
+
     for (const label of ['上', '下', '左', '右', '確定']) {
       fireEvent.click(screen.getByRole('button', { name: label }))
     }
-    for (const label of ['返回', '播放／暫停', '倒退 5 秒', '快轉 5 秒', '全螢幕']) {
+    for (const label of ['返回', '播放／暫停', '倒退 5 秒', '快轉 5 秒']) {
       fireEvent.click(screen.getByRole('button', { name: label }))
     }
-    openPanel('調整')
+
     for (const label of ['倍速 −', '倍速 +']) {
       fireEvent.click(screen.getByRole('button', { name: label }))
     }
-    openPanel('輸入')
+
     const text = 'x'.repeat(256)
     fireEvent.change(screen.getByLabelText('遙控輸入'), { target: { value: text } })
     vi.advanceTimersByTime(125)
@@ -171,7 +221,6 @@ describe('RemotePage', () => {
       'PLAY_PAUSE',
       'SEEK_BACKWARD_5',
       'SEEK_FORWARD_5',
-      'FULLSCREEN',
       'SPEED_DOWN',
       'SPEED_UP',
     ])
@@ -188,7 +237,7 @@ describe('RemotePage', () => {
       focused_title: 'Example',
     })
     const view = render(remoteElement())
-    openPanel('遙控')
+
     let right = screen.getByRole('button', { name: '右' })
 
     fireEvent.pointerDown(right, { button: 0, pointerId: 1 })
@@ -234,6 +283,7 @@ describe('RemotePage', () => {
 
   it('types into Netflix from the remote keyboard', () => {
     vi.useFakeTimers()
+    socketMock.state = netflixState(null)
     render(
       <RemotePage
         token="paired-token-value-that-is-long-enough"
@@ -243,7 +293,7 @@ describe('RemotePage', () => {
       />,
     )
 
-    openPanel('輸入')
+
     fireEvent.change(screen.getByLabelText('遙控輸入'), { target: { value: 'user@example.com' } })
     vi.advanceTimersByTime(125)
     fireEvent.click(screen.getByRole('button', { name: '送出' }))
@@ -254,8 +304,9 @@ describe('RemotePage', () => {
   })
 
   it('masks generic text by default and exposes an explicit visibility toggle', () => {
+    socketMock.state = netflixState(null)
     render(remoteElement())
-    openPanel('輸入')
+
     const input = screen.getByLabelText('遙控輸入') as HTMLInputElement
 
     expect(input.type).toBe('password')
@@ -338,10 +389,11 @@ describe('RemotePage', () => {
   })
 
   it('uses a keyboard-specific description without connection-note overlap styles', () => {
+    socketMock.state = netflixState(null)
     render(remoteElement())
 
     const description = screen.getByText(
-      '先開啟 Netflix 或 YouTube，點選輸入欄，再從這裡輸入。',
+      '先點電視上的輸入欄，再從這裡打字送出。密碼不會被記住。',
     )
     expect(description.className).toBe('keyboard-description')
     expect(description.className).not.toContain('remote-connection-note')
@@ -525,7 +577,7 @@ describe('RemotePage', () => {
     view.rerender(remoteElement())
     expect(screen.queryByLabelText('Netflix 情境輸入')).toBeNull()
     expect(screen.getByLabelText('遙控輸入')).toBeTruthy()
-    openPanel('遙控')
+
     expect(screen.getByRole('button', { name: '確定' })).toBeTruthy()
 
     socketMock.state = netflixState({
@@ -539,77 +591,6 @@ describe('RemotePage', () => {
     expect((screen.getByLabelText('Netflix 情境輸入') as HTMLInputElement).value).toBe('')
   })
 
-  it('uses speech recognition when 語音 is clicked', async () => {
-    interface FakeSpeechRecognitionEvent {
-      results: { [index: number]: { [index: number]: { transcript: string } } }
-    }
-    interface FakeSpeechRecognition {
-      lang: string
-      interimResults: boolean
-      maxAlternatives: number
-      onresult: ((event: FakeSpeechRecognitionEvent) => void) | null
-      onerror: ((event: unknown) => void) | null
-      onend: (() => void) | null
-      start: () => void
-      stop: () => void
-    }
-    const instances: FakeSpeechRecognition[] = []
-    class MockSpeechRecognition implements FakeSpeechRecognition {
-      lang = ''
-      interimResults = false
-      maxAlternatives = 1
-      onresult: ((event: FakeSpeechRecognitionEvent) => void) | null = null
-      onerror: ((event: unknown) => void) | null = null
-      onend: (() => void) | null = null
-      start = vi.fn()
-      stop = vi.fn()
-      constructor() {
-        instances.push(this)
-      }
-    }
-    vi.stubGlobal('SpeechRecognition', MockSpeechRecognition)
-
-    render(
-      <RemotePage
-        token="paired-token-value-that-is-long-enough"
-        onPaired={vi.fn()}
-        onForget={vi.fn()}
-        onAuthenticationFailed={vi.fn()}
-      />,
-    )
-
-    openPanel('遙控')
-    const voiceBtn = screen.getByRole('button', { name: '語音' })
-    fireEvent.click(voiceBtn)
-    expect(screen.getByText('聆聽中…')).toBeTruthy()
-    expect(instances.length).toBe(1)
-    expect(instances[0].start).toHaveBeenCalledOnce()
-    expect(instances[0].lang).toBe('zh-TW')
-
-    instances[0].onresult?.({
-      results: [[{ transcript: '台灣新聞' }]],
-    })
-
-    expect(socketMock.sendSearch).toHaveBeenCalledWith('台灣新聞')
-    openPanel('首頁')
-    await waitFor(() => {
-      expect((screen.getByLabelText('搜片') as HTMLInputElement).value).toBe('台灣新聞')
-    })
-  })
-  it('disables 語音 button when speech recognition API is missing', () => {
-    render(
-      <RemotePage
-        token="paired-token-value-that-is-long-enough"
-        onPaired={vi.fn()}
-        onForget={vi.fn()}
-        onAuthenticationFailed={vi.fn()}
-      />,
-    )
-
-    openPanel('遙控')
-    expect((screen.getByRole('button', { name: '語音' }) as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByText('此瀏覽器不支援語音輸入。')).toBeTruthy()
-  })
 
   it('prefills a QR pairing code and removes it from the address bar after pairing', async () => {
     const onPaired = vi.fn()
@@ -655,45 +636,33 @@ describe('RemotePage', () => {
 
     expect((screen.getByLabelText('搜片') as HTMLInputElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: '搜片' }) as HTMLButtonElement).disabled).toBe(true)
-    openPanel('調整')
+
     expect((screen.getByRole('button', { name: '音量 +' }) as HTMLButtonElement).disabled).toBe(true)
-    openPanel('遙控')
-    expect((screen.getByRole('button', { name: '語音' }) as HTMLButtonElement).disabled).toBe(true)
+
+    expect(screen.queryByRole('button', { name: '語音' })).toBeNull()
     expect(screen.getByText('電視盒重新連線後，按鍵會自動解鎖。')).toBeTruthy()
   })
 
-  it('shows one clear control panel at a time', () => {
+  it('shows every control section together without tab switching', () => {
     render(remoteElement())
 
-    const homeTab = screen.getByRole('tab', { name: '首頁' })
-    const remoteTab = screen.getByRole('tab', { name: '遙控' })
-    const homePanel = document.getElementById('remote-panel-home')
-    const remotePanel = document.getElementById('remote-panel-remote')
-    if (!homePanel || !remotePanel) throw new Error('Expected all remote panels to be rendered.')
-    expect(homeTab.getAttribute('aria-selected')).toBe('true')
-    expect(homePanel.hasAttribute('hidden')).toBe(false)
-    expect(remotePanel.hasAttribute('hidden')).toBe(true)
-
-    fireEvent.click(remoteTab)
-
-    expect(remoteTab.getAttribute('aria-selected')).toBe('true')
-    expect(remoteTab.getAttribute('aria-controls')).toContain('remote-panel-playback')
-    expect(homePanel.hasAttribute('hidden')).toBe(true)
-    expect(remotePanel.hasAttribute('hidden')).toBe(false)
+    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    expect(screen.queryByRole('navigation', { name: '遙控器功能' })).toBeNull()
+    for (const panelId of [
+      'remote-panel-home',
+      'remote-panel-remote',
+      'remote-panel-adjust',
+      'remote-panel-channel',
+      'remote-panel-search',
+    ]) {
+      const panel = document.getElementById(panelId)
+      if (!panel) throw new Error(`Expected ${panelId} to be rendered.`)
+      expect(panel.hasAttribute('hidden')).toBe(false)
+    }
+    expect(screen.getByRole('button', { name: 'YouTube' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '確定' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'YouTube' })).toBeNull()
-  })
-
-  it('supports left and right keyboard navigation between tabs', () => {
-    render(remoteElement())
-    const homeTab = screen.getByRole('tab', { name: '首頁' })
-    const remoteTab = screen.getByRole('tab', { name: '遙控' })
-
-    homeTab.focus()
-    fireEvent.keyDown(homeTab, { key: 'ArrowRight' })
-
-    expect(remoteTab.getAttribute('aria-selected')).toBe('true')
-    expect(document.activeElement).toBe(remoteTab)
+    expect(screen.getByRole('button', { name: '亮度 +' })).toBeTruthy()
+    expect(screen.getByLabelText('搜片')).toBeTruthy()
   })
 
   it('shows a friendly current-app summary and stages updates with the paired token', async () => {
@@ -703,17 +672,21 @@ describe('RemotePage', () => {
       focused_tile: 'youtube',
       update_available: 'v0.3.0',
     }
-    const fetchUpdate = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          success: true,
-          message: '更新已下載。',
-          version: 'v0.3.0',
-          restart_required: true,
-        }),
-        { status: 200 },
-      ),
-    )
+    const fetchUpdate = vi.fn().mockImplementation((url: string) => {
+      const payload = url === '/api/youtube/quality'
+        ? {
+            video_id: 'video-alpha',
+            current: 'hd1080',
+            available: ['tiny', 'hd720', 'hd1080'],
+          }
+        : {
+            success: true,
+            message: '更新已下載。',
+            version: 'v0.3.0',
+            restart_required: true,
+          }
+      return Promise.resolve(new Response(JSON.stringify(payload), { status: 200 }))
+    })
     vi.stubGlobal('fetch', fetchUpdate)
     render(remoteElement())
 
@@ -757,8 +730,9 @@ describe('RemotePage', () => {
 
   it('coalesces rapid generic live text changes', () => {
     vi.useFakeTimers()
+    socketMock.state = netflixState(null)
     render(remoteElement())
-    openPanel('輸入')
+
     const input = screen.getByLabelText('遙控輸入')
     fireEvent.change(input, { target: { value: 'a' } })
     fireEvent.change(input, { target: { value: 'ab' } })
@@ -771,8 +745,9 @@ describe('RemotePage', () => {
 
   it('cancels a pending generic live send when submitted', () => {
     vi.useFakeTimers()
+    socketMock.state = netflixState(null)
     render(remoteElement())
-    openPanel('輸入')
+
     fireEvent.change(screen.getByLabelText('遙控輸入'), { target: { value: 'final' } })
     fireEvent.click(screen.getByRole('button', { name: '送出' }))
     expect(socketMock.sendText).toHaveBeenCalledOnce()
@@ -797,8 +772,9 @@ describe('RemotePage', () => {
 
   it('cancels pending live text when unmounted', () => {
     vi.useFakeTimers()
+    socketMock.state = netflixState(null)
     const view = render(remoteElement())
-    openPanel('輸入')
+
     fireEvent.change(screen.getByLabelText('遙控輸入'), { target: { value: 'stale' } })
     view.unmount()
     vi.advanceTimersByTime(125)

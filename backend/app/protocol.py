@@ -198,6 +198,8 @@ class StateMessage(WireModel):
     brightness: int = Field(default=100, ge=10, le=100)
     channel_number: int | None = None
     channel_name: str | None = Field(default=None, max_length=120)
+    previous_channel_name: str | None = Field(default=None, max_length=120)
+    next_channel_name: str | None = Field(default=None, max_length=120)
     status_message: str | None = Field(default=None, max_length=256)
     error_message: str | None = Field(default=None, max_length=256)
     netflix_context: NetflixContext | None = None

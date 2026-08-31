@@ -979,8 +979,7 @@
   }
 
   const closeTopOverlay = () => {
-    const overlay = visibleOverlays().at(-1)
-    if (!overlay) return false
+    const overlays = visibleOverlays()
     const closeSelectors = [
       '[data-uia*="close" i]',
       'button[aria-label*="close" i]',
@@ -988,13 +987,29 @@
       '[role="button"][aria-label*="close" i]',
       '[role="button"][aria-label*="關閉"]',
     ].join(',')
-    const close = [...overlay.querySelectorAll(closeSelectors)].find(
-      (element) => element instanceof HTMLElement && visible(element),
+    for (let index = overlays.length - 1; index >= 0; index -= 1) {
+      const overlay = overlays[index]
+      const candidates = [
+        ...(overlay.matches(closeSelectors) ? [overlay] : []),
+        ...overlay.querySelectorAll(closeSelectors),
+      ]
+      const close = candidates.find(
+        (element) => element instanceof HTMLElement && visible(element),
+      )
+      if (close instanceof HTMLElement) {
+        close.click()
+        return close
+      }
+    }
+    const dialog = overlays.find(
+      (overlay) =>
+        overlay instanceof HTMLDialogElement && typeof overlay.close === 'function',
     )
-    if (close instanceof HTMLElement) close.click()
-    else if (overlay instanceof HTMLDialogElement && typeof overlay.close === 'function') overlay.close()
-    else overlay.click()
-    return true
+    if (dialog instanceof HTMLDialogElement) {
+      dialog.close()
+      return dialog
+    }
+    return null
   }
 
   const traditionalChinese = (value) => {
@@ -1146,10 +1161,7 @@
             '.touchable.player-back-to-browsing',
           ].join(',')),
         ].find(
-          (element) =>
-            element instanceof HTMLElement &&
-            element.isConnected &&
-            !isDisabled(element),
+          (element) => element instanceof HTMLElement && visible(element),
         )
         if (playerBack instanceof HTMLElement) {
           playerBack.click()
@@ -1187,13 +1199,16 @@
             : success('history', {}, netflixContext())
         }
       }
-      const topOverlay = visibleOverlays().at(-1)
-      if (topOverlay && closeTopOverlay()) {
+      const closedOverlay = closeTopOverlay()
+      if (closedOverlay) {
         const context = await settle(
-          () => (!topOverlay.isConnected || !visible(topOverlay) ? netflixContext() : null),
+          () =>
+            !closedOverlay.isConnected || !visible(closedOverlay)
+              ? netflixContext()
+              : null,
           1200,
         )
-        return context ? success('closed', {}, context) : error('netflix_back_unavailable')
+        if (context) return success('closed', {}, context)
       }
       const closeDetailBtn = [
         ...document.querySelectorAll([

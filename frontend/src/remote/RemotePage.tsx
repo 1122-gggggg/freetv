@@ -1,6 +1,5 @@
 import {
   type FormEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement,
   useEffect,
   useRef,
@@ -11,45 +10,9 @@ import { useControllerSocket } from '../api/useControllerSocket'
 import { CommandButton } from '../components/CommandButton'
 import type { Command, ControllerState, NetflixInputKind } from '../types/protocol'
 import { rememberRemoteToken } from './tokenStorage'
+import { YouTubeQualityPanel } from './YouTubeQualityPanel'
 import './remote.css'
 
-interface SpeechRecognitionResultItem {
-  transcript: string
-}
-
-interface SpeechRecognitionResultList {
-  [index: number]: SpeechRecognitionResultItem
-  length: number
-}
-
-interface SpeechRecognitionResultEvent {
-  results: {
-    [index: number]: SpeechRecognitionResultList
-    length: number
-  }
-}
-
-interface SpeechRecognitionInstance {
-  lang: string
-  interimResults: boolean
-  maxAlternatives: number
-  onresult: ((event: SpeechRecognitionResultEvent) => void) | null
-  onerror: ((event: unknown) => void) | null
-  onend: (() => void) | null
-  start: () => void
-  stop: () => void
-}
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance
-
-function getSpeechRecognition(): SpeechRecognitionConstructor | null {
-  if (typeof window === 'undefined') return null
-  const win = window as unknown as {
-    SpeechRecognition?: SpeechRecognitionConstructor
-    webkitSpeechRecognition?: SpeechRecognitionConstructor
-  }
-  return win.SpeechRecognition || win.webkitSpeechRecognition || null
-}
 
 interface PairResponse {
   token: string
@@ -68,22 +31,7 @@ interface RemoteControlProps {
   onAuthenticationFailed: () => void
 }
 
-const REMOTE_PANELS = [
-  ['home', '首頁'],
-  ['remote', '遙控'],
-  ['adjust', '調整'],
-  ['input', '輸入'],
-] as const
 
-type RemotePanel = (typeof REMOTE_PANELS)[number][0]
-
-const PANEL_CONTROLS: Record<RemotePanel, string> = {
-  home: 'remote-panel-home remote-panel-search',
-  remote:
-    'remote-panel-remote remote-panel-navigation remote-panel-playback remote-panel-channel',
-  adjust: 'remote-panel-adjust',
-  input: 'remote-panel-input',
-}
 
 function activeAppLabel(app: ControllerState['active_app'] | undefined): string {
   const labels: Record<ControllerState['active_app'], string> = {
@@ -236,13 +184,6 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   const [updateStatus, setUpdateStatus] = useState<string | null>(null)
   const [updating, setUpdating] = useState(false)
   const [stagedUpdateVersion, setStagedUpdateVersion] = useState<string | null>(null)
-  const [activePanel, setActivePanel] = useState<RemotePanel>(() =>
-    state?.active_app === 'netflix' && state.netflix_context?.stage !== 'unknown'
-      ? 'input'
-      : 'home',
-  )
-  const [listening, setListening] = useState(false)
-  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const liveTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const controlsDisabled = status !== 'connected'
   const canTypeIntoApp =
@@ -265,12 +206,19 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   ])
   const [previousNetflixSemanticKey, setPreviousNetflixSemanticKey] =
     useState(netflixSemanticKey)
+  const channelControlsVisible =
+    state?.active_app === undefined ||
+    state.active_app === 'news' ||
+    state.active_app === 'live_tv'
+  const fallbackKeyboardVisible =
+    state?.active_app === 'netflix' &&
+    (!netflixContext || netflixContext.stage === 'unknown')
+  const videoSearchVisible = state?.active_app !== 'netflix'
   if (previousNetflixSemanticKey !== netflixSemanticKey) {
     setPreviousNetflixSemanticKey(netflixSemanticKey)
     setNetflixTyped('')
     setPendingNetflixRequest(null)
     setNetflixLocalSendFailed(false)
-    if (netflixContext && netflixContext.stage !== 'unknown') setActivePanel('input')
   }
   const netflixAcknowledgementFailed =
     pendingNetflixRequest !== null &&
@@ -302,8 +250,6 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
 
 
 
-  const SpeechRecognitionAPI = getSpeechRecognition()
-  const speechSupported = SpeechRecognitionAPI !== null
 
   useEffect(() => {
     if (lastError?.code === 'authentication_failed') onAuthenticationFailed()
@@ -311,50 +257,11 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
 
 
 
-  useEffect(() => () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop()
-      recognitionRef.current = null
-    }
-  }, [])
 
   const command = (value: Command) => {
     if (!sendCommand(value)) navigator.vibrate?.([16, 35, 16])
   }
 
-  const handleVoice = () => {
-    if (controlsDisabled || !SpeechRecognitionAPI) return
-    try {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop()
-        recognitionRef.current = null
-      }
-      const recognition = new SpeechRecognitionAPI()
-      recognitionRef.current = recognition
-      recognition.lang = 'zh-TW'
-      recognition.interimResults = false
-      recognition.maxAlternatives = 1
-      recognition.onresult = (event: SpeechRecognitionResultEvent) => {
-        const transcript = event.results?.[0]?.[0]?.transcript?.trim()
-        if (transcript) {
-          setQuery(transcript)
-          sendSearch(transcript)
-        }
-        setListening(false)
-      }
-      recognition.onerror = () => {
-        setListening(false)
-      }
-      recognition.onend = () => {
-        setListening(false)
-      }
-      setListening(true)
-      recognition.start()
-    } catch {
-      setListening(false)
-    }
-
-  }
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -450,23 +357,6 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
     }
   }
 
-  const navigatePanels = (event: ReactKeyboardEvent<HTMLButtonElement>, panel: RemotePanel) => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-    event.preventDefault()
-    const current = REMOTE_PANELS.findIndex(([id]) => id === panel)
-    const next =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? REMOTE_PANELS.length - 1
-          : (current + (event.key === 'ArrowRight' ? 1 : -1) + REMOTE_PANELS.length) %
-            REMOTE_PANELS.length
-    setActivePanel(REMOTE_PANELS[next][0])
-    const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
-      '[role="tab"]',
-    )
-    tabs?.[next]?.focus()
-  }
 
   return (
     <main className="remote-shell" aria-label="電視遙控器">
@@ -487,23 +377,6 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         </span>
         <span>目前：<strong>{activeAppLabel(state?.active_app)}</strong></span>
       </div>
-      <nav className="remote-tabs" role="tablist" aria-label="遙控器功能">
-        {REMOTE_PANELS.map(([id, label]) => (
-          <button
-            key={id}
-            id={`remote-tab-${id}`}
-            role="tab"
-            aria-selected={activePanel === id}
-            aria-controls={PANEL_CONTROLS[id]}
-            tabIndex={activePanel === id ? 0 : -1}
-            type="button"
-            onClick={() => setActivePanel(id)}
-            onKeyDown={(event) => navigatePanels(event, id)}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
 
       {state?.update_available ? <section className="remote-update-card" aria-labelledby="remote-update-title">
         <div><strong id="remote-update-title">有新的 FreeTV 更新</strong><span>版本 {state.update_available}</span></div>
@@ -528,8 +401,28 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
           電視盒重新連線後，按鍵會自動解鎖。
         </p>
       ) : null}
+      {videoSearchVisible ? (
+        <section id="remote-panel-search" className="search-card" aria-labelledby="search-title">
+          <p className="eyebrow">影片搜尋</p>
+          <h2 id="search-title">搜尋影片</h2>
+          <form onSubmit={submitSearch}>
+            <input
+              aria-label="搜片"
+              placeholder="輸入片名或關鍵字…"
+              disabled={controlsDisabled}
+              maxLength={128}
+              value={query}
+              onChange={(event) => setQuery(event.target.value.slice(0, 128))}
+            />
+            <button className="remote-button search-submit" disabled={controlsDisabled || query.trim().length === 0} type="submit">
+              搜片
+            </button>
+          </form>
+        </section>
+      ) : null}
 
-      <section id="remote-panel-home" role="tabpanel" aria-labelledby="remote-tab-home" className="remote-grid three-column apps-row" hidden={activePanel !== 'home'}>
+      <h2 className="remote-section-title">首頁</h2>
+      <section id="remote-panel-home" aria-label="首頁應用程式" className="remote-grid three-column apps-row">
         <CommandButton command="OPEN_YOUTUBE" label="YouTube" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="OPEN_NETFLIX" label="Netflix" onCommand={command} disabled={controlsDisabled} />
         <CommandButton command="OPEN_NEWS" label="新聞" onCommand={command} disabled={controlsDisabled} />
@@ -538,9 +431,6 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       {netflixContext && netflixContext.stage !== 'unknown' ? (
         <section
           id="remote-panel-input"
-          role="tabpanel"
-          aria-labelledby="remote-tab-input"
-          hidden={activePanel !== 'input'}
           className={`netflix-context-card ${netflixContext.has_error ? 'is-error' : ''}`}
         >
           <p className="eyebrow">Netflix 電視情境</p>
@@ -613,17 +503,21 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         </section>
       ) : null}
 
-      {/* Direction Pad */}
-      <section id="remote-panel-remote" role="tabpanel" aria-labelledby="remote-tab-remote" className="remote-direction-pad" hidden={activePanel !== 'remote'}>
+      <h2 className="remote-section-title">遙控</h2>
+      <section id="remote-panel-remote" aria-label="方向鍵" className="remote-direction-pad">
+        <CommandButton command="BACK" label="返回" onCommand={command} className="direction-back" disabled={controlsDisabled} />
         <CommandButton command="NAV_UP" label="上" onCommand={command} className="direction-up" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
+        <CommandButton command="PLAY_PAUSE" label="播放／暫停" onCommand={command} className="direction-play" disabled={controlsDisabled} />
         <CommandButton command="NAV_LEFT" label="左" onCommand={command} className="direction-left" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
         <CommandButton command="OK" label="確定" onCommand={command} className="direction-ok" disabled={controlsDisabled} />
         <CommandButton command="NAV_RIGHT" label="右" onCommand={command} className="direction-right" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
+        <CommandButton command="SEEK_BACKWARD_5" label="倒退 5 秒" onCommand={command} className="direction-rewind" disabled={controlsDisabled} />
         <CommandButton command="NAV_DOWN" label="下" onCommand={command} className="direction-down" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
+        <CommandButton command="SEEK_FORWARD_5" label="快轉 5 秒" onCommand={command} className="direction-forward" disabled={controlsDisabled} />
       </section>
 
-      {/* 3 Vertical Draggable Slider Bars */}
-      <section id="remote-panel-adjust" role="tabpanel" aria-labelledby="remote-tab-adjust" className="remote-sliders-row" hidden={activePanel !== 'adjust'}>
+      <h2 className="remote-section-title">調整</h2>
+      <section id="remote-panel-adjust" aria-label="音量、倍速與亮度" className="remote-sliders-row">
         {/* Volume Slider */}
         <div className="slider-card">
           <p className="slider-header">音量</p>
@@ -657,44 +551,43 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         </div>
       </section>
 
-      {/* Navigation Row */}
-      <section id="remote-panel-navigation" className="remote-grid four-column nav-row" aria-label="導覽列" hidden={activePanel !== 'remote'}>
-        <CommandButton command="BACK" label="返回" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="HOME" label="主畫面" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="PLAY_PAUSE" label="播放／暫停" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="FULLSCREEN" label="全螢幕" onCommand={command} disabled={controlsDisabled} />
-      </section>
+      {state?.active_app === 'youtube' ? (
+        <YouTubeQualityPanel
+          token={token}
+          onAuthenticationFailed={onAuthenticationFailed}
+        />
+      ) : null}
 
-      {/* Playback Actions & Features Row */}
-      <section id="remote-panel-playback" className="remote-grid four-column feature-row" aria-label="主要按鍵" hidden={activePanel !== 'remote'}>
-        <CommandButton command="SEEK_BACKWARD_5" label="倒退 5 秒" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="SEEK_FORWARD_5" label="快轉 5 秒" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="QUALITY" label="畫質" onCommand={command} disabled={controlsDisabled} />
-        <CommandButton command="SUBTITLES" label="字幕" onCommand={command} disabled={controlsDisabled} />
-      </section>
 
-      {/* Channel Switchers & Voice Row */}
-      <section id="remote-panel-channel" className="remote-grid three-column channel-voice-row" aria-label="頻道切換與語音" hidden={activePanel !== 'remote'}>
-        <CommandButton command="CHANNEL_DOWN" label="頻道 −" onCommand={command} disabled={controlsDisabled} repeatOnHold />
-        <button
-          className={`remote-button voice-button ${listening ? 'is-listening' : ''}`}
-          disabled={controlsDisabled || !speechSupported}
-          type="button"
-          onClick={handleVoice}
-          aria-describedby={!speechSupported ? 'voice-support-note' : undefined}
+      {channelControlsVisible ? (
+        <section
+          id="remote-panel-channel"
+          className="remote-grid two-column channel-row"
+          aria-label="頻道切換"
         >
-          {listening ? '聆聽中…' : '語音'}
-        </button>
-        <CommandButton command="CHANNEL_UP" label="頻道 +" onCommand={command} disabled={controlsDisabled} repeatOnHold />
-        {!speechSupported ? (
-          <p id="voice-support-note" className="remote-hint">
-            此瀏覽器不支援語音輸入。
-          </p>
-        ) : null}
-      </section>
+          <CommandButton
+            command="CHANNEL_DOWN"
+            label={state?.active_app === 'news' && state.previous_channel_name
+              ? `上一台：${state.previous_channel_name}`
+              : '頻道 −'}
+            onCommand={command}
+            disabled={controlsDisabled}
+            repeatOnHold
+          />
+          <CommandButton
+            command="CHANNEL_UP"
+            label={state?.active_app === 'news' && state.next_channel_name
+              ? `下一台：${state.next_channel_name}`
+              : '頻道 +'}
+            onCommand={command}
+            disabled={controlsDisabled}
+            repeatOnHold
+          />
+        </section>
+      ) : null}
 
-      {!netflixContext || netflixContext.stage === 'unknown' ? (
-      <section id="remote-panel-input" role="tabpanel" aria-labelledby="remote-tab-input" className="search-card" hidden={activePanel !== 'input'}>
+      {fallbackKeyboardVisible ? (
+      <section id="remote-panel-input" className="search-card">
         <p className="eyebrow">鍵盤</p>
         <h2 id="keyboard-title">輸入帳號或密碼</h2>
         <p className="keyboard-description">
@@ -740,23 +633,6 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       </section>
       ) : null}
 
-      <section id="remote-panel-search" className="search-card" aria-labelledby="search-title" hidden={activePanel !== 'home'}>
-        <p className="eyebrow">影片搜尋</p>
-        <h2 id="search-title">搜尋影片</h2>
-        <form onSubmit={submitSearch}>
-          <input
-            aria-label="搜片"
-            placeholder="輸入片名或關鍵字…"
-            disabled={controlsDisabled}
-            maxLength={128}
-            value={query}
-            onChange={(event) => setQuery(event.target.value.slice(0, 128))}
-          />
-          <button className="remote-button search-submit" disabled={controlsDisabled || query.trim().length === 0} type="submit">
-            搜片
-          </button>
-        </form>
-      </section>
 
       <footer className="remote-feedback" aria-live="polite">
         {forgetError ?? state?.error_message ?? state?.status_message ?? lastError?.message ?? lastAcknowledgement?.message ?? (lastAcknowledgement?.success ? '指令已送出。' : '就緒。')}

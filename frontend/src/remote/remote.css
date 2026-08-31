@@ -60,42 +60,17 @@
   gap: 0.4rem;
 }
 
-.remote-tabs {
-  position: sticky;
-  top: max(0.35rem, env(safe-area-inset-top));
-  z-index: 10;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0.25rem;
-  margin: 0.75rem 0 1rem;
-  padding: 0.3rem;
-  border: 1px solid var(--remote-border);
-  border-radius: 1rem;
-  background: rgba(9, 14, 24, 0.94);
-  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(14px);
-}
-
-.remote-tabs button {
-  min-height: 3rem;
-  border: 0;
-  border-radius: 0.75rem;
-  background: transparent;
-  color: var(--remote-muted);
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.remote-tabs button[aria-selected='true'] {
-  background: #f2c45e;
-  color: #111827;
-}
-
-.remote-tabs button:focus-visible,
 .remote-update-card button:focus-visible,
 .remote-shell .forget-button:focus-visible {
   outline: 3px solid #f2c45e;
   outline-offset: 2px;
+}
+
+.remote-section-title {
+  margin: 1.35rem 0.125rem 0.25rem;
+  color: #f8fafc;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
 }
 
 .remote-shell [hidden] {
@@ -170,10 +145,6 @@
   font-size: 1rem;
 }
 
-.remote-shell .nav-row,
-.remote-shell .feature-row {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
 
 .remote-shell .remote-direction-pad {
   width: min(100%, 21rem);
@@ -258,6 +229,51 @@
   background: #0e1522;
   color: #f8fafc;
   font-weight: 850;
+}
+
+.youtube-quality-card {
+  margin-block: 0.75rem;
+  padding: 1rem;
+  border: 1px solid rgba(242, 196, 94, 0.48);
+  border-radius: 0.9rem;
+  background: linear-gradient(145deg, rgba(242, 196, 94, 0.12), var(--remote-card));
+}
+
+.youtube-quality-heading,
+.youtube-quality-scale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.youtube-quality-heading h2 {
+  margin: 0.15rem 0 0;
+  font-size: 1.15rem;
+}
+
+.youtube-quality-heading strong {
+  color: #f2c45e;
+  font-size: 1.25rem;
+}
+
+.youtube-quality-card input[type='range'] {
+  width: 100%;
+  min-height: 2.75rem;
+  margin: 0.75rem 0 0;
+  accent-color: #f2c45e;
+  cursor: ew-resize;
+}
+
+.youtube-quality-scale,
+.youtube-quality-status {
+  color: var(--remote-muted);
+  font-size: 0.8rem;
+}
+
+.youtube-quality-status {
+  min-height: 1.2rem;
+  margin: 0.65rem 0 0;
 }
 
 .remote-shell .search-card,

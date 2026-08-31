@@ -194,17 +194,21 @@ button:focus-visible, input:focus-visible {
 .remote-direction-pad {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  grid-template-areas: '. up .' 'left ok right' '. down .';
+  grid-template-areas: 'back up play' 'left ok right' 'rewind down forward';
   gap: 0.7rem;
   margin: 1.5rem auto;
   width: min(100%, 24rem);
 }
 
+.direction-back { grid-area: back; }
 .direction-up { grid-area: up; }
+.direction-play { grid-area: play; }
 .direction-left { grid-area: left; }
 .direction-ok { grid-area: ok; color: #1a1b20; border-color: #f7d488; background: #f7d488; }
 .direction-right { grid-area: right; }
+.direction-rewind { grid-area: rewind; }
 .direction-down { grid-area: down; }
+.direction-forward { grid-area: forward; }
 
 .remote-grid { display: grid; gap: 0.6rem; margin-top: 0.75rem; }
 .two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -212,9 +216,6 @@ button:focus-visible, input:focus-visible {
 .four-column { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .apps-row { margin-top: 0.75rem; }
 .apps-row .remote-button { min-height: 3.6rem; background: #1e293b; border-color: #334155; font-weight: 700; border-radius: 0.9rem; }
-.nav-row .remote-button { min-height: 3.2rem; font-size: 0.95rem; font-weight: 700; border-radius: 0.9rem; }
-.feature-row .remote-button { min-height: 3.2rem; font-size: 0.95rem; font-weight: 700; border-radius: 0.9rem; }
-.channel-voice-row { margin-top: 0.75rem; }
 
 .remote-sliders-row {
   display: grid;
@@ -305,21 +306,6 @@ button:focus-visible, input:focus-visible {
   border-color: #f7d488;
 }
 
-.remote-voice-row { margin-top: 0.75rem; display: flex; }
-.voice-button {
-  width: 100%;
-  min-height: 3.4rem;
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: #f8fafc;
-  background: #1e3a5f;
-  border-color: #3b82f6;
-  border-radius: 0.9rem;
-}
-.voice-button.is-listening {
-  background: #7c2d12;
-  border-color: #f97316;
-}
 .search-card {
   display: flex;
   flex-direction: column;

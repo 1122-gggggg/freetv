@@ -45,6 +45,7 @@ export class ControllerSocket {
   private reconnectTimer?: number
   private reconnectAttempt = 0
   private closed = false
+  private readonly pendingCommands = new Map<string, Command>()
   private readonly stateListeners = new Set<StateListener>()
   private readonly statusListeners = new Set<StatusListener>()
   private readonly acknowledgementListeners = new Set<AcknowledgementListener>()
@@ -94,6 +95,7 @@ export class ControllerSocket {
     socket.addEventListener('close', (event) => {
       if (socket !== this.socket) return
       this.socket = undefined
+      this.pendingCommands.clear()
       if (this.closed) return
       if (NON_RETRYABLE_CLOSE_CODES.has(event.code)) {
         this.setStatus('error')
@@ -107,12 +109,22 @@ export class ControllerSocket {
   close(): void {
     this.closed = true
     if (this.reconnectTimer !== undefined) window.clearTimeout(this.reconnectTimer)
+    this.pendingCommands.clear()
     this.socket?.close()
     this.socket = undefined
   }
 
   sendCommand(command: Command): string | null {
-    return this.sendRaw({ version: PROTOCOL_VERSION, type: 'command', request_id: this.requestId(), command })
+    if (!this.canSendCommand(command)) return null
+    const requestId = this.requestId()
+    const sentRequestId = this.sendRaw({
+      version: PROTOCOL_VERSION,
+      type: 'command',
+      request_id: requestId,
+      command,
+    })
+    if (sentRequestId) this.pendingCommands.set(sentRequestId, command)
+    return sentRequestId
   }
 
   sendPointer(action: PointerAction, dx = 0, dy = 0): string | null {
@@ -168,6 +180,14 @@ export class ControllerSocket {
     return requestId
   }
 
+  private canSendCommand(command: Command): boolean {
+    if (command !== 'HOME' && command !== 'BACK') return this.pendingCommands.size === 0
+    for (const pending of this.pendingCommands.values()) {
+      if (pending === 'HOME' || pending === command) return false
+    }
+    return true
+  }
+
   private handleMessage(raw: unknown): void {
     if (typeof raw !== 'string') return
     let message: unknown
@@ -183,6 +203,7 @@ export class ControllerSocket {
       return
     }
     if (message.type === 'ack') {
+      this.pendingCommands.delete(message.request_id)
       if (message.request_id === this.authenticationRequestId) {
         this.authenticationRequestId = undefined
         if (message.success) this.reconnectAttempt = 0

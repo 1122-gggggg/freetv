@@ -631,12 +631,18 @@ def test_non_idempotent_action_ack_loss_is_not_retried(
         asyncio.run(controller.execute(command))
 
     assert caught.value.code == "netflix_controller_unavailable"
-    assert page_calls == [9222]
-    assert len(connect.calls) == 1
+    expected_calls = 2 if command is Command.OK else 1
+    assert page_calls == [9222] * expected_calls
+    assert len(connect.calls) == expected_calls
+    expressions = runtime_expressions(first) + runtime_expressions(second)
     assert len(runtime_expressions(first)) == 1
-    assert runtime_expressions(second) == []
+    if command is Command.OK:
+        assert sum('"READ_CONTEXT"' in expression for expression in expressions) == 1
+        assert second.closed
+    else:
+        assert runtime_expressions(second) == []
+        assert not second.closed
     assert first.closed
-    assert not second.closed
 
 
 def test_injection_failure_retries_once_then_returns_controller_unavailable(
@@ -979,12 +985,18 @@ def test_non_idempotent_action_schema_failure_is_not_retried(
         asyncio.run(controller.execute(command))
 
     assert caught.value.code == "netflix_controller_unavailable"
-    assert page_calls == [9222]
-    assert len(connect.calls) == 1
+    expected_calls = 2 if command is Command.OK else 1
+    assert page_calls == [9222] * expected_calls
+    assert len(connect.calls) == expected_calls
+    expressions = runtime_expressions(first) + runtime_expressions(second)
     assert len(runtime_expressions(first)) == 1
-    assert runtime_expressions(second) == []
+    if command is Command.OK:
+        assert sum('"READ_CONTEXT"' in expression for expression in expressions) == 1
+        assert second.closed
+    else:
+        assert runtime_expressions(second) == []
+        assert not second.closed
     assert first.closed
-    assert not second.closed
 
 
 def test_execute_returns_a_strict_safe_context(
@@ -1190,16 +1202,19 @@ def test_ok_direct_play_unknown_outcome_is_not_retried(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     controller = make_controller(tmp_path)
-    socket = FakeSocket(drop_run_ack=True)
-    connect, _ = install_transport(monkeypatch, controller, [socket])
+    first = FakeSocket(drop_run_ack=True)
+    recovery = FakeSocket(runtime_result=PLAYING_WATCH_RESULT)
+    connect, _ = install_transport(monkeypatch, controller, [first, recovery])
 
-    with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.execute(Command.OK))
+    context = asyncio.run(controller.execute(Command.OK))
 
-    assert caught.value.code == "netflix_controller_unavailable"
-    assert len(connect.calls) == 1
-    assert len(runtime_expressions(socket)) == 1
-    assert socket.closed
+    assert context.stage is NetflixStage.WATCH
+    assert len(connect.calls) == 2
+    expressions = runtime_expressions(first) + runtime_expressions(recovery)
+    assert sum('"OK"' in expression for expression in expressions) == 1
+    assert sum('"READ_CONTEXT"' in expression for expression in expressions) == 1
+    assert first.closed
+    assert recovery.closed
 
 
 def test_submit_after_insert_skips_revalidation_and_never_repeats_insert(
@@ -1370,7 +1385,7 @@ def test_ok_watch_sends_one_fullscreen_evaluate_in_the_same_transaction(
     assert socket.closed
 
 
-def test_ok_fullscreen_reject_does_not_replay_play(
+def test_ok_fullscreen_reject_does_not_fail_completed_playback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     controller = make_controller(tmp_path)
@@ -1386,10 +1401,12 @@ def test_ok_fullscreen_reject_does_not_replay_play(
     )
     connect, page_calls = install_transport(monkeypatch, controller, [socket, FakeSocket()])
 
-    with pytest.raises(CommandExecutionError) as caught:
-        asyncio.run(controller.execute(Command.OK))
+    context = asyncio.run(controller.execute(Command.OK))
 
-    assert caught.value.code == "netflix_fullscreen_unavailable"
+    assert context == NetflixContext(
+        stage=NetflixStage.WATCH,
+        input_kind=NetflixInputKind.NONE,
+    )
     runs = runtime_expressions(socket)
     assert len(runs) == 2
     assert '"OK"' in runs[0]
@@ -1398,3 +1415,28 @@ def test_ok_fullscreen_reject_does_not_replay_play(
     assert page_calls == [9222]
     assert len(connect.calls) == 1
     assert socket.closed
+
+
+def test_ok_fullscreen_ack_loss_does_not_fail_completed_playback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    controller = make_controller(tmp_path)
+    socket = FakeSocket(
+        runtime_result=PLAYING_WATCH_RESULT,
+        drop_run_ack_at=2,
+    )
+    connect, page_calls = install_transport(monkeypatch, controller, [socket, FakeSocket()])
+
+    context = asyncio.run(controller.execute(Command.OK))
+
+    assert context == NetflixContext(
+        stage=NetflixStage.WATCH,
+        input_kind=NetflixInputKind.NONE,
+    )
+    runs = runtime_expressions(socket)
+    assert len(runs) == 2
+    assert '"OK"' in runs[0]
+    assert '"FULLSCREEN"' in runs[1]
+    assert sum('"OK"' in expression for expression in runs) == 1
+    assert page_calls == [9222]
+    assert len(connect.calls) == 1

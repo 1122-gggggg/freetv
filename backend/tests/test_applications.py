@@ -201,6 +201,15 @@ class FakeYoutubeFullscreen:
     rate_calls: list[tuple[int, int]] = field(default_factory=list)
     seek_calls: list[tuple[int, int]] = field(default_factory=list)
     next_rate: float = 1.25
+    quality_calls: list[int] = field(default_factory=list)
+    set_quality_calls: list[tuple[int, str]] = field(default_factory=list)
+    quality: dict[str, object] = field(
+        default_factory=lambda: {
+            "video_id": "alpha",
+            "current": "hd1080",
+            "available": ["tiny", "hd720", "hd1080"],
+        }
+    )
 
     async def start(self, port: int) -> None:
         self.events.append(f"start:{port}")
@@ -223,6 +232,14 @@ class FakeYoutubeFullscreen:
     async def seek(self, port: int, direction: int) -> None:
         self.seek_calls.append((port, direction))
 
+
+    async def quality_info(self, port: int) -> dict[str, object]:
+        self.quality_calls.append(port)
+        return self.quality
+
+    async def set_quality(self, port: int, quality: str) -> dict[str, object]:
+        self.set_quality_calls.append((port, quality))
+        return {**self.quality, "current": quality}
 
 def _ready_adblock(tmp_path: Path) -> Path:
     adblock = tmp_path / "adblock"
@@ -879,6 +896,24 @@ def test_seek_routes_to_youtube_and_netflix() -> None:
         await manager.seek(-1)
         assert netflix.actions == [Command.SEEK_BACKWARD_5]
         assert input_controller.commands == []
+        await manager.shutdown()
+
+    asyncio.run(scenario())
+
+def test_youtube_quality_detection_and_selection_use_active_video() -> None:
+    async def scenario() -> None:
+        fullscreen = FakeYoutubeFullscreen()
+        manager, _, _, _ = make_manager(youtube_fullscreen=fullscreen, debug_port=9222)
+
+        await manager.open(ActiveApp.YOUTUBE)
+        detected = await manager.youtube_quality_info()
+        selected = await manager.set_youtube_quality("hd720")
+
+        assert detected["video_id"] == "alpha"
+        assert detected["available"] == ["tiny", "hd720", "hd1080"]
+        assert selected["current"] == "hd720"
+        assert fullscreen.quality_calls == [9222]
+        assert fullscreen.set_quality_calls == [(9222, "hd720")]
         await manager.shutdown()
 
     asyncio.run(scenario())

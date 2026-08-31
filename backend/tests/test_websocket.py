@@ -43,6 +43,14 @@ class FakeApplications:
     searches: list[str] = field(default_factory=list)
     next_context: NetflixContext | None = None
     lifecycle_callback: Callable[[ActiveApp], Awaitable[None]] | None = None
+    quality_selections: list[str] = field(default_factory=list)
+    quality: dict[str, object] = field(
+        default_factory=lambda: {
+            "video_id": "alpha",
+            "current": "hd1080",
+            "available": ["tiny", "hd720", "hd1080"],
+        }
+    )
 
     async def open(self, app: ActiveApp) -> NetflixContext | None:
         self.opened.append(app)
@@ -71,6 +79,14 @@ class FakeApplications:
 
     async def type_text(self, text: str, submit: bool = False) -> NetflixContext | None:
         return self.next_context
+
+    async def youtube_quality_info(self) -> dict[str, object]:
+        return self.quality
+
+    async def set_youtube_quality(self, quality: str) -> dict[str, object]:
+        self.quality_selections.append(quality)
+        self.quality = {**self.quality, "current": quality}
+        return self.quality
 
     def require_input_target(self, app: ActiveApp) -> None:
         return None
@@ -589,9 +605,12 @@ def test_pairing_code_endpoint_includes_lan_remote_url(tmp_path, monkeypatch) ->
 
     assert response.status_code == 200
     assert response.json()["remote_url"] == "http://192.168.1.42:8765/remote"
+    assert response.json()["public_remote_url"] is None
 
 
-def test_pairing_code_endpoint_prefers_public_tunnel_origin(tmp_path, monkeypatch) -> None:
+def test_pairing_code_endpoint_prefers_low_latency_lan_and_keeps_public_fallback(
+    tmp_path, monkeypatch
+) -> None:
     app = make_app(tmp_path)
     monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
     monkeypatch.setattr(main, "_default_route_ipv4_address", lambda: IPv4Address("192.168.1.42"))
@@ -600,7 +619,8 @@ def test_pairing_code_endpoint_prefers_public_tunnel_origin(tmp_path, monkeypatc
         response = client.get("/api/pairing", headers={"host": "127.0.0.1:8765"})
 
     assert response.status_code == 200
-    assert response.json()["remote_url"] == "https://abc.trycloudflare.com/remote"
+    assert response.json()["remote_url"] == "http://192.168.1.42:8765/remote"
+    assert response.json()["public_remote_url"] == "https://abc.trycloudflare.com/remote"
 
 
 def test_pairing_accepts_public_tunnel_origin_from_loopback(tmp_path, monkeypatch) -> None:
@@ -891,6 +911,72 @@ def test_remote_token_revocation_rejects_an_invalid_bearer_token(tmp_path) -> No
 
     assert response.status_code == 401
 
+
+def test_authenticated_remote_can_read_and_set_youtube_quality(tmp_path) -> None:
+    app = make_app(tmp_path)
+    token = app.state.runtime.pairing.pair("482731")
+    headers = {**TRUSTED_REMOTE_HEADERS, "authorization": f"Bearer {token}"}
+
+    with secure_remote_client(app) as client:
+        detected = client.get("/api/youtube/quality", headers=headers)
+        selected = client.post(
+            "/api/youtube/quality",
+            headers=headers,
+            json={"quality": "hd720"},
+        )
+
+    assert detected.status_code == 200
+    assert detected.json() == {
+        "video_id": "alpha",
+        "current": "hd1080",
+        "available": ["tiny", "hd720", "hd1080"],
+    }
+    assert selected.status_code == 200
+    assert selected.json()["current"] == "hd720"
+    assert app.state.runtime.applications.quality_selections == ["hd720"]
+
+def test_authenticated_tunnel_quality_get_allows_browser_request_without_origin(
+    tmp_path, monkeypatch
+) -> None:
+    app = make_app(tmp_path)
+    monkeypatch.setenv("PC_TV_PUBLIC_ORIGIN", "https://abc.trycloudflare.com")
+    token = app.state.runtime.pairing.pair("482731")
+
+    with TestClient(
+        app,
+        base_url="https://abc.trycloudflare.com",
+        client=("8.8.8.8", 50_000),
+    ) as client:
+        response = client.get(
+            "/api/youtube/quality",
+            headers={
+                "host": "abc.trycloudflare.com",
+                "authorization": f"Bearer {token}",
+                "sec-fetch-site": "same-origin",
+            },
+        )
+
+    assert response.status_code == 200
+
+
+
+def test_youtube_quality_api_rejects_invalid_quality_and_token(tmp_path) -> None:
+    app = make_app(tmp_path)
+    token = app.state.runtime.pairing.pair("482731")
+
+    with secure_remote_client(app) as client:
+        invalid_token = client.get(
+            "/api/youtube/quality",
+            headers={**TRUSTED_REMOTE_HEADERS, "authorization": "Bearer invalid"},
+        )
+        invalid_quality = client.post(
+            "/api/youtube/quality",
+            headers={**TRUSTED_REMOTE_HEADERS, "authorization": f"Bearer {token}"},
+            json={"quality": "../../../secret"},
+        )
+
+    assert invalid_token.status_code == 401
+    assert invalid_quality.status_code == 422
 
 def test_update_apply_requires_a_valid_remote_bearer_token(tmp_path, monkeypatch) -> None:
     app = make_app(tmp_path)

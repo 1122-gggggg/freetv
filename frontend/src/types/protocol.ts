@@ -56,6 +56,8 @@ export interface ControllerState {
   brightness: number
   channel_number: number | null
   channel_name: string | null
+  previous_channel_name: string | null
+  next_channel_name: string | null
   status_message: string | null
   error_message: string | null
   netflix_context?: NetflixContext | null

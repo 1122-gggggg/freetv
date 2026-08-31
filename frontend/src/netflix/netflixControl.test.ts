@@ -243,6 +243,27 @@ describe('Netflix DOM control runtime', () => {
     expect(historyBack).not.toHaveBeenCalled()
   })
 
+  it('ignores a hidden privacy-dialog Back button during playback', async () => {
+    window.history.replaceState({}, '', '/watch/123')
+    document.body.innerHTML = `
+      <button aria-label="Back" id="privacy-back"></button>
+      <video></video>
+    `
+    const privacyBack = document.querySelector('#privacy-back') as HTMLButtonElement
+    const privacyClick = vi.spyOn(privacyBack, 'click')
+    const historyBack = vi.spyOn(window.history, 'back').mockImplementation(() => {
+      window.history.replaceState({}, '', '/browse')
+      document.body.innerHTML =
+        '<div class="lolomoRow"><div class="title-card" tabindex="0">Browse</div></div>'
+    })
+
+    const result = await runtime().run('BACK', null)
+
+    expect(result).toMatchObject({ ok: true, status: 'history' })
+    expect(privacyClick).not.toHaveBeenCalled()
+    expect(historyBack).toHaveBeenCalledOnce()
+  })
+
   it('moves within one rail and chooses the nearest x card in the adjacent rail', async () => {
     document.body.innerHTML = `
       <header><button id="header">Header</button></header>
@@ -912,6 +933,40 @@ describe('Netflix DOM control runtime', () => {
   top.remove()
   expect((await runtime().run('BACK', null)).status).toBe('history')
   expect(historyBack).toHaveBeenCalledOnce() })
+
+  it('closes a real Netflix detail modal instead of its nested metadata', async () => {
+    vi.useFakeTimers()
+    document.body.innerHTML = `
+      <div class="previewModal--wrapper detail-modal" id="details">
+        <div data-uia="modal-motion-container-DETAIL_MODAL" class="detail-modal">
+          <span data-uia="previewModal-closebtn" aria-label="close" id="close"></span>
+          <div data-uia="previewModal--tags-person">Cast</div>
+          <div data-uia="previewModal--tags-genre">Drama</div>
+        </div>
+      </div>
+    `
+    const details = document.querySelector('#details') as HTMLElement
+    const container = document.querySelector('[data-uia^="modal-motion-container-"]') as HTMLElement
+    const close = document.querySelector('#close') as HTMLElement
+    const person = document.querySelector('[data-uia="previewModal--tags-person"]') as HTMLElement
+    const genre = document.querySelector('[data-uia="previewModal--tags-genre"]') as HTMLElement
+    setRect(details, 20, 20, 900, 650)
+    setRect(container, 60, 40, 820, 600)
+    setRect(close, 820, 60)
+    setRect(person, 100, 500, 300, 40)
+    setRect(genre, 100, 550, 300, 40)
+    const closeClick = vi.spyOn(close, 'click').mockImplementation(() => details.remove())
+    const historyBack = vi.spyOn(window.history, 'back')
+
+    const pending = runtime().run('BACK', null)
+    await vi.runAllTimersAsync()
+    const result = await pending
+
+    expect(result.status).toBe('closed')
+    expect(closeClick).toHaveBeenCalledOnce()
+    expect(historyBack).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
 
   it('toggles only the visible video in the current document', async () => { document.body.innerHTML = '<video id="hidden"></video><video id="visible"></video>'
   const hidden = document.querySelector('#hidden') as HTMLVideoElement

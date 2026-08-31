@@ -33,6 +33,8 @@ class ControllerState(BaseModel):
     brightness: int = Field(default=100, ge=10, le=100)
     channel_number: int | None = Field(default=None, ge=1)
     channel_name: str | None = Field(default=None, max_length=120)
+    previous_channel_name: str | None = Field(default=None, max_length=120)
+    next_channel_name: str | None = Field(default=None, max_length=120)
     status_message: str | None = Field(default=None, max_length=256)
     error_message: str | None = Field(default=None, max_length=256)
     netflix_context: NetflixContext | None = None
@@ -47,6 +49,8 @@ class ControllerState(BaseModel):
             brightness=self.brightness,
             channel_number=self.channel_number,
             channel_name=self.channel_name,
+            previous_channel_name=self.previous_channel_name,
+            next_channel_name=self.next_channel_name,
             status_message=self.status_message,
             error_message=self.error_message,
             netflix_context=self.netflix_context,

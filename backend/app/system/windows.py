@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import ctypes
 import os
+import subprocess
 import time
 from ctypes import wintypes
 
@@ -39,20 +41,50 @@ class WindowsWindowController:
         ctypes.windll.user32.ShowWindow(wintypes.HWND(handle), SW_MINIMIZE)
 
     def maximize(self, handle: int) -> None:
-        self._require_windows()
-        user32 = ctypes.windll.user32
-        user32.ShowWindow(wintypes.HWND(handle), SW_MAXIMIZE)
-        user32.SetForegroundWindow(wintypes.HWND(handle))
+        self._activate_window(handle, show_action=SW_MAXIMIZE)
 
     def activate(self, handle: int) -> None:
         self._require_windows()
         user32 = ctypes.windll.user32
         window_handle = wintypes.HWND(handle)
-        if user32.IsIconic(window_handle):
-            user32.ShowWindow(window_handle, SW_RESTORE)
-        if hasattr(user32, "BringWindowToTop"):
+        show_action = SW_RESTORE if user32.IsIconic(window_handle) else None
+        self._activate_window(handle, show_action=show_action)
+
+    def _activate_window(self, handle: int, *, show_action: int | None) -> None:
+        self._require_windows()
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        window_handle = wintypes.HWND(handle)
+        get_foreground_window = user32.GetForegroundWindow
+        if hasattr(get_foreground_window, "argtypes"):
+            get_foreground_window.argtypes = ()
+            get_foreground_window.restype = wintypes.HWND
+        foreground_window = get_foreground_window()
+        current_thread = int(kernel32.GetCurrentThreadId() or 0)
+        foreground_thread = int(
+            user32.GetWindowThreadProcessId(foreground_window, None) or 0
+        )
+        target_thread = int(user32.GetWindowThreadProcessId(window_handle, None) or 0)
+        attached_threads: list[int] = []
+        try:
+            for thread_id in (foreground_thread, target_thread):
+                if (
+                    thread_id == 0
+                    or thread_id == current_thread
+                    or thread_id in attached_threads
+                ):
+                    continue
+                if user32.AttachThreadInput(current_thread, thread_id, True):
+                    attached_threads.append(thread_id)
+            if show_action is not None:
+                user32.ShowWindow(window_handle, show_action)
             user32.BringWindowToTop(window_handle)
-        user32.SetForegroundWindow(window_handle)
+            user32.SetForegroundWindow(window_handle)
+            user32.SetActiveWindow(window_handle)
+            user32.SetFocus(window_handle)
+        finally:
+            for thread_id in reversed(attached_threads):
+                user32.AttachThreadInput(current_thread, thread_id, False)
 
     def is_foreground(self, handle: int) -> bool:
         self._require_windows()
@@ -148,34 +180,72 @@ class WindowsBrightnessController:
         self._step = step_percent
         self._level = initial_level
         self._os_name = os_name
+        self._initialized = False
 
     async def increase(self) -> int:
+        await self._initialize_level()
         self._level = min(100, self._level + self._step)
         await self._apply_brightness(self._level)
         return self._level
 
     async def decrease(self) -> int:
+        await self._initialize_level()
         self._level = max(10, self._level - self._step)
         await self._apply_brightness(self._level)
         return self._level
 
     async def get_level(self) -> int:
+        await self._initialize_level()
         return self._level
 
-    async def _apply_brightness(self, level: int) -> None:
-        if self._os_name == "nt":
-            try:
-                import subprocess
+    async def _initialize_level(self) -> None:
+        if self._initialized:
+            return
+        self._initialized = True
+        if self._os_name != "nt":
+            return
+        level = await asyncio.to_thread(self._read_level_sync)
+        if level is not None:
+            self._level = max(10, min(100, level))
 
-                cmd = (
-                    "(Get-CimInstance -Namespace root/WMI -ClassName "
-                    f"WmiMonitorBrightnessMethods).WmiSetBrightness(1, {level})"
-                )
-                subprocess.run(
-                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", cmd],
-                    check=False,
-                    capture_output=True,
-                    timeout=1.5,
-                )
-            except Exception:
-                pass
+    def _read_level_sync(self) -> int | None:
+        try:
+            command = (
+                "Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness "
+                "| Select-Object -First 1 -ExpandProperty CurrentBrightness"
+            )
+            completed = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            value = completed.stdout.strip()
+            return int(value) if value.isdigit() else None
+        except Exception:
+            return None
+
+    async def _apply_brightness(self, level: int) -> None:
+        if self._os_name != "nt":
+            return
+        try:
+            await asyncio.to_thread(self._write_level_sync, level)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _write_level_sync(level: int) -> None:
+        command = (
+            "Get-CimInstance -Namespace root/WMI -ClassName "
+            "WmiMonitorBrightnessMethods | Invoke-CimMethod "
+            "-MethodName WmiSetBrightness "
+            f"-Arguments @{{Timeout=1; Brightness=[byte]{level}}} | Out-Null"
+        )
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )

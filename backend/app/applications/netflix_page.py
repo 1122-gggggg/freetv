@@ -244,14 +244,37 @@ class NetflixPageController:
                     raise _OutcomeUnknownError from None
                 raise
             if action is NetflixAction.OK and context.stage is NetflixStage.WATCH:
-                fullscreen = await self._run_action(socket, NetflixAction.FULLSCREEN)
                 try:
+                    fullscreen = await self._run_action(socket, NetflixAction.FULLSCREEN)
                     self._accept_runtime_result(fullscreen)
-                except _RetryableControllerError:
-                    raise _OutcomeUnknownError from None
+                except (
+                    CommandExecutionError,
+                    _OutcomeUnknownError,
+                    _RetryableControllerError,
+                ):
+                    pass
             return context
 
-        return await self._run_transaction(operation)
+        try:
+            return await self._run_transaction(operation)
+        except CommandExecutionError as error:
+            if (
+                action is not NetflixAction.OK
+                or error.code != "netflix_controller_unavailable"
+            ):
+                raise
+
+            async def read_current_context(socket: Any) -> NetflixContext:
+                result = await self._run_runtime(socket, NetflixAction.READ_CONTEXT)
+                return self._accept_runtime_result(result)
+
+            try:
+                recovered = await self._run_transaction(read_current_context)
+            except CommandExecutionError:
+                raise error from None
+            if recovered.stage is NetflixStage.WATCH:
+                return recovered
+            raise error
 
     async def type_text(
         self,

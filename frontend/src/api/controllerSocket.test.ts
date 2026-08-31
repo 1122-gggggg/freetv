@@ -189,4 +189,60 @@ describe('ControllerSocket request IDs', () => {
     ])
     controller.close()
   })
+
+  it('keeps at most one regular command in flight until acknowledgement', () => {
+    const controller = new ControllerSocket('/ws/tv')
+    controller.connect()
+    const socket = sockets[0]
+    socket.open()
+
+    const firstRequestId = controller.sendCommand('BRIGHTNESS_UP')
+    const droppedRequestId = controller.sendCommand('NAV_RIGHT')
+
+    expect(firstRequestId).not.toBeNull()
+    expect(droppedRequestId).toBeNull()
+    expect(socket.sent).toHaveLength(1)
+
+    socket.receive({
+      version: 1,
+      type: 'ack',
+      request_id: firstRequestId,
+      success: true,
+      error_code: null,
+      message: null,
+    })
+
+    expect(controller.sendCommand('NAV_RIGHT')).not.toBeNull()
+    expect(socket.sent).toHaveLength(2)
+    controller.close()
+  })
+
+  it('lets BACK and HOME bypass a regular command without duplicating either', () => {
+    const controller = new ControllerSocket('/ws/tv')
+    controller.connect()
+    const socket = sockets[0]
+    socket.open()
+
+    expect(controller.sendCommand('OK')).not.toBeNull()
+    expect(controller.sendCommand('BACK')).not.toBeNull()
+    expect(controller.sendCommand('BACK')).toBeNull()
+    expect(controller.sendCommand('HOME')).not.toBeNull()
+    expect(controller.sendCommand('HOME')).toBeNull()
+    expect(controller.sendCommand('NAV_LEFT')).toBeNull()
+
+    const commands = socket.sent.map((raw) => {
+      const message: unknown = JSON.parse(raw)
+      if (
+        !message ||
+        typeof message !== 'object' ||
+        !('command' in message) ||
+        typeof message.command !== 'string'
+      ) {
+        throw new TypeError('Expected a command message.')
+      }
+      return message.command
+    })
+    expect(commands).toEqual(['OK', 'BACK', 'HOME'])
+    controller.close()
+  })
 })

@@ -46,6 +46,15 @@ class FakeProbe:
     seek_calls: list[tuple[int, int]] = field(default_factory=list)
     seek_result: bool = True
 
+    quality_result: dict[str, object] = field(
+        default_factory=lambda: {
+            "video_id": "alpha",
+            "current": "hd1080",
+            "available": ["tiny", "small", "medium", "large", "hd720", "hd1080"],
+        }
+    )
+    quality_calls: list[int] = field(default_factory=list)
+    set_quality_calls: list[tuple[int, str]] = field(default_factory=list)
     async def inspect(self, port: int) -> tuple[str | None, bool, bool]:
         assert port == 9222
         if len(self.inspections) == 1:
@@ -65,6 +74,16 @@ class FakeProbe:
     async def seek(self, port: int, direction: int) -> bool:
         self.seek_calls.append((port, direction))
         return self.seek_result
+
+    async def quality_info(self, port: int) -> dict[str, object]:
+        self.quality_calls.append(port)
+        return self.quality_result
+
+    async def set_quality(self, port: int, quality: str) -> dict[str, object]:
+        self.set_quality_calls.append((port, quality))
+        result = dict(self.quality_result)
+        result["current"] = quality
+        return result
 
 
 @pytest.mark.parametrize(
@@ -101,6 +120,39 @@ def test_same_video_is_requested_at_most_once_even_after_escape() -> None:
     assert asyncio.run(scenario()) == (
         [True, False],
         [(9222, "watch:alpha", True)],
+    )
+
+def test_each_new_video_defaults_to_its_detected_highest_quality() -> None:
+    async def scenario() -> tuple[list[tuple[int, str]], list[int]]:
+        probe = FakeProbe(
+            inspections=[
+                ("watch:alpha", True, True),
+                ("watch:alpha", True, True),
+                ("watch:beta", True, True),
+                ("watch:beta", True, True),
+            ],
+            quality_result={
+                "video_id": "alpha",
+                "current": "small",
+                "available": ["tiny", "small", "medium", "large", "hd720", "hd1080"],
+            },
+        )
+        controller = YoutubeFullscreenController(probe=probe)
+
+        await controller.probe_once(9222)
+        await controller.probe_once(9222)
+        await controller.probe_once(9222)
+        probe.quality_result = {
+            "video_id": "beta",
+            "current": "small",
+            "available": ["tiny", "small", "medium", "large", "hd720"],
+        }
+        await controller.probe_once(9222)
+        return probe.set_quality_calls, probe.quality_calls
+
+    assert asyncio.run(scenario()) == (
+        [(9222, "hd1080"), (9222, "hd720")],
+        [9222, 9222, 9222],
     )
 
 
@@ -184,6 +236,22 @@ def test_seek_delegates_to_probe() -> None:
         return probe.seek_calls
 
     assert asyncio.run(scenario()) == [(9222, -1), (9222, 1)]
+
+def test_quality_info_and_selection_delegate_to_probe() -> None:
+    async def scenario() -> tuple[dict[str, object], dict[str, object], FakeProbe]:
+        probe = FakeProbe()
+        controller = YoutubeFullscreenController(probe=probe)
+        before = await controller.quality_info(9222)
+        after = await controller.set_quality(9222, "hd720")
+        return before, after, probe
+
+    before, after, probe = asyncio.run(scenario())
+
+    assert before["current"] == "hd1080"
+    assert before["available"][-1] == "hd1080"
+    assert after["current"] == "hd720"
+    assert probe.quality_calls == [9222]
+    assert probe.set_quality_calls == [(9222, "hd720")]
 
 
 @dataclass
@@ -373,6 +441,19 @@ def _youtube_target(debugger_url: str) -> dict[str, object]:
     }
 
 
+def test_quality_maximum_uses_only_levels_the_current_video_reports() -> None:
+    info = fullscreen_module._quality_info(
+        {
+            "video_id": "alpha",
+            "current": "hd1080",
+            "available": ["small", "hd720"],
+        }
+    )
+
+    assert info["current"] == "hd1080"
+    assert info["available"] == ["small", "hd720"]
+
+
 def test_short_cdp_probe_uses_localhost_and_closes_each_socket(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -380,6 +461,19 @@ def test_short_cdp_probe_uses_localhost_and_closes_each_socket(
     FakeAsyncClient.urls = []
     FakeAsyncClient.exits = 0
     connect = FakeConnect()
+    connect.contexts = [
+        connect.contexts[0],
+        FakeSocketContext(
+            FakeSocket(
+                {
+                    "video_id": "alpha",
+                    "current": "hd1080",
+                    "available": ["small", "hd1080"],
+                }
+            )
+        ),
+        connect.contexts[1],
+    ]
     monkeypatch.setattr(fullscreen_module.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(fullscreen_module.websockets, "connect", connect)
 
@@ -389,12 +483,11 @@ def test_short_cdp_probe_uses_localhost_and_closes_each_socket(
         return await controller.probe_once(9222)
 
     assert asyncio.run(scenario()) is True
-    assert FakeAsyncClient.urls == [
-        "http://127.0.0.1:9222/json/list",
-        "http://127.0.0.1:9222/json/list",
-    ]
-    assert FakeAsyncClient.exits == 2
+    debugger_url = "http://127.0.0.1:9222/json/list"
+    assert FakeAsyncClient.urls == [debugger_url, debugger_url, debugger_url]
+    assert FakeAsyncClient.exits == 3
     assert [url for url, _ in connect.calls] == [
+        "ws://127.0.0.1:9222/devtools/page/alpha",
         "ws://127.0.0.1:9222/devtools/page/alpha",
         "ws://127.0.0.1:9222/devtools/page/alpha",
     ]
@@ -406,7 +499,7 @@ def test_short_cdp_probe_uses_localhost_and_closes_each_socket(
     assert "document.fullscreenElement" in inspect_request["params"]["expression"]
     assert "userGesture" not in inspect_request["params"]
 
-    fullscreen_request = connect.contexts[1].socket.requests[0]
+    fullscreen_request = connect.contexts[2].socket.requests[0]
     assert fullscreen_request["method"] == "Runtime.evaluate"
     assert fullscreen_request["params"]["userGesture"] is True
     expression = fullscreen_request["params"]["expression"]
@@ -453,6 +546,37 @@ def test_short_cdp_probe_seeks_five_seconds_with_user_gesture(
     assert "video.currentTime = target" in expression
 
 
+def test_short_cdp_probe_reads_and_sets_available_quality(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    quality = {
+        "video_id": "alpha",
+        "current": "hd1080",
+        "available": ["tiny", "hd720", "hd1080"],
+    }
+    FakeAsyncClient.payload = [_youtube_target("ws://127.0.0.1:9222/devtools/page/alpha")]
+    connect = FakeConnect()
+    connect.contexts = [
+        FakeSocketContext(FakeSocket(quality)),
+        FakeSocketContext(FakeSocket({**quality, "current": "hd720"})),
+    ]
+    monkeypatch.setattr(fullscreen_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(fullscreen_module.websockets, "connect", connect)
+    probe = ShortCdpYoutubeProbe(timeout=0.8)
+
+    detected = asyncio.run(probe.quality_info(9222))
+    selected = asyncio.run(probe.set_quality(9222, "hd720"))
+
+    assert detected == quality
+    assert selected["current"] == "hd720"
+    detect_expression = connect.contexts[0].socket.requests[0]["params"]["expression"]
+    set_request = connect.contexts[1].socket.requests[0]
+    assert "getAvailableQualityLevels" in detect_expression
+    assert "getPlaybackQuality" in detect_expression
+    assert "setPlaybackQualityRange" in set_request["params"]["expression"]
+    assert json.dumps("hd720") in set_request["params"]["expression"]
+    assert set_request["params"]["userGesture"] is True
+
 def test_inspect_rejects_outer_runtime_exception_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -484,6 +608,15 @@ def test_fullscreen_outer_runtime_exception_is_not_retried(
     connect = FakeConnect()
     connect.contexts = [
         FakeSocketContext(FakeSocket(inspection)),
+        FakeSocketContext(
+            FakeSocket(
+                {
+                    "video_id": "alpha",
+                    "current": "hd1080",
+                    "available": ["small", "hd1080"],
+                }
+            )
+        ),
         FakeSocketContext(FakeSocket(True, outer_exception=True)),
         FakeSocketContext(FakeSocket(inspection)),
     ]

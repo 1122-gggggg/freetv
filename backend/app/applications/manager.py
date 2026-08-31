@@ -14,7 +14,7 @@ from urllib.parse import quote_plus
 from app.applications.chrome_policy import TV_CHROME_NOTIFICATION_FLAGS
 from app.applications.netflix_page import NetflixPageController
 from app.applications.youtube_adfilter import YoutubeAdFilter, reserve_localhost_port
-from app.applications.youtube_fullscreen import YoutubeFullscreenController
+from app.applications.youtube_fullscreen import YoutubeFullscreenController, YoutubeQualityInfo
 from app.commands.ports import CommandExecutionError
 from app.config import Settings, project_root
 from app.logging import log_event
@@ -463,6 +463,22 @@ class ApplicationManager:
             "command_not_supported",
             "目前應用程式不支援這個操作。",
         )
+
+    async def youtube_quality_info(self) -> YoutubeQualityInfo:
+        if self._active_app is not ActiveApp.YOUTUBE:
+            raise CommandExecutionError(
+                "youtube_video_unavailable",
+                "請先開啟 YouTube 影片再調整畫質。",
+            )
+        return await self._youtube_fullscreen.quality_info(self._debug_port)
+
+    async def set_youtube_quality(self, quality: str) -> YoutubeQualityInfo:
+        if self._active_app is not ActiveApp.YOUTUBE:
+            raise CommandExecutionError(
+                "youtube_video_unavailable",
+                "請先開啟 YouTube 影片再調整畫質。",
+            )
+        return await self._youtube_fullscreen.set_quality(self._debug_port, quality)
 
     async def cycle_quality(self) -> str:
         self.require_input_target(self._active_app)

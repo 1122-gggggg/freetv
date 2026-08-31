@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.types import Scope
 
+from app.commands.ports import CommandExecutionError
 from app.config import Settings, detect_capabilities, load_settings, project_root
 from app.controller import ControllerRuntime, build_runtime
 from app.logging import configure_logging, log_event
@@ -105,6 +106,11 @@ class PairRequest(BaseModel):
 
     code: str = Field(pattern=r"^[0-9]{6}$")
 
+
+class YoutubeQualityRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quality: str = Field(pattern=r"^[a-z0-9_-]{1,32}$")
 
 class PairingAttemptGuard:
     def __init__(
@@ -232,10 +238,14 @@ def create_app(
         port = app.state.settings.server.port
         _require_local_tv_host(request, port)
         code, expires_at = app.state.runtime.pairing.current_code()
+        public_origin = _public_tunnel_origin()
         return {
             "code": code,
             "expires_at": expires_at.isoformat(),
             "remote_url": _pairing_remote_url(port, app.state.settings.server.transport),
+            "public_remote_url": (
+                f"{public_origin}/remote" if public_origin is not None else None
+            ),
         }
 
     @app.post("/api/pair")
@@ -286,6 +296,35 @@ def create_app(
             sessions = await connections.remove_token_sessions(token)
         await connections.close_connections(sessions)
         log_event(logger, "remote_token_revoked", client=_client_host(request))
+
+    @app.get("/api/youtube/quality")
+    async def youtube_quality(request: Request) -> dict[str, object]:
+        await _authorize_update_request(request, app)
+        try:
+            async with app.state.dispatch_lock:
+                return dict(await app.state.runtime.applications.youtube_quality_info())
+        except CommandExecutionError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=error.message,
+            ) from error
+
+    @app.post("/api/youtube/quality")
+    async def set_youtube_quality(
+        request: Request,
+        payload: YoutubeQualityRequest,
+    ) -> dict[str, object]:
+        await _authorize_update_request(request, app)
+        try:
+            async with app.state.dispatch_lock:
+                return dict(
+                    await app.state.runtime.applications.set_youtube_quality(payload.quality)
+                )
+        except CommandExecutionError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=error.message,
+            ) from error
 
     @app.get("/api/update/check")
     async def update_check(request: Request) -> dict[str, object]:
@@ -622,7 +661,10 @@ async def _authorize_update_request(request: Request, app: FastAPI) -> None:
     ):
         _require_local_tv_host(request, port)
         return
-    _require_trusted_remote_origin(request, port, app.state.settings.server.transport)
+    if request.method == "GET" and origin is None:
+        _require_trusted_remote_host(request, port, app.state.settings.server.transport)
+    else:
+        _require_trusted_remote_origin(request, port, app.state.settings.server.transport)
     token = _bearer_token(request)
     if token is None or not await app.state.runtime.pairing.verify_token_async(token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="遙控器權杖無效。")
@@ -879,13 +921,13 @@ def _is_public_tunnel_host(host: str) -> bool:
 
 
 def _pairing_remote_url(port: int, scheme: str) -> str | None:
+    address = _default_route_ipv4_address() or _first_lan_ipv4_address()
+    if address is not None:
+        return f"{scheme}://{address}:{port}/remote"
     public_origin = _public_tunnel_origin()
     if public_origin is not None:
         return f"{public_origin}/remote"
-    address = _default_route_ipv4_address() or _first_lan_ipv4_address()
-    if address is None:
-        return None
-    return f"{scheme}://{address}:{port}/remote"
+    return None
 
 
 def _default_route_ipv4_address() -> IPv4Address | None:

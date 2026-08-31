@@ -222,6 +222,9 @@ class FakeNews:
     def current(self) -> Channel:
         return self.channels[self.current_index]
 
+    def preview_move(self, direction: int) -> Channel:
+        return self.channels[(self.current_index + direction) % len(self.channels)]
+
     def move(self, direction: int) -> Channel:
         self.current_index = (self.current_index + direction) % len(self.channels)
         return self.current
@@ -835,6 +838,8 @@ def test_open_news_sets_channel_and_active_app() -> None:
         assert outcome.state.active_app is ActiveApp.NEWS
         assert outcome.state.channel_number == 1
         assert outcome.state.channel_name == "DW News"
+        assert outcome.state.previous_channel_name == "Al Jazeera English"
+        assert outcome.state.next_channel_name == "Al Jazeera English"
         assert applications.opened_news == ["https://www.youtube.com/@dwnews/live"]
 
     asyncio.run(scenario())
@@ -850,6 +855,8 @@ def test_channel_up_on_news_opens_next_official_url() -> None:
         assert outcome.state.active_app is ActiveApp.NEWS
         assert outcome.state.channel_number == 2
         assert outcome.state.channel_name == "Al Jazeera English"
+        assert outcome.state.previous_channel_name == "DW News"
+        assert outcome.state.next_channel_name == "DW News"
         assert applications.opened_news == [
             "https://www.youtube.com/@dwnews/live",
             "https://www.youtube.com/@aljazeeraenglish/live",
@@ -868,6 +875,8 @@ def test_channel_down_on_news_opens_previous_channel() -> None:
         assert outcome.state.active_app is ActiveApp.NEWS
         assert outcome.state.channel_number == 2
         assert outcome.state.channel_name == "Al Jazeera English"
+        assert outcome.state.previous_channel_name == "DW News"
+        assert outcome.state.next_channel_name == "DW News"
         assert applications.opened_news == [
             "https://www.youtube.com/@dwnews/live",
             "https://www.youtube.com/@aljazeeraenglish/live",
