@@ -169,6 +169,23 @@ def test_resolve_application_paths_falls_back_to_bundled_tools(
     assert paths["cloudflared"] == cloudflared
 
 
+def test_resolve_application_paths_ignores_bundled_windows_tools_on_non_windows(
+    tmp_path, monkeypatch
+) -> None:
+    for executable in (
+        tmp_path / "tools" / "mpv" / "mpv.exe",
+        tmp_path / "tools" / "cloudflared" / "cloudflared.exe",
+    ):
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        executable.touch()
+    monkeypatch.setattr(config.shutil, "which", lambda _: None)
+
+    paths = resolve_application_paths(Settings(), os_name="posix", root=tmp_path)
+
+    assert paths["mpv"] is None
+    assert paths["cloudflared"] is None
+
+
 def test_find_executable_accepts_multiple_command_names(tmp_path, monkeypatch) -> None:
     chrome = tmp_path / "google-chrome"
     chrome.write_text("", encoding="utf-8")

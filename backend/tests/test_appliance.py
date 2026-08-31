@@ -133,6 +133,67 @@ def test_cloudflare_network_probe_fails_fast_offline(monkeypatch) -> None:
     assert not appliance.cloudflare_network_available(timeout_seconds=0.01)
 
 
+def test_cloudflare_network_probe_uses_bounded_default_target(monkeypatch) -> None:
+    calls: list[tuple[tuple[str, int], float]] = []
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+    def connect(address, *, timeout):
+        calls.append((address, timeout))
+        return Connection()
+
+    monkeypatch.setattr(appliance.socket, "create_connection", connect)
+
+    assert appliance.cloudflare_network_available()
+    assert calls == [(("1.1.1.1", 443), 0.75)]
+
+
+def test_start_appliance_skips_tunnel_launcher_when_cloudflare_is_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = tmp_path / "runtime" / "python.exe"
+    runtime.parent.mkdir()
+    runtime.touch()
+    frontend = tmp_path / "frontend" / "dist" / "index.html"
+    frontend.parent.mkdir(parents=True)
+    frontend.touch()
+    cloudflared = tmp_path / "tools" / "cloudflared" / "cloudflared.exe"
+    cloudflared.parent.mkdir(parents=True)
+    cloudflared.touch()
+    tunnel_calls: list[Path] = []
+    monkeypatch.setattr(appliance, "port_is_listening", lambda port: True)
+    monkeypatch.setattr(
+        appliance,
+        "_wait_json",
+        lambda url, **kwargs: (
+            {"status": "ok", "backend": True, "frontend": True}
+            if url.endswith("/api/health")
+            else {"remote_url": "http://lan.test/remote"}
+        ),
+    )
+    monkeypatch.setattr(
+        appliance,
+        "resolve_application_paths",
+        lambda settings, root: {"cloudflared": cloudflared},
+    )
+    monkeypatch.setattr(appliance, "cloudflare_network_available", lambda: False)
+    monkeypatch.setattr(
+        appliance,
+        "_start_cloudflare_tunnel",
+        lambda executable, **kwargs: tunnel_calls.append(executable),
+    )
+
+    result = appliance.start_appliance(root=tmp_path, no_browser=True)
+
+    assert result == 0
+    assert tunnel_calls == []
+
+
 def test_systemd_quote_wraps_paths_with_spaces() -> None:
     assert _systemd_quote("/opt/free tv/python") == '"/opt/free tv/python"'
     assert _systemd_quote("--no-browser") == "--no-browser"

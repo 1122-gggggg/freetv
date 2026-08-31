@@ -8,6 +8,8 @@ from app.applications.chrome_policy import (
     force_install_entries,
 )
 
+RETIRED_EXTENSION_ID = "cmedhionkhpnakcndndgjdbohmhepckk"
+
 
 def test_tv_notification_flags_are_fixed_and_minimal() -> None:
     assert TV_CHROME_NOTIFICATION_FLAGS == [
@@ -27,3 +29,28 @@ def test_apply_force_install_writes_only_primary_entry() -> None:
     assert dict(result) == written == {
         "1": f"{ADBLOCK_EXTENSION_ID};{STORE_UPDATE_URL}"
     }
+
+
+def test_apply_force_install_removes_matching_retired_policy_entry() -> None:
+    legacy_value = f"{RETIRED_EXTENSION_ID};{STORE_UPDATE_URL}"
+    deleted: list[str] = []
+
+    apply_force_install(
+        writer=lambda name, value: None,
+        reader=lambda name: legacy_value if name == "2" else None,
+        deleter=deleted.append,
+    )
+
+    assert deleted == ["2"]
+
+
+def test_apply_force_install_preserves_unrelated_policy_entry() -> None:
+    deleted: list[str] = []
+
+    apply_force_install(
+        writer=lambda name, value: None,
+        reader=lambda name: f"unrelated-extension;{STORE_UPDATE_URL}" if name == "2" else None,
+        deleter=deleted.append,
+    )
+
+    assert deleted == []

@@ -189,8 +189,14 @@ def resolve_application_paths(
     root: Path | None = None,
 ) -> dict[str, Path | None]:
     base = root or project_root()
-    bundled_mpv = base / "tools" / "mpv" / "mpv.exe"
-    bundled_cloudflared = base / "tools" / "cloudflared" / "cloudflared.exe"
+    bundled_mpv_candidates = (
+        (base / "tools" / "mpv" / "mpv.exe",) if os_name == "nt" else ()
+    )
+    bundled_cloudflared_candidates = (
+        (base / "tools" / "cloudflared" / "cloudflared.exe",)
+        if os_name == "nt"
+        else ()
+    )
     chrome_commands = (
         ("chrome.exe",)
         if os_name == "nt"
@@ -215,12 +221,12 @@ def resolve_application_paths(
         ),
         "mpv": find_executable(
             settings.applications.mpv_path,
-            (*_mpv_candidates(os_name=os_name), bundled_mpv),
+            (*_mpv_candidates(os_name=os_name), *bundled_mpv_candidates),
             mpv_commands,
         ),
         "cloudflared": find_executable(
             settings.applications.cloudflared_path,
-            (bundled_cloudflared,),
+            bundled_cloudflared_candidates,
             cloudflared_commands,
         ),
         "browser": find_executable(settings.applications.browser_path, (), browser_commands),
