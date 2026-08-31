@@ -172,23 +172,6 @@ def launch_pending_installer_update(
             source_stat = source.stat(follow_symlinks=False)
         except FileNotFoundError:
             source_stat = None
-        if target_parts == installed_parts:
-            if source_stat is not None:
-                if not stat.S_ISREG(source_stat.st_mode):
-                    return False
-                _, source_digest = _hash_installer(source)
-                if source_digest.lower() != expected_digest.lower():
-                    return False
-                try:
-                    source.unlink()
-                except OSError:
-                    return False
-            try:
-                marker.unlink()
-            except OSError:
-                return False
-            _cleanup_temp_installers()
-            return False
         if target_parts <= installed_parts or source_stat is None:
             return False
         if not stat.S_ISREG(source_stat.st_mode):
@@ -234,6 +217,70 @@ def launch_pending_installer_update(
             except OSError:
                 pass
         return False
+
+
+def finalize_completed_installer_update(
+    root: Path,
+    *,
+    os_name: str = os.name,
+) -> bool:
+    if os_name != "nt":
+        return False
+    _cleanup_temp_installers()
+    config = root / "config"
+    updates = config / "updates"
+    marker = pending_installer_marker(root)
+    if (
+        not _safe_update_boundaries(root, config, updates)
+        or marker.is_symlink()
+        or _is_reparse_point(marker)
+        or not marker.is_file()
+    ):
+        return False
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        version = str(payload["version"]).strip()
+        expected_digest = str(payload["sha256"]).strip()
+        source = Path(str(payload["installer"])).expanduser()
+        source = source if source.is_absolute() else marker.parent / source
+        if (
+            not _inside(source, updates)
+            or source.is_symlink()
+            or _is_reparse_point(source)
+            or len(expected_digest) != 64
+            or any(character not in "0123456789abcdefABCDEF" for character in expected_digest)
+        ):
+            return False
+        installed_version = (root / "VERSION").read_text(encoding="utf-8").strip()
+        target_parts = _version_parts(version)
+        installed_parts = _version_parts(installed_version)
+        if target_parts != installed_parts:
+            return False
+        try:
+            source_stat = source.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            source_stat = None
+        if source_stat is not None:
+            if not stat.S_ISREG(source_stat.st_mode):
+                return False
+            _, source_digest = _hash_installer(source)
+            if source_digest.lower() != expected_digest.lower():
+                return False
+            try:
+                source.unlink()
+            except OSError:
+                return False
+        try:
+            marker.unlink()
+        except OSError:
+            return False
+        _cleanup_temp_installers()
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+cleanup_completed_installer_update = finalize_completed_installer_update
 
 def managed_files(source: Path) -> list[str]:
     """Return release-managed relative paths, excluding user state."""

@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$InstallRoot
+    [string]$InstallRoot,
+    [string]$InstallerPath = ''
 )
 
 Set-StrictMode -Version Latest
@@ -206,5 +207,68 @@ Describe 'Offline FreeTV installation' {
         $Shortcut.TargetPath | Should -Be $ExpectedPythonw
         $Shortcut.Arguments | Should -Be "$ExpectedLauncherArguments --supervise"
         $Shortcut.WorkingDirectory | Should -Be $InstallRoot
+    }
+
+    It 'removes obsolete managed files on upgrade while preserving config, logs, and user settings' {
+        $ResolvedInstaller = if (-not [string]::IsNullOrWhiteSpace($InstallerPath) -and (Test-Path -LiteralPath $InstallerPath)) {
+            (Resolve-Path -LiteralPath $InstallerPath).Path
+        } else {
+            $Candidate = Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'FreeTV-Setup.exe'
+            if (Test-Path -LiteralPath $Candidate) { (Resolve-Path -LiteralPath $Candidate).Path } else { $null }
+        }
+        if ($null -eq $ResolvedInstaller) {
+            throw "FreeTV-Setup.exe was not found. Please build the installer first or pass -InstallerPath."
+        }
+
+        $ObsoleteBackend = Join-Path $InstallRoot 'backend\app\adblock.py'
+        $ObsoleteVendor = Join-Path $InstallRoot 'vendor\adblock-rules.txt'
+        $ObsoleteScripts = Join-Path $InstallRoot 'scripts\obsolete-script.ps1'
+        $ObsoleteTools = Join-Path $InstallRoot 'tools\obsolete-tool.exe'
+
+        $CustomConfigFile = Join-Path $InstallRoot 'config\user-custom.json'
+        $CustomLogFile = Join-Path $InstallRoot 'logs\custom-install.log'
+
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ObsoleteBackend) | Out-Null
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ObsoleteVendor) | Out-Null
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ObsoleteScripts) | Out-Null
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ObsoleteTools) | Out-Null
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $CustomConfigFile) | Out-Null
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $CustomLogFile) | Out-Null
+
+        Set-Content -LiteralPath $ObsoleteBackend -Value '# obsolete adblock module' -Encoding utf8
+        Set-Content -LiteralPath $ObsoleteVendor -Value 'obsolete vendor rules' -Encoding utf8
+        Set-Content -LiteralPath $ObsoleteScripts -Value '# obsolete helper' -Encoding utf8
+        Set-Content -LiteralPath $ObsoleteTools -Value 'obsolete tool binary' -Encoding utf8
+        Set-Content -LiteralPath $CustomConfigFile -Value '{"custom_setting": 123}' -Encoding utf8
+        Set-Content -LiteralPath $CustomLogFile -Value '2026-08-31 custom log entry' -Encoding utf8
+
+        $Process = Start-Process `
+            -FilePath $ResolvedInstaller `
+            -ArgumentList @(
+                '/VERYSILENT',
+                '/SUPPRESSMSGBOXES',
+                '/NORESTART',
+                '/UPDATE=1',
+                ('/DIR="{0}"' -f $InstallRoot),
+                '/MERGETASKS="!appliancepower"'
+            ) `
+            -PassThru
+        $Process.WaitForExit(60000) | Should -BeTrue
+        $Process.ExitCode | Should -Be 0
+
+        Test-Path -LiteralPath $ObsoleteBackend | Should -BeFalse
+        Test-Path -LiteralPath $ObsoleteVendor | Should -BeFalse
+        Test-Path -LiteralPath $ObsoleteScripts | Should -BeFalse
+        Test-Path -LiteralPath $ObsoleteTools | Should -BeFalse
+
+        Test-Path -LiteralPath $CustomConfigFile | Should -BeTrue
+        (Get-Content -Raw -LiteralPath $CustomConfigFile) | Should -Match '"custom_setting": 123'
+
+        Test-Path -LiteralPath $CustomLogFile | Should -BeTrue
+        (Get-Content -Raw -LiteralPath $CustomLogFile) | Should -Match 'custom log entry'
+
+        Test-Path -LiteralPath (Join-Path $InstallRoot 'runtime\python.exe') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $InstallRoot 'backend\app\installer.py') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $InstallRoot 'freetv.py') | Should -BeTrue
     }
 }

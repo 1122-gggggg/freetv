@@ -144,6 +144,7 @@ function Resolve-BuildExecutable {
     param(
         [string]$ConfiguredPath,
         [Parameter(Mandatory = $true)][string[]]$CommandNames,
+        [string[]]$CandidatePaths = @(),
         [Parameter(Mandatory = $true)][string]$Description
     )
 
@@ -152,6 +153,12 @@ function Resolve-BuildExecutable {
             throw "$Description was not found at $ConfiguredPath."
         }
         return (Resolve-Path -LiteralPath $ConfiguredPath).Path
+    }
+
+    foreach ($Candidate in $CandidatePaths) {
+        if (-not [string]::IsNullOrWhiteSpace($Candidate) -and (Test-Path -LiteralPath $Candidate -PathType Leaf)) {
+            return (Resolve-Path -LiteralPath $Candidate).Path
+        }
     }
 
     foreach ($CommandName in $CommandNames) {
@@ -205,11 +212,20 @@ function Invoke-OfflineBundleBuild {
     $ResolvedPackagePath = (Resolve-Path -LiteralPath $PackagePath).Path
     $BuildPythonPath = Resolve-BuildExecutable `
         -ConfiguredPath $BuildPythonPath `
-        -CommandNames @('python.exe', 'python') `
+        -CommandNames @('python3.13.exe', 'python3.13', 'python.exe', 'python') `
+        -CandidatePaths @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python313\python.exe'),
+            (Join-Path $env:ProgramFiles 'Python313\python.exe'),
+            'C:\Python313\python.exe'
+        ) `
         -Description 'A Python 3.13 build interpreter'
     $SevenZipPath = Resolve-BuildExecutable `
         -ConfiguredPath $SevenZipPath `
         -CommandNames @('7z.exe', '7z') `
+        -CandidatePaths @(
+            (Join-Path $env:ProgramFiles '7-Zip\7z.exe'),
+            (Join-Path ${env:ProgramFiles(x86)} '7-Zip\7z.exe')
+        ) `
         -Description '7-Zip'
     $VersionProbe = "import struct, sys; print('{}.{}|{}'.format(sys.version_info.major, sys.version_info.minor, struct.calcsize('P') * 8))"
     $BuildRuntimeOutput = & $BuildPythonPath -c $VersionProbe

@@ -2,7 +2,9 @@
 param(
     [string]$OutputPath = '',
     [string]$PackagePath = '',
-    [string]$IsccPath = ''
+    [string]$IsccPath = '',
+    [string]$BuildPythonPath = '',
+    [string]$SevenZipPath = ''
 )
 
 Set-StrictMode -Version Latest
@@ -51,7 +53,9 @@ try {
     $BundleRoot = Join-Path $StageRoot 'offline-bundle'
     & (Join-Path $PSScriptRoot 'build-offline-bundle.ps1') `
         -PackagePath $PackagePath `
-        -OutputPath $BundleRoot
+        -OutputPath $BundleRoot `
+        -BuildPythonPath $BuildPythonPath `
+        -SevenZipPath $SevenZipPath
     if ($LASTEXITCODE -ne 0) {
         throw 'Offline bundle assembly failed.'
     }

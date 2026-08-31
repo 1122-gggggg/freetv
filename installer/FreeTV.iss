@@ -142,16 +142,16 @@ begin
     RaiseFailure('無法清理 ' + Name + ' 的暫存保留資料。');
 end;
 
-function IsLegacyVenvExecutable(const ExecutablePath: String): Boolean;
+function IsAppOwnedExecutable(const ExecutablePath: String): Boolean;
 var
-  LegacyPrefix: String;
+  AppPrefix: String;
 begin
-  LegacyPrefix := AddBackslash(ExpandConstant('{app}\.venv'));
+  AppPrefix := AddBackslash(ExpandConstant('{app}'));
   Result :=
-    (Length(ExecutablePath) >= Length(LegacyPrefix)) and
+    (Length(ExecutablePath) >= Length(AppPrefix)) and
     (CompareText(
-      Copy(ExecutablePath, 1, Length(LegacyPrefix)),
-      LegacyPrefix
+      Copy(ExecutablePath, 1, Length(AppPrefix)),
+      AppPrefix
     ) = 0);
 end;
 
@@ -185,7 +185,7 @@ begin
       begin
         Process := Processes.ItemIndex(Index);
         ExecutablePath := Process.ExecutablePath;
-        if IsLegacyVenvExecutable(ExecutablePath) then
+        if IsAppOwnedExecutable(ExecutablePath) then
         begin
           OwnedCount := OwnedCount + 1;
           if Attempt = 0 then
@@ -311,6 +311,34 @@ begin
      (not DelTree(ExpandConstant('{app}\.venv'), True, True, True)) then
     RaiseFailure('無法移除舊版 FreeTV 虛擬環境。');
 end;
+procedure CleanManagedReleaseDirectories;
+var
+  AppDir: String;
+  ManagedDirs: array of String;
+  Index: Integer;
+  TargetDir: String;
+begin
+  AppDir := ExpandConstant('{app}');
+  SetArrayLength(ManagedDirs, 7);
+  ManagedDirs[0] := 'backend';
+  ManagedDirs[1] := 'frontend';
+  ManagedDirs[2] := 'runtime';
+  ManagedDirs[3] := 'tools';
+  ManagedDirs[4] := 'licenses';
+  ManagedDirs[5] := 'scripts';
+  ManagedDirs[6] := 'vendor';
+
+  for Index := 0 to GetArrayLength(ManagedDirs) - 1 do
+  begin
+    TargetDir := AppDir + '\' + ManagedDirs[Index];
+    if DirExists(TargetDir) then
+    begin
+      Log('Removing managed directory before extraction: ' + TargetDir);
+      if not DelTree(TargetDir, True, True, True) then
+        RaiseFailure('無法清理舊版目錄：' + TargetDir);
+    end;
+  end;
+end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
@@ -341,6 +369,13 @@ var
   Pythonw: String;
   Parameters: String;
 begin
+  if CurStep = ssInstall then
+  begin
+    MigrateLegacyInstallation;
+    CleanManagedReleaseDirectories;
+    Exit;
+  end;
+
   if CurStep <> ssPostInstall then
     Exit;
 

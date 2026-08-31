@@ -10,8 +10,10 @@ from app import installer
 from app.installer import (
     apply_pending_update,
     bundled_runtime_python,
+    cleanup_completed_installer_update,
     copy_release_files,
     create_user_launcher,
+    finalize_completed_installer_update,
     is_bundled_runtime,
     launch_pending_installer_update,
     managed_files,
@@ -292,6 +294,22 @@ def test_pending_installer_copy_and_cleanup_failures_do_not_crash_bootstrap(
     assert source.exists()
 
 
+def test_pending_installer_matching_version_does_not_delete_marker_or_source(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "installed"
+    marker, source, _ = pending_installer(root, version="v0.4.2")
+    (root / "VERSION").write_text("0.4.2")
+
+    assert not launch_pending_installer_update(
+        root,
+        popen=lambda *args, **kwargs: pytest.fail(f"unexpected launch: {args} {kwargs}"),
+        os_name="nt",
+    )
+    assert marker.exists()
+    assert source.exists()
+
+
 def test_completed_installer_update_cleans_marker_source_and_old_temp_copies(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -305,11 +323,7 @@ def test_completed_installer_update_cleans_marker_source_and_old_temp_copies(
     old_copy.write_bytes(b"old")
     monkeypatch.setattr(installer.tempfile, "gettempdir", lambda: str(temporary))
 
-    assert not launch_pending_installer_update(
-        root,
-        popen=lambda *args, **kwargs: pytest.fail(f"unexpected launch: {args} {kwargs}"),
-        os_name="nt",
-    )
+    assert finalize_completed_installer_update(root, os_name="nt")
     assert not marker.exists()
     assert not source.exists()
     assert not old_copy.exists()
@@ -332,15 +346,12 @@ def test_completed_installer_cleanup_retries_source_before_removing_marker(
         real_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", fail_source_once)
-    no_launch = lambda *args, **kwargs: pytest.fail(
-        f"unexpected launch: {args} {kwargs}"
-    )
 
-    assert not launch_pending_installer_update(root, popen=no_launch, os_name="nt")
+    assert not finalize_completed_installer_update(root, os_name="nt")
     assert marker.exists()
     assert source.exists()
 
-    assert not launch_pending_installer_update(root, popen=no_launch, os_name="nt")
+    assert finalize_completed_installer_update(root, os_name="nt")
     assert not marker.exists()
     assert not source.exists()
 
@@ -362,18 +373,75 @@ def test_completed_installer_cleanup_retries_marker_after_source_is_gone(
         real_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", fail_marker_once)
-    no_launch = lambda *args, **kwargs: pytest.fail(
-        f"unexpected launch: {args} {kwargs}"
-    )
 
-    assert not launch_pending_installer_update(root, popen=no_launch, os_name="nt")
+    assert not finalize_completed_installer_update(root, os_name="nt")
     assert marker.exists()
     assert not source.exists()
 
-    assert not launch_pending_installer_update(root, popen=no_launch, os_name="nt")
+    assert finalize_completed_installer_update(root, os_name="nt")
     assert not marker.exists()
     assert not source.exists()
 
+
+def test_completed_installer_cleanup_cleans_temp_copies_on_ordinary_startup(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "installed"
+    root.mkdir()
+    (root / "VERSION").write_text("0.4.2")
+    temporary = tmp_path / "temporary"
+    old_updates = temporary / "FreeTV-updates"
+    old_updates.mkdir(parents=True)
+    old_copy = old_updates / "FreeTV-update-old.exe"
+    old_copy.write_bytes(b"old")
+    monkeypatch.setattr(installer.tempfile, "gettempdir", lambda: str(temporary))
+
+    assert not finalize_completed_installer_update(root, os_name="nt")
+    assert not old_copy.exists()
+
+
+def test_installer_setup_retains_marker_and_source_on_success_and_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "installed"
+    marker, source, _ = pending_installer(root, version="v0.4.2")
+    (root / "VERSION").write_text("0.4.2")
+    monkeypatch.setattr(freetv, "ROOT", root)
+    monkeypatch.setattr(freetv, "is_bundled_runtime", lambda r: True)
+
+    # Successful setup must NOT delete marker or source
+    monkeypatch.setattr(freetv, "_run_application", lambda args: 0)
+    assert freetv.main(["setup"]) == 0
+    assert marker.exists()
+    assert source.exists()
+
+    # Failed setup must ALSO NOT delete marker or source
+    monkeypatch.setattr(freetv, "_run_application", lambda args: 1)
+    assert freetv.main(["setup"]) == 1
+    assert marker.exists()
+    assert source.exists()
+
+
+def test_bundled_runtime_start_finalizes_completed_installer_update(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "installed"
+    marker, source, _ = pending_installer(root, version="v0.4.2")
+    (root / "VERSION").write_text("0.4.2")
+    temporary = tmp_path / "temporary"
+    old_updates = temporary / "FreeTV-updates"
+    old_updates.mkdir(parents=True)
+    old_copy = old_updates / "FreeTV-update-old.exe"
+    old_copy.write_bytes(b"old")
+    monkeypatch.setattr(installer.tempfile, "gettempdir", lambda: str(temporary))
+    monkeypatch.setattr(freetv, "ROOT", root)
+    monkeypatch.setattr(freetv, "is_bundled_runtime", lambda r: True)
+    monkeypatch.setattr(freetv, "_run_application", lambda args: 0)
+
+    assert freetv.main(["start"]) == 0
+    assert not marker.exists()
+    assert not source.exists()
+    assert not old_copy.exists()
 
 def test_copy_release_files_preserves_user_data(tmp_path: Path) -> None:
     source, target = tmp_path / "package", tmp_path / "installed"

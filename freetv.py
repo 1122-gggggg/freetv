@@ -26,8 +26,8 @@ bundled_runtime_python = _INSTALLER.bundled_runtime_python
 copy_release_files = _INSTALLER.copy_release_files
 user_install_directory = _INSTALLER.user_install_directory
 create_user_launcher = _INSTALLER.create_user_launcher
+finalize_completed_installer_update = _INSTALLER.finalize_completed_installer_update
 is_bundled_runtime = _INSTALLER.is_bundled_runtime
-
 MINIMUM_PYTHON = (3, 11)
 ROOT = Path(__file__).resolve().parent
 
@@ -89,7 +89,10 @@ def main(argv: list[str] | None = None) -> int:
             code = _run_application(["setup"])
             if code != 0:
                 return code
-        return _run_application(["setup"] if command == "install" else raw_arguments)
+        code = _run_application(["setup"] if command == "install" else raw_arguments)
+        if code == 0 and command in {"start", "run"}:
+            finalize_completed_installer_update(ROOT)
+        return code
     if command == "install":
         target = user_install_directory()
         print(f"Installing FreeTV for this user into {target}")
@@ -136,9 +139,14 @@ def main(argv: list[str] | None = None) -> int:
                 )
             if code != 0:
                 return code
-        return _run([str(python), str(ROOT / "freetv.py"), *raw_arguments])
-
-    return _run_application(raw_arguments)
+        code = _run([str(python), str(ROOT / "freetv.py"), *raw_arguments])
+        if code == 0 and command in {"start", "run"}:
+            finalize_completed_installer_update(ROOT)
+        return code
+    code = _run_application(raw_arguments)
+    if code == 0 and command in {"start", "run"}:
+        finalize_completed_installer_update(ROOT)
+    return code
 
 
 if __name__ == "__main__":

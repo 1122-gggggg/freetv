@@ -266,6 +266,12 @@ def start_appliance(
     process: subprocess.Popen[bytes] | None = None
     if not port_is_listening(settings.server.port):
         print("Starting PC TV Controller...")
+        creationflags = (
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            if os.name == "nt" and not supervise
+            else 0
+        )
         process = subprocess.Popen(
             [
                 str(python),
@@ -278,6 +284,11 @@ def start_appliance(
                 ),
             ],
             cwd=backend,
+            stdin=subprocess.DEVNULL if not supervise else None,
+            stdout=subprocess.DEVNULL if not supervise else None,
+            stderr=subprocess.DEVNULL if not supervise else None,
+            close_fds=True,
+            creationflags=creationflags,
         )
         print(f"Backend process started: {process.pid}")
 
@@ -290,8 +301,10 @@ def start_appliance(
         or health.get("frontend") is not True
     ):
         raise RuntimeError(f"Controller did not become fully healthy at {health_url}.")
-    pairing = _wait_json(pairing_url, timeout=15, verify=verify_health)
+    from app.installer import finalize_completed_installer_update
 
+    finalize_completed_installer_update(base)
+    pairing = _wait_json(pairing_url, timeout=15, verify=verify_health)
     origin_file = base / "config" / "tunnel-origin.txt"
     if not no_tunnel:
         cloudflared = paths["cloudflared"]
