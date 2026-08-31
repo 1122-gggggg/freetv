@@ -34,7 +34,7 @@ interface PairingInfo {
   code: string
   expires_at: string
   remote_url?: string | null
-  public_remote_url?: string | null
+  lan_remote_url?: string | null
 }
 
 interface LocalHudMessage {
@@ -302,17 +302,17 @@ export function TVLauncher(): ReactElement {
               </div>
             ) : null}
             <div className="pairing-text-wrapper">
-              <p className="eyebrow">手機網頁遙控器 · 區網低延遲</p>
+              <p className="eyebrow">手機網頁遙控器 · 穩定外網連線</p>
               <strong className="pairing-code">{pairing?.code ?? '------'}</strong>
-              <p className="pairing-instructions">手機與電腦連上同一個 Wi-Fi 後掃描 QR 碼：</p>
+              <p className="pairing-instructions">掃描 QR 碼後即可連線：</p>
               {pairing?.remote_url ? (
                 <code className="pairing-url">{pairing.remote_url}</code>
               ) : (
-                <p className="pairing-url-unavailable">請把電視盒連上區網，才會產生遙控器連結。</p>
+                <p className="pairing-url-unavailable">目前無法產生遙控器連結。</p>
               )}
-              {pairing?.public_remote_url ? (
+              {pairing?.lan_remote_url && pairing.lan_remote_url !== pairing.remote_url ? (
                 <p className="pairing-instructions">
-                  外網備用：<code className="pairing-url">{pairing.public_remote_url}</code>
+                  同 Wi-Fi 低延遲備用：<code className="pairing-url">{pairing.lan_remote_url}</code>
                 </p>
               ) : null}
             </div>

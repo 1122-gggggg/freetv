@@ -239,13 +239,18 @@ def create_app(
         _require_local_tv_host(request, port)
         code, expires_at = app.state.runtime.pairing.current_code()
         public_origin = _public_tunnel_origin()
+        lan_remote_url = _pairing_lan_remote_url(
+            port, app.state.settings.server.transport
+        )
         return {
             "code": code,
             "expires_at": expires_at.isoformat(),
-            "remote_url": _pairing_remote_url(port, app.state.settings.server.transport),
-            "public_remote_url": (
-                f"{public_origin}/remote" if public_origin is not None else None
+            "remote_url": (
+                f"{public_origin}/remote"
+                if public_origin is not None
+                else lan_remote_url
             ),
+            "lan_remote_url": lan_remote_url,
         }
 
     @app.post("/api/pair")
@@ -920,14 +925,11 @@ def _is_public_tunnel_host(host: str) -> bool:
     return urlsplit(origin).hostname == host.split(":", 1)[0].casefold()
 
 
-def _pairing_remote_url(port: int, scheme: str) -> str | None:
+def _pairing_lan_remote_url(port: int, scheme: str) -> str | None:
     address = _default_route_ipv4_address() or _first_lan_ipv4_address()
-    if address is not None:
-        return f"{scheme}://{address}:{port}/remote"
-    public_origin = _public_tunnel_origin()
-    if public_origin is not None:
-        return f"{public_origin}/remote"
-    return None
+    if address is None:
+        return None
+    return f"{scheme}://{address}:{port}/remote"
 
 
 def _default_route_ipv4_address() -> IPv4Address | None:

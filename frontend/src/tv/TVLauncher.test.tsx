@@ -41,14 +41,14 @@ function pairingResponse(
   code: string,
   expiresAt: string,
   remoteUrl?: string,
-  publicRemoteUrl?: string,
+  lanRemoteUrl?: string,
 ): Response {
   return new Response(
     JSON.stringify({
       code,
       expires_at: expiresAt,
       remote_url: remoteUrl ?? null,
-      public_remote_url: publicRemoteUrl ?? null,
+      lan_remote_url: lanRemoteUrl ?? null,
     }),
     { status: 200 },
   )
@@ -76,7 +76,7 @@ describe('TVLauncher pairing code', () => {
     render(<TVLauncher />)
     await act(async () => {})
     expect(screen.getByText('111111')).toBeTruthy()
-    expect(screen.getByText('請把電視盒連上區網，才會產生遙控器連結。')).toBeTruthy()
+    expect(screen.getByText('目前無法產生遙控器連結。')).toBeTruthy()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(55_000)
@@ -93,8 +93,8 @@ describe('TVLauncher pairing code', () => {
         pairingResponse(
           '111111',
           '2026-08-13T00:01:00.000Z',
-          'http://192.168.1.42:8765/remote',
           'https://abc.trycloudflare.com/remote',
+          'http://192.168.1.42:8765/remote',
         ),
       ),
     )
@@ -102,10 +102,10 @@ describe('TVLauncher pairing code', () => {
     render(<TVLauncher />)
     await act(async () => {})
 
-    expect(screen.getByText('http://192.168.1.42:8765/remote')).toBeTruthy()
     expect(screen.getByText('https://abc.trycloudflare.com/remote')).toBeTruthy()
+    expect(screen.getByText('http://192.168.1.42:8765/remote')).toBeTruthy()
     expect(screen.getByTestId('pairing-qr').textContent).toBe(
-      'http://192.168.1.42:8765/remote?code=111111',
+      'https://abc.trycloudflare.com/remote?code=111111',
     )
   })
 

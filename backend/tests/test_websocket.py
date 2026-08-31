@@ -605,10 +605,10 @@ def test_pairing_code_endpoint_includes_lan_remote_url(tmp_path, monkeypatch) ->
 
     assert response.status_code == 200
     assert response.json()["remote_url"] == "http://192.168.1.42:8765/remote"
-    assert response.json()["public_remote_url"] is None
+    assert response.json()["lan_remote_url"] == "http://192.168.1.42:8765/remote"
 
 
-def test_pairing_code_endpoint_prefers_low_latency_lan_and_keeps_public_fallback(
+def test_pairing_code_endpoint_prefers_public_qr_and_keeps_lan_fallback(
     tmp_path, monkeypatch
 ) -> None:
     app = make_app(tmp_path)
@@ -619,8 +619,8 @@ def test_pairing_code_endpoint_prefers_low_latency_lan_and_keeps_public_fallback
         response = client.get("/api/pairing", headers={"host": "127.0.0.1:8765"})
 
     assert response.status_code == 200
-    assert response.json()["remote_url"] == "http://192.168.1.42:8765/remote"
-    assert response.json()["public_remote_url"] == "https://abc.trycloudflare.com/remote"
+    assert response.json()["remote_url"] == "https://abc.trycloudflare.com/remote"
+    assert response.json()["lan_remote_url"] == "http://192.168.1.42:8765/remote"
 
 
 def test_pairing_accepts_public_tunnel_origin_from_loopback(tmp_path, monkeypatch) -> None:
