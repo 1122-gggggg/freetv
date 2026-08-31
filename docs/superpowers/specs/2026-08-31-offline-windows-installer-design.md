@@ -4,7 +4,7 @@
 
 Make Windows installation a single offline `FreeTV-Setup.exe` under 250 MB. A user downloads it, completes one short wizard, and starts FreeTV without installing Python, opening PowerShell, invoking `winget` or `pip`, or requiring Internet access.
 
-Chrome remains external. A private Python runtime, mpv, cloudflared, the built frontend, backend dependencies, and the primary AdBlock extension ship inside the installer.
+Chrome remains external. A private Python runtime, mpv, cloudflared, the built frontend, and backend dependencies ship inside the installer. FreeTV applies the primary AdBlock Web Store policy without downloading or redistributing its CRX; Chrome retrieves it from the official store when Internet access is available.
 
 ## Current problem
 
@@ -16,7 +16,7 @@ The v0.4.1 installer is a 2.2 MB online bootstrap. Its post-install step opens P
 2. Use the official CPython 3.13 x64 embedded distribution. Pin the exact patch version, source URL, architecture, size, and SHA-256 in the repository.
 3. Vendor runtime wheels beside the embedded interpreter at release-build time. Do not ship pip or pytest.
 4. Bundle baseline x86-64 mpv and x64 cloudflared portable binaries.
-5. Bundle only the primary Chrome Web Store AdBlock extension (`gighmmpiobklfepjocnamgkkbiglidom`). Remove the second YouTube-specific extension (`cmedhionkhpnakcndndgjdbohmhepckk`) because its downloaded package and current store listing do not provide verifiable redistribution terms.
+5. Do not bundle Chrome extension files. Keep only the primary Chrome Web Store AdBlock policy (`gighmmpiobklfepjocnamgkkbiglidom`) and remove the second YouTube-specific extension (`cmedhionkhpnakcndndgjdbohmhepckk`), whose downloaded package and current store listing do not provide verifiable redistribution terms.
 6. Keep Chrome external. Missing Chrome is a capability warning, not an installation failure.
 7. Replace partial Windows zip updates with complete installer updates.
 8. Keep installation per-user and do not modify `PATH` or the system Python.
@@ -64,14 +64,13 @@ No network is required to install, initialize configuration, open the LAN TV int
       cloudflared.exe
   backend\app\
   frontend\dist\
-  vendor\adblock\
   config\
   logs\
   licenses\
   scripts\
 ```
 
-`config` and `logs` are user state. `runtime`, `tools`, `backend/app`, `frontend/dist`, `vendor/adblock`, managed root files, and third-party notices are release-managed.
+`config` and `logs` are user state. `runtime`, `tools`, `backend/app`, `frontend/dist`, managed root files, and third-party notices are release-managed.
 
 ## Reproducible release build
 
@@ -85,10 +84,9 @@ The Windows release job:
 4. Extracts CPython under `runtime`.
 5. Installs runtime-only Windows wheels under `runtime/site-packages`.
 6. Extracts mpv and cloudflared under `tools`.
-7. Downloads the primary AdBlock CRX through the existing Chrome Web Store endpoint, validates its CRX3 structure and extension ID, and extracts it under `vendor/adblock`.
-8. Copies application code, frontend output, examples, runtime scripts, and third-party notices.
-9. Runs the private interpreter directly to prove imports, configuration initialization, bundled executable discovery, and backend startup.
-10. Compiles the complete stage with Inno Setup and rejects an installer larger than 250 MB.
+7. Copies application code, frontend output, examples, runtime scripts, and third-party notices.
+8. Runs the private interpreter directly to prove imports, configuration initialization, bundled executable discovery, and backend startup.
+9. Compiles the complete stage with Inno Setup and rejects an installer larger than 250 MB.
 
 The build may use the network. The resulting installer may not. Unpinned `latest` downloads are forbidden in the release job.
 
@@ -102,7 +100,7 @@ The build may use the network. The resulting installer may not. Unpinned `latest
 
 Start Menu, desktop, and sign-in launchers call `runtime\pythonw.exe freetv.py start`.
 
-Bundled setup only validates the private runtime and AdBlock files, initializes missing configuration from examples, applies the existing Chrome policy when Chrome is present, and records capability diagnostics. It performs no download.
+Bundled setup only validates the private runtime, initializes missing configuration from examples, applies the primary Chrome Web Store policy when Chrome is present, and records capability diagnostics. It performs no download; Chrome retrieves the extension later when Internet access is available.
 
 Application resolution order is:
 
@@ -136,7 +134,7 @@ Portable and non-Windows installations keep the existing zip updater. Update art
 
 ## Failure and security boundaries
 
-- Release generation fails for an unverified artifact, missing license, wrong architecture, missing Windows wheel, invalid extension ID, failed private-runtime import, failed startup, or installer over 250 MB.
+- Release generation fails for an unverified artifact, missing license, wrong architecture, missing Windows wheel, failed private-runtime import, failed startup, or installer over 250 MB.
 - No target-machine path invokes a package manager or executes a downloaded script.
 - Update URLs remain restricted to HTTPS and trusted GitHub Release hosts; every redirect is checked.
 - Installer updates are SHA-256 verified before execution.
