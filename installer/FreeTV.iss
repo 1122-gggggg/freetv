@@ -61,6 +61,7 @@ Name: "{userstartup}\FreeTV"; Filename: "{app}\runtime\pythonw.exe"; Parameters:
 var
   PreservedConfigPath: String;
   PreservedLogsPath: String;
+  SetupFailureExitCode: Integer;
 
 function IsApplicationUpdate: Boolean;
 begin
@@ -69,7 +70,13 @@ end;
 
 procedure RaiseFailure(const Message: String);
 begin
+  SetupFailureExitCode := 1;
   RaiseException(Format('%s 安裝記錄：%s', [Message, ExpandConstant('{log}')]));
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  Result := SetupFailureExitCode;
 end;
 
 procedure CopyUserDirectory(
@@ -135,10 +142,172 @@ begin
     RaiseFailure('無法清理 ' + Name + ' 的暫存保留資料。');
 end;
 
+function IsLegacyVenvExecutable(const ExecutablePath: String): Boolean;
+var
+  LegacyPrefix: String;
+begin
+  LegacyPrefix := AddBackslash(ExpandConstant('{app}\.venv'));
+  Result :=
+    (Length(ExecutablePath) >= Length(LegacyPrefix)) and
+    (CompareText(
+      Copy(ExecutablePath, 1, Length(LegacyPrefix)),
+      LegacyPrefix
+    ) = 0);
+end;
+
+procedure TerminateLegacyVenvProcesses;
+var
+  Attempt: Integer;
+  ExecutablePath: String;
+  Index: Integer;
+  OwnedCount: Integer;
+  Process: Variant;
+  Processes: Variant;
+  QueryError: String;
+  Services: Variant;
+  TerminateError: String;
+  TerminateResult: Integer;
+  WmiLocator: Variant;
+begin
+  Attempt := 0;
+  repeat
+    OwnedCount := 0;
+    QueryError := '';
+    TerminateError := '';
+    try
+      WmiLocator := CreateOleObject('WbemScripting.SWbemLocator');
+      Services := WmiLocator.ConnectServer('.', 'root\cimv2');
+      Processes := Services.ExecQuery(
+        'SELECT ProcessId, ExecutablePath FROM Win32_Process ' +
+        'WHERE ExecutablePath IS NOT NULL'
+      );
+      for Index := 0 to Processes.Count - 1 do
+      begin
+        Process := Processes.ItemIndex(Index);
+        ExecutablePath := Process.ExecutablePath;
+        if IsLegacyVenvExecutable(ExecutablePath) then
+        begin
+          OwnedCount := OwnedCount + 1;
+          if Attempt = 0 then
+          begin
+            TerminateResult := Process.Terminate(0);
+            if TerminateResult <> 0 then
+              TerminateError :=
+                '無法終止舊版 FreeTV 程序 ' +
+                IntToStr(Process.ProcessId) + '（代碼 ' +
+                IntToStr(TerminateResult) + '）。';
+          end;
+        end;
+      end;
+    except
+      QueryError := GetExceptionMessage;
+    end;
+
+    if QueryError <> '' then
+      RaiseFailure('無法查詢舊版 FreeTV 程序：' + QueryError);
+    if TerminateError <> '' then
+      RaiseFailure(TerminateError);
+    if OwnedCount = 0 then
+      Exit;
+
+    Sleep(100);
+    Attempt := Attempt + 1;
+  until Attempt >= 100;
+
+  RaiseFailure('舊版 FreeTV 程序未在 10 秒內結束。');
+end;
+
+procedure MigrateLegacyInstallation;
+var
+  Action: Variant;
+  Actions: Variant;
+  Candidate: Variant;
+  ExpectedArguments: String;
+  Found: Boolean;
+  Index: Integer;
+  Owned: Boolean;
+  QueryError: String;
+  RootFolder: Variant;
+  Scheduler: Variant;
+  Task: Variant;
+  Tasks: Variant;
+begin
+  Found := False;
+  Owned := False;
+  QueryError := '';
+  try
+    Scheduler := CreateOleObject('Schedule.Service');
+    Scheduler.Connect;
+    RootFolder := Scheduler.GetFolder('\');
+    Tasks := RootFolder.GetTasks(0);
+    for Index := 1 to Tasks.Count do
+    begin
+      Candidate := Tasks.Item(Index);
+      if CompareText(Candidate.Name, 'PC TV Box') = 0 then
+      begin
+        Task := Candidate;
+        Found := True;
+        Break;
+      end;
+    end;
+
+    if Found then
+    begin
+      Actions := Task.Definition.Actions;
+      if Actions.Count = 1 then
+      begin
+        Action := Actions.Item(1);
+        ExpectedArguments := ExpandConstant(
+          '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden ' +
+          '-File "{app}\scripts\start.ps1" -Supervise'
+        );
+        try
+          Owned :=
+            (CompareText(ExtractFileName(Action.Path), 'powershell.exe') = 0) and
+            (CompareText(Action.Arguments, ExpectedArguments) = 0);
+        except
+          Owned := False;
+        end;
+      end;
+
+      if Owned and (Task.State = 4) then
+        Task.Stop(0);
+    end;
+  except
+    QueryError := GetExceptionMessage;
+  end;
+
+  if QueryError <> '' then
+    RaiseFailure('無法查詢舊版 PC TV Box 排程工作：' + QueryError);
+  if not Found then
+    Log('Legacy PC TV Box scheduled task was not found.')
+  else if not Owned then
+    Log('Preserving unrelated scheduled task named PC TV Box.');
+
+  TerminateLegacyVenvProcesses;
+
+  if Owned then
+  begin
+    QueryError := '';
+    try
+      RootFolder.DeleteTask('PC TV Box', 0);
+    except
+      QueryError := GetExceptionMessage;
+    end;
+    if QueryError <> '' then
+      RaiseFailure('無法刪除舊版 PC TV Box 排程工作：' + QueryError);
+  end;
+
+  if DirExists(ExpandConstant('{app}\.venv')) and
+     (not DelTree(ExpandConstant('{app}\.venv'), True, True, True)) then
+    RaiseFailure('無法移除舊版 FreeTV 虛擬環境。');
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
   begin
+    MigrateLegacyInstallation;
     PreserveUserDirectory('config', PreservedConfigPath);
     PreserveUserDirectory('logs', PreservedLogsPath);
   end
@@ -153,36 +322,6 @@ begin
       True
     );
   end;
-end;
-
-procedure DeleteLegacyScheduledTask;
-var
-  ResultCode: Integer;
-begin
-  if not Exec(
-    ExpandConstant('{sys}\schtasks.exe'),
-    '/Query /TN "PC TV Box"',
-    '',
-    SW_HIDE,
-    ewWaitUntilTerminated,
-    ResultCode
-  ) then
-    RaiseFailure('無法檢查舊版 PC TV Box 排程工作。');
-
-  if ResultCode <> 0 then
-    Exit;
-
-  if not Exec(
-    ExpandConstant('{sys}\schtasks.exe'),
-    '/Delete /TN "PC TV Box" /F',
-    '',
-    SW_HIDE,
-    ewWaitUntilTerminated,
-    ResultCode
-  ) then
-    RaiseFailure('無法刪除舊版 PC TV Box 排程工作。');
-  if ResultCode <> 0 then
-    RaiseFailure(Format('刪除舊版 PC TV Box 排程工作失敗（代碼 %d）。', [ResultCode]));
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -211,10 +350,7 @@ begin
   if ResultCode <> 0 then
     RaiseFailure(Format('FreeTV 初始化失敗（代碼 %d）。', [ResultCode]));
 
-  if DirExists(ExpandConstant('{app}\.venv')) and
-     (not DelTree(ExpandConstant('{app}\.venv'), True, True, True)) then
-    RaiseFailure('無法移除舊版 FreeTV 虛擬環境。');
-  DeleteLegacyScheduledTask;
+  MigrateLegacyInstallation;
 
   if WizardIsTaskSelected('appliancepower') and (not IsApplicationUpdate) then
   begin
@@ -245,14 +381,14 @@ begin
     Parameters,
     ExpandConstant('{app}'),
     SW_HIDE,
-    ewNoWait,
+    ewWaitUntilTerminated,
     ResultCode
   ) then
     RaiseFailure('無法啟動 FreeTV。');
+  if ResultCode <> 0 then
+    RaiseFailure(Format('FreeTV 啟動失敗（代碼 %d）。', [ResultCode]));
 end;
 
-[UninstallRun]
-Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /TN ""PC TV Box"" /F"; RunOnceId: "RemoveLegacyPCTVBoxTask"; Flags: waituntilterminated runhidden
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\.venv"
