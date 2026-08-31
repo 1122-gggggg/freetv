@@ -5,36 +5,39 @@ A local controller that turns an HDMI-connected Windows, macOS, or Linux PC into
 ## Requirements
 
 - Windows 10/11, macOS, or Linux, signed in as the user who will run the TV controller.
-- Python 3.11+ on `PATH` (`python` / `python3`, or the Windows `py` launcher). The Windows installer can install a user-scoped Python through `winget`; macOS/Linux installers fail closed and ask for Python instead of changing the system package manager.
-- Google Chrome or Chromium for YouTube/News TV playback and the Netflix standalone app window. Netflix still relies on Chrome/Widevine and the user's normal Netflix authorization.
-- [mpv](https://mpv.io/installation/) for Live TV.
-- Laptop/PC on a private LAN. Phone may be on another network if `cloudflared` is installed.
+- **Windows 10/11 x64 installer:** Self-contained offline installer includes a bundled Python 3.13 private runtime, prebuilt backend, mpv, and cloudflared. No Python, Node.js, winget, or pip is required on the host.
+- **macOS / Linux / Portable zip / Git clones:** Python 3.11+ on `PATH` (`python` / `python3`, or the Windows `py` launcher). macOS/Linux installers fail closed and ask for Python instead of changing the system package manager.
+- Google Chrome or Chromium for YouTube/News TV playback and the Netflix standalone app window. Chrome and online streaming services still need an Internet connection when used; the Windows installer itself does not. Netflix protected playback relies on Chrome/Widevine and the user's normal Netflix authorization.
+- [mpv](https://mpv.io/installation/) for Live TV (bundled in the Windows installer; install separately on macOS/Linux/portable setups).
+- [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) for optional remote phone pairing over Cloudflare Tunnel (bundled in the Windows installer).
+- Laptop/PC on a private LAN. Phone may be on another network if `cloudflared` is running.
 - Linux remotes also need `xdotool` or `ydotool` for D-pad/touchpad injection, and `wpctl` or `pactl` for system volume.
 - Node.js LTS only if `frontend/dist` is missing (git clones). Release zips already include it.
 - Native Android builds additionally require Android Studio, its Android SDK, and a JDK. Native iOS builds require macOS/Xcode or an authenticated Expo EAS build account.
 
 ## Installation
 
-### One-click per-user install (recommended)
+### Windows 10/11 x64 (recommended)
 
-Download the installer entry for your platform from the latest GitHub Release:
+Download **FreeTV-Setup.exe** and double-click it. Installation is per-user (`%LOCALAPPDATA%\FreeTV`) and does not require Python or an Internet connection. Windows may show an unknown-publisher warning because this release is not Authenticode-signed; verify `FreeTV-Setup.exe.sha256` when authenticity matters.
 
-- **Windows 10/11 x64:** download and double-click `FreeTV-Setup.exe`. The per-user installer deploys FreeTV under `%LOCALAPPDATA%\FreeTV`, creates Start Menu and optional desktop shortcuts, enables logon autostart, and starts the fullscreen TV interface. If Python is missing, installation may use `winget` with `--scope user`.
-- **macOS/Linux:** download `install.sh`, then run `sh install.sh`. It verifies the release checksum, installs under the current user's application-data directory, creates a user launcher, and starts FreeTV. Python 3.11+, `curl`, and `unzip` must already be available.
+The offline installer:
+- Deploys the application under `%LOCALAPPDATA%\FreeTV` with an isolated Python 3.13 private runtime and prebuilt backend (no `.venv` created).
+- Bundles portable `mpv` for Live TV and `cloudflared` for remote tunnels.
+- Creates Start Menu and optional desktop shortcuts.
+- Configures logon autostart by default.
+- Provides an optional task to keep the laptop running when the lid is closed (disables sleep/hibernation on the active power plan; prompts for UAC only when selected).
+- Preserves existing user configuration (`config`), pairings, and logs during updates.
 
-The installer never replaces `config`, `.venv`, `vendor`, or `logs` during upgrades. Chrome/Chromium remains required for browser playback; mpv and cloudflared remain optional capabilities rather than silently installed system dependencies.
+### Other platforms and advanced downloads
 
-### Keep running with a laptop lid closed (Windows)
+#### macOS/Linux one-click install
 
-The recommended `FreeTV-Setup.exe` option configures the active Windows power plan automatically: closing the lid does nothing, and automatic sleep and hibernation are disabled on both plugged-in and battery power. Windows may request administrator approval for this power-plan change. To verify or change it manually:
+Download `install.sh`, then run `sh install.sh`. It verifies the release checksum, installs under the current user's application-data directory, creates a user launcher, and starts FreeTV. Python 3.11+, `curl`, and `unzip` must already be available.
 
-1. Open **Control Panel → Hardware and Sound → Power Options → Choose what closing the lid does**.
-2. Confirm **When I close the lid** is **Do nothing** for both **On battery** and **Plugged in**.
-3. Open **Settings → System → Power & battery → Screen and sleep** and confirm sleep is **Never**. The display itself may still turn off.
+The installer never replaces `config` or `logs` during upgrades.
 
-Keep the laptop connected to power and place it where closing the lid does not obstruct cooling vents. Disabling sleep on battery can drain it completely; Windows critical-battery protection still applies.
-
-### Portable folder
+#### Portable folder
 
 Copy this repository or unzip `pc-tv-box.zip` from GitHub Releases, then:
 
@@ -61,13 +64,7 @@ python freetv.py autostart   # start at login (Task Scheduler / systemd / launch
 
 Skip the browser window with `python freetv.py start --no-browser`. Skip Cloudflare with `--no-tunnel`.
 
-## Updates
-
-FreeTV checks GitHub Release metadata in the background. When a newer tagged release contains the exact `pc-tv-box.zip` and `pc-tv-box.zip.sha256` assets, the TV, web Remote, and native Remote receive an update notice through controller state.
-
-Select **立即更新** from a paired client to download and verify the archive. The controller stages it under `config/updates` and leaves the running version untouched. Restart FreeTV once to apply the staged managed files; personal configuration, the virtual environment, extensions, and logs are preserved. Invalid checksums, unsafe ZIP paths, oversized archives, unauthenticated remotes, and concurrent update attempts are rejected.
-
-### Appliance (Release zip, Windows PowerShell)
+#### Appliance (Release zip, Windows PowerShell)
 
 Download `pc-tv-box.zip` from GitHub Releases, unzip it, enter the extracted
 `pc-tv-box` directory, then in PowerShell:
@@ -79,7 +76,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 The zip includes a prebuilt `frontend\dist`, so setup needs Python 3.11+ and network access to install its Python packages. From a development checkout after `npm run build` in `frontend`, `.\scripts\package.ps1` writes the same zip locally.
 
-### Development (git clone)
+#### Development (git clone)
 
 ```bash
 python freetv.py setup
@@ -93,6 +90,25 @@ Set-ExecutionPolicy -Scope Process Bypass
 ```
 
 The setup path selects a qualifying Python 3.11+ runtime, creates `.venv`, installs Python dependencies, downloads and verifies the official Chrome Web Store AdBlock extension into `vendor/adblock`, and builds the frontend when `frontend/dist` is missing (requires Node.js LTS). An existing `.venv` must contain an isolated Python 3.11+ runtime; setup leaves an invalid environment untouched and asks you to remove or rename it manually. It also creates ignored `config/settings.json`, `config/channels.json`, and `config/news.json` from their examples. Default transport is plain HTTP on the private LAN. HTTPS mode additionally creates a controller-specific local CA plus an IP-address TLS certificate in ignored `config/tls`.
+
+### Keep running with a laptop lid closed (Windows)
+
+The installer includes an optional task during setup that configures the active Windows power plan automatically: closing the lid does nothing, and automatic sleep and hibernation are disabled on both plugged-in and battery power (Windows requests administrator approval only when this option is checked). To verify or change it manually:
+
+1. Open **Control Panel → Hardware and Sound → Power Options → Choose what closing the lid does**.
+2. Confirm **When I close the lid** is **Do nothing** for both **On battery** and **Plugged in**.
+3. Open **Settings → System → Power & battery → Screen and sleep** and confirm sleep is **Never**. The display itself may still turn off.
+
+Keep the laptop connected to power and place it where closing the lid does not obstruct cooling vents. Disabling sleep on battery can drain it completely; Windows critical-battery protection still applies.
+
+## Updates
+
+FreeTV checks GitHub Release metadata in the background. When a newer tagged release is available:
+
+- **Installed Windows instances (`FreeTV-Setup.exe`):** The controller downloads and verifies `FreeTV-Setup.exe` and `FreeTV-Setup.exe.sha256`, staging the installer under `config/updates`. Select **立即更新** from a paired client or restart FreeTV to run the installer update silently in the background. Application files and bundled runtimes are updated while personal configuration (`config`), pairings, and logs are preserved.
+- **Portable / Archive instances (`pc-tv-box.zip`):** The controller downloads and verifies `pc-tv-box.zip` and `pc-tv-box.zip.sha256`. Restart FreeTV to apply staged managed files; personal configuration, `.venv`, extensions, and logs are preserved.
+
+Invalid checksums, unsafe paths, oversized downloads, unauthenticated remotes, and concurrent update attempts are rejected.
 
 Configure nonstandard executable locations in `config/settings.json`:
 

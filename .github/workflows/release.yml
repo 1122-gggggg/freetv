@@ -181,6 +181,10 @@ jobs:
           ./scripts/build-installer.ps1 `
             -PackagePath ./pc-tv-box.zip `
             -OutputPath ./FreeTV-Setup.exe
+          $size = (Get-Item -LiteralPath ./FreeTV-Setup.exe).Length
+          if ($size -gt 250MB) {
+            throw "FreeTV-Setup.exe size ($size bytes) exceeds 250 MiB limit."
+          }
           $hash = (Get-FileHash -LiteralPath ./FreeTV-Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           [System.IO.File]::WriteAllText(
             (Join-Path $PWD 'FreeTV-Setup.exe.sha256'),
@@ -324,12 +328,17 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $env:HTTP_PROXY = 'http://127.0.0.1:9'
+          $env:HTTPS_PROXY = 'http://127.0.0.1:9'
+          $env:NO_PROXY = '127.0.0.1,localhost'
+
           $installer = Start-Process `
             -FilePath './release-artifact/FreeTV-Setup.exe' `
             -ArgumentList @(
               '/VERYSILENT',
               '/SUPPRESSMSGBOXES',
               '/NORESTART',
+              '/TASKS="autostart,desktopicon,!appliancepower"',
               '/LOG=FreeTV-Setup.log'
             ) `
             -PassThru
@@ -340,22 +349,48 @@ jobs:
           }
 
           $installed = Join-Path $env:LOCALAPPDATA 'FreeTV'
-          $python = Join-Path $installed '.venv\Scripts\python.exe'
+          $python = Join-Path $installed 'runtime\python.exe'
           $smoke = Join-Path $installed 'scripts\integration-smoke.py'
           if (-not (Test-Path -LiteralPath $python) -or -not (Test-Path -LiteralPath $smoke)) {
             throw 'FreeTV installer did not create a runnable application.'
           }
-          & (Join-Path $installed 'scripts\configure-appliance-power.ps1') -VerifyOnly
-          if ($LASTEXITCODE -ne 0) {
-            throw "Installed FreeTV power configuration failed with exit code $LASTEXITCODE."
+          foreach ($required in @(
+            (Join-Path $installed 'runtime\python.exe'),
+            (Join-Path $installed 'runtime\pythonw.exe'),
+            (Join-Path $installed 'tools\mpv\mpv.exe'),
+            (Join-Path $installed 'tools\cloudflared\cloudflared.exe')
+          )) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+              throw "Installed FreeTV is missing required file: $required"
+            }
           }
-          $task = Get-ScheduledTask -TaskName 'PC TV Box' -ErrorAction Stop
-          if ($task.State -eq 'Disabled') {
-            throw 'FreeTV autostart task is disabled.'
+          if (Test-Path -LiteralPath (Join-Path $installed '.venv')) {
+            throw 'Installed FreeTV unexpectedly contains .venv directory.'
           }
-          & $python $smoke --transport http --port 8765 --lan-ip 127.0.0.1
+
+          & $installed\runtime\python.exe $installed\freetv.py start --no-browser --no-tunnel
+          & $installed\runtime\python.exe $installed\scripts\integration-smoke.py `
+            --transport http --port 8765 --lan-ip 127.0.0.1
           if ($LASTEXITCODE -ne 0) {
             throw "Installed FreeTV integration smoke failed with exit code $LASTEXITCODE."
+          }
+
+          $runtimePattern = [regex]::Escape((Join-Path $installed 'runtime'))
+          $controllerProcesses = @(
+            Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+              Where-Object {
+                $_.CommandLine -and
+                $_.CommandLine -match ([regex]::Escape($installed)) -and
+                $_.CommandLine -match '(?i)(?:^|\s)-m\s+uvicorn\s+app\.main:app(?:\s|$)'
+              }
+          )
+          if ($controllerProcesses.Count -eq 0) {
+            throw 'No running FreeTV controller process found.'
+          }
+          foreach ($proc in $controllerProcesses) {
+            if ($proc.ExecutablePath -notmatch "^$runtimePattern\\python(?:\.exe)?$") {
+              throw "Controller process executable path $($proc.ExecutablePath) is not under runtime directory."
+            }
           }
       - name: Clean up installed FreeTV
         if: ${{ always() }}
@@ -412,6 +447,10 @@ jobs:
             echo "Refusing to publish: tag no longer targets the tested commit." >&2
             exit 1
           fi
+          printf '%s\n\n%s\n\n%s\n' \
+            '## Windows 10/11 x64' \
+            'Download **FreeTV-Setup.exe** and double-click it. Installation is per-user and does not require Python or an Internet connection. Windows may show an unknown-publisher warning because this release is not Authenticode-signed; verify `FreeTV-Setup.exe.sha256` when authenticity matters.' \
+            '## Other platforms and advanced downloads' > release-notes.md
           gh release create "$GITHUB_REF_NAME" \
             release-artifact/pc-tv-box.zip \
             release-artifact/pc-tv-box.zip.sha256 \
@@ -424,4 +463,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md \
             --generate-notes

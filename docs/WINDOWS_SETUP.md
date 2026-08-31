@@ -1,17 +1,31 @@
 # Windows 11 Setup
 
-## First installation
+## Installation methods
+
+### 1. Offline Windows installer (recommended)
+
+Download **FreeTV-Setup.exe** from the latest GitHub Release and double-click it.
+
+- **Self-contained & offline:** Deploys FreeTV under `%LOCALAPPDATA%\FreeTV` with a private Python 3.13 runtime, prebuilt backend, mpv, and cloudflared. No Python, Node.js, winget, pip, or Internet connection is required during installation.
+- **Browser requirement:** Google Chrome or Chromium is required for YouTube/News TV playback and Netflix. Internet access is needed when using Chrome and online streaming services, but not for installing FreeTV.
+- **SmartScreen warning:** Because releases are not Authenticode-signed, Windows SmartScreen may show an unknown-publisher dialog. Click **More info** → **Run anyway** (verify `FreeTV-Setup.exe.sha256` when authenticity matters).
+- **Setup options:**
+  - **Desktop shortcut:** Creates a `FreeTV` desktop shortcut.
+  - **Logon autostart:** Configures FreeTV to start automatically in background supervised mode when signing in to Windows (via user Startup shortcut).
+  - **Lid-close power configuration (optional):** Configures the active Windows power plan so closing a laptop lid does not sleep or hibernate the machine (prompts for UAC only when selected).
+- **Updates:** FreeTV checks GitHub Releases for newer `FreeTV-Setup.exe` and `FreeTV-Setup.exe.sha256` assets. Updating via the web/native Remote stages the installer under `config/updates` and executes it silently on restart, updating application binaries while preserving `config`, pairings, and `logs`.
+
+### 2. Portable archive or developer checkout
 
 1. Install Python 3.11+ as `python` on `PATH` or through the Windows `py` launcher. Node.js LTS is needed only if you clone the repo and `frontend\dist` is missing.
 2. Install Google Chrome. YouTube/News and Netflix use separate ignored Chrome profiles; Netflix protected playback still depends on Chrome/Widevine and a user-authorized Netflix account.
 3. Install [mpv](https://mpv.io/installation/) if Live TV is required. Add its directory to `PATH` or set `applications.mpv_path` in `config/settings.json`.
-4. In PowerShell at the repository root or unzipped Release directory, run `Set-ExecutionPolicy -Scope Process Bypass` then `./scripts/setup.ps1`.
+4. In PowerShell at the repository root or unzipped Release directory (`pc-tv-box.zip`), run `Set-ExecutionPolicy -Scope Process Bypass` then `./scripts/setup.ps1`.
 5. Review local `config/settings.json` and `config/channels.json`. Those files are intentionally ignored by Git because they are machine-specific. Default `server.transport` is `"http"`.
 
-Setup validates any existing `.venv` as an isolated Python 3.11+ environment. If it is incomplete, unusable, or too old, setup does not delete it; remove or rename it manually before retrying.
+Setup validates any existing `.venv` as an isolated Python 3.11+ environment. If it is incomplete, unusable, or too old, setup does not delete it; remove or rename it manually before retrying. Portable updates use `pc-tv-box.zip` and `pc-tv-box.zip.sha256`.
 
 ## Network and firewall
-
 The backend binds only to `0.0.0.0:8765` so a paired phone can reach `http://<PC-LAN-IP>:8765/remote` on the private LAN. Keep `server.host` set to `0.0.0.0`; `start.ps1` rejects another binding because the controller's LAN and loopback policies depend on this separation. When Windows asks about firewall access, select **Private networks** only. Do not select Public networks and do not add a router port-forwarding rule.
 
 Find the Remote address by running `./scripts/start.ps1`; it prints the selected IPv4 address. Open that exact numeric address on phones rather than a PC name or custom hostname. Phones must be on the same Wi-Fi/LAN. Guest Wi-Fi often blocks device-to-device traffic and will not work.
@@ -25,15 +39,10 @@ When Edge is available, it starts only the local MY TV launcher in Edge's docume
 The controller launches only its own browser children. YouTube/News use `config\chrome-tv-profile`; Netflix uses `config\chrome-netflix-profile`. Both profiles receive `--disable-notifications` and `--deny-permission-prompts` on their command line, so setup does not grant a global website permission or alter a daily Chrome profile. HOME and shutdown act only on the tracked PID/HWND tree.
 
 For automatic start after sign-in:
-
-```powershell
-./scripts/install-autostart.ps1
-```
-
-This creates one current-user Task Scheduler task that can start and continue on battery power. Its startup action remains attached as a controller supervisor and makes three one-minute restart attempts after a failure. Installation and removal refuse to touch an unrelated same-name task. It is not a Windows service and does not run in Session 0. Remove it with `./scripts/install-autostart.ps1 -Remove`.
+- **Installed Windows app:** The installer automatically creates a user Startup shortcut launching `runtime\pythonw.exe freetv.py start --supervise` without console windows.
+- **Portable / developer setup:** Run `./scripts/install-autostart.ps1`. This creates one current-user Task Scheduler task that can start and continue on battery power. Its startup action remains attached as a controller supervisor and makes three one-minute restart attempts after a failure. Remove it with `./scripts/install-autostart.ps1 -Remove`.
 
 ## Application paths
-
 Common paths are detected automatically:
 
 - Brave: `C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe`
