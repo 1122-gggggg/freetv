@@ -80,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
     raw_arguments = list(argv) if argv is not None else sys.argv[1:]
     arguments = parse_arguments(raw_arguments)
     command = arguments.command or "run"
+    if is_bundled_runtime(ROOT):
+        return _run_application(["setup"] if command == "install" else raw_arguments)
     if command == "install":
         target = user_install_directory()
         print(f"Installing FreeTV for this user into {target}")
@@ -98,8 +100,6 @@ def main(argv: list[str] | None = None) -> int:
         code = _run([sys.executable, str(ROOT / "freetv.py"), "setup"])
         if code != 0:
             return code
-    if is_bundled_runtime(ROOT):
-        return _run_application(raw_arguments)
     python = venv_python()
 
     if sys.prefix == getattr(sys, "base_prefix", sys.prefix):

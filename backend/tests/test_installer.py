@@ -255,6 +255,32 @@ def test_bundled_runtime_runs_application_without_venv_bootstrap(monkeypatch) ->
 
 
 
+def test_bundled_runtime_install_finalizes_without_legacy_bootstrap(
+    tmp_path: Path, monkeypatch
+) -> None:
+    application_calls: list[list[str]] = []
+    monkeypatch.setattr(freetv, "is_bundled_runtime", lambda root: True)
+    monkeypatch.setattr(freetv, "user_install_directory", lambda: tmp_path / "installed")
+    monkeypatch.setattr(
+        freetv,
+        "_run_application",
+        lambda arguments: application_calls.append(arguments) or 0,
+    )
+    monkeypatch.setattr(
+        freetv,
+        "copy_release_files",
+        lambda *args: pytest.fail(f"unexpected legacy install copy: {args}"),
+    )
+    monkeypatch.setattr(
+        freetv,
+        "_run",
+        lambda command: pytest.fail(f"unexpected bootstrap command: {command}"),
+    )
+
+    assert freetv.main(["install"]) == 0
+    assert application_calls == [["setup"]]
+
+
 def test_applied_update_finishes_dependency_setup_before_start(monkeypatch) -> None:
     commands: list[list[str]] = []
     monkeypatch.setattr(freetv, "UPDATE_APPLIED", True)

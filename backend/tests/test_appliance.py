@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from app import appliance
 from app.appliance import (
     application_python,
     _systemd_quote,
@@ -35,6 +36,7 @@ def test_venv_python_uses_platform_layout(tmp_path: Path) -> None:
     assert venv_python(tmp_path, os_name="nt") == tmp_path / ".venv" / "Scripts" / "python.exe"
     assert venv_python(tmp_path, os_name="posix") == tmp_path / ".venv" / "bin" / "python"
 
+
 def test_application_python_prefers_bundled_runtime(tmp_path: Path) -> None:
     bundled = tmp_path / "runtime" / "python.exe"
     bundled.parent.mkdir()
@@ -42,6 +44,36 @@ def test_application_python_prefers_bundled_runtime(tmp_path: Path) -> None:
 
     assert application_python(tmp_path, os_name="nt") == bundled
 
+
+def test_bundled_setup_keeps_non_pip_setup_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = tmp_path / "runtime" / "python.exe"
+    runtime.parent.mkdir()
+    runtime.touch()
+    frontend = tmp_path / "frontend" / "dist" / "index.html"
+    frontend.parent.mkdir(parents=True)
+    frontend.touch()
+    commands: list[tuple[list[str], Path | None]] = []
+    doctor_calls: list[Path] = []
+    monkeypatch.setattr(appliance, "is_bundled_runtime", lambda root: True)
+    monkeypatch.setattr(
+        appliance,
+        "_run",
+        lambda arguments, cwd=None: commands.append((list(arguments), cwd)),
+    )
+    monkeypatch.setattr(appliance, "print_doctor", lambda root: doctor_calls.append(root))
+
+    appliance.setup_appliance(tmp_path)
+
+    assert any(
+        arguments[:3] == [str(runtime), "-m", "app.applications.adblock"]
+        for arguments, _ in commands
+    )
+    assert all(
+        "pip" not in arguments and "venv" not in arguments for arguments, _ in commands
+    )
+    assert doctor_calls == [tmp_path]
 
 
 def test_chrome_launcher_args_add_linux_flags(tmp_path: Path) -> None:
