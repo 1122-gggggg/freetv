@@ -39,7 +39,7 @@ When Edge is available, it starts only the local MY TV launcher in Edge's docume
 The controller launches only its own browser children. YouTube/News use `config\chrome-tv-profile`; Netflix uses `config\chrome-netflix-profile`. Both profiles receive `--disable-notifications` and `--deny-permission-prompts` on their command line, so setup does not grant a global website permission or alter a daily Chrome profile. HOME and shutdown act only on the tracked PID/HWND tree.
 
 For automatic start after sign-in:
-- **Installed Windows app:** The installer automatically creates a user Startup shortcut launching `runtime\pythonw.exe freetv.py start --supervise` without console windows.
+- **Installed Windows app:** When logon autostart remains selected during setup (preselected by default), the installer creates a user Startup shortcut launching `runtime\pythonw.exe freetv.py start --supervise` without console windows.
 - **Portable / developer setup:** Run `./scripts/install-autostart.ps1`. This creates one current-user Task Scheduler task that can start and continue on battery power. Its startup action remains attached as a controller supervisor and makes three one-minute restart attempts after a failure. Remove it with `./scripts/install-autostart.ps1 -Remove`.
 
 ## Application paths

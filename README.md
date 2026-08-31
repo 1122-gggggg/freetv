@@ -340,7 +340,7 @@ For HTTPS mode, verify the same instance with its generated controller CA:
 ## Known limitations
 
 - The Windows installer is a user-scoped, unsigned Inno Setup executable rather than a signed MSI. macOS/Linux still use bootstrap scripts and require Python 3.11+, `curl`, and `unzip`. SHA-256 detects download corruption, while publisher trust remains rooted in the HTTPS GitHub Release account rather than a separately pinned signing key.
-- The TV Launcher is a browser window, not a native OS shell replacement. The Windows installer enables current-user logon autostart and opens Chrome/Chromium fullscreen for the appliance flow. Portable installs can run `python freetv.py autostart`. Linux D-pad/volume need xdotool/ydotool and wpctl/pactl.
+- The TV Launcher is a browser window, not a native OS shell replacement. The Windows installer configures current-user logon autostart by default (when selected) and opens Chrome/Chromium fullscreen for the appliance flow. Portable installs can run `python freetv.py autostart`. Linux D-pad/volume need xdotool/ydotool and wpctl/pactl.
 - HTTP mode cannot install the Remote as a PWA (service workers require a secure context). HTTPS mode requires explicit trust of the controller local CA; the certificate contains literal current IP addresses, so `start.ps1` refreshes it after LAN-address changes.
 - Native Remote pairing uses QR or a manually entered numeric IP and remains HTTPS-only. The controller advertises mDNS metadata only in HTTPS mode, but the current native app does not yet provide automatic mDNS discovery.
 - Native iOS builds require macOS/Xcode or an authenticated Expo EAS account.
