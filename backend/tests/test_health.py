@@ -25,7 +25,7 @@ def test_health_reports_controller_and_dependency_availability() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
-        "version": "0.4.0",
+        "version": "0.4.1",
         "backend": True,
         "frontend": False,
         "chrome_available": True,
@@ -33,4 +33,4 @@ def test_health_reports_controller_and_dependency_availability() -> None:
         "edge_available": True,
         "mpv_available": False,
     }
-    assert app.version == "0.4.0"
+    assert app.version == "0.4.1"

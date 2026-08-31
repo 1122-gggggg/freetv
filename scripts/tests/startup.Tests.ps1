@@ -6,11 +6,12 @@ Import-Module (Resolve-Path $ModulePath).Path -Force
 
 Describe 'TVBox.Startup Module Tests' {
     Context 'Installer script syntax' {
-        It 'parses both local and standalone PowerShell installers' {
+        It 'parses local, standalone, and appliance power installers' {
             $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
             foreach ($Path in @(
                 (Join-Path $Root 'Install-FreeTV.ps1'),
-                (Join-Path $Root 'scripts\install.ps1')
+                (Join-Path $Root 'scripts\install.ps1'),
+                (Join-Path $Root 'scripts\configure-appliance-power.ps1')
             )) {
                 $Tokens = $null
                 $Errors = $null

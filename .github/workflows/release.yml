@@ -280,13 +280,19 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          & ./release-artifact/FreeTV-Setup.exe `
-            /VERYSILENT `
-            /SUPPRESSMSGBOXES `
-            /NORESTART `
-            /LOG=FreeTV-Setup.log
-          if ($LASTEXITCODE -ne 0) {
-            throw "FreeTV installer failed with exit code $LASTEXITCODE."
+          $installer = Start-Process `
+            -FilePath './release-artifact/FreeTV-Setup.exe' `
+            -ArgumentList @(
+              '/VERYSILENT',
+              '/SUPPRESSMSGBOXES',
+              '/NORESTART',
+              '/LOG=FreeTV-Setup.log'
+            ) `
+            -PassThru
+          $installer.WaitForExit()
+          if ($installer.ExitCode -ne 0) {
+            Get-Content -LiteralPath FreeTV-Setup.log -ErrorAction SilentlyContinue
+            throw "FreeTV installer failed with exit code $($installer.ExitCode)."
           }
 
           $installed = Join-Path $env:LOCALAPPDATA 'FreeTV'
@@ -294,6 +300,10 @@ jobs:
           $smoke = Join-Path $installed 'scripts\integration-smoke.py'
           if (-not (Test-Path -LiteralPath $python) -or -not (Test-Path -LiteralPath $smoke)) {
             throw 'FreeTV installer did not create a runnable application.'
+          }
+          & (Join-Path $installed 'scripts\configure-appliance-power.ps1') -VerifyOnly
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installed FreeTV power configuration failed with exit code $LASTEXITCODE."
           }
           $task = Get-ScheduledTask -TaskName 'PC TV Box' -ErrorAction Stop
           if ($task.State -eq 'Disabled') {

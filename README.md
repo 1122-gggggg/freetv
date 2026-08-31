@@ -26,13 +26,13 @@ The installer never replaces `config`, `.venv`, `vendor`, or `logs` during upgra
 
 ### Keep running with a laptop lid closed (Windows)
 
-Windows normally puts a laptop to sleep when its lid closes. Sleep or hibernation stops FreeTV, its network connection, and the phone remote even though logon autostart is enabled. Before using a laptop as a set-top box:
+The recommended `FreeTV-Setup.exe` option configures the active Windows power plan automatically: closing the lid does nothing, and automatic sleep and hibernation are disabled on both plugged-in and battery power. Windows may request administrator approval for this power-plan change. To verify or change it manually:
 
 1. Open **Control Panel → Hardware and Sound → Power Options → Choose what closing the lid does**.
-2. Set **When I close the lid** to **Do nothing** for **Plugged in**. Change the battery setting only if you intentionally need unplugged operation.
-3. Open **Settings → System → Power & battery → Screen and sleep** and set plugged-in sleep to **Never**. The display itself may still turn off.
+2. Confirm **When I close the lid** is **Do nothing** for both **On battery** and **Plugged in**.
+3. Open **Settings → System → Power & battery → Screen and sleep** and confirm sleep is **Never**. The display itself may still turn off.
 
-Keep the laptop connected to power and place it where closing the lid does not obstruct cooling vents.
+Keep the laptop connected to power and place it where closing the lid does not obstruct cooling vents. Disabling sleep on battery can drain it completely; Windows critical-battery protection still applies.
 
 ### Portable folder
 

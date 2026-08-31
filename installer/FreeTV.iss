@@ -45,6 +45,7 @@ VersionInfoProductVersion={#AppVersion}
 
 [Tasks]
 Name: "desktopicon"; Description: "建立桌面捷徑"; Flags: unchecked
+Name: "appliancepower"; Description: "關上筆電螢幕後仍持續運作（停用目前電源方案的自動睡眠與休眠）"; Flags: checkedonce
 
 [Files]
 Source: "{#SourceRoot}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -62,6 +63,27 @@ var
 begin
   if CurStep <> ssPostInstall then
     Exit;
+
+  PowerShell := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  if WizardIsTaskSelected('appliancepower') then
+  begin
+    WizardForm.StatusLabel.Caption := '正在設定闔蓋不中斷的機上盒電源模式…';
+    Parameters := ExpandConstant(
+      '-NoProfile -ExecutionPolicy Bypass -File "{app}\scripts\configure-appliance-power.ps1"'
+    );
+    if not ShellExec(
+      'runas',
+      PowerShell,
+      Parameters,
+      ExpandConstant('{app}'),
+      SW_HIDE,
+      ewWaitUntilTerminated,
+      ResultCode
+    ) then
+      RaiseException('無法取得設定機上盒電源模式所需的系統管理員權限。');
+    if ResultCode <> 0 then
+      RaiseException(Format('機上盒電源模式設定失敗（代碼 %d）。', [ResultCode]));
+  end;
 
   WizardForm.StatusLabel.Caption := '正在安裝 FreeTV 執行環境並啟動電視介面…';
   PowerShell := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
