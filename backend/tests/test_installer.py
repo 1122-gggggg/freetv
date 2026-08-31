@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -7,13 +8,15 @@ import pytest
 
 from app import installer
 from app.installer import (
-    bundled_runtime_python,
     apply_pending_update,
+    bundled_runtime_python,
     copy_release_files,
     create_user_launcher,
-    managed_files,
-    user_install_directory,
     is_bundled_runtime,
+    launch_pending_installer_update,
+    managed_files,
+    pending_installer_marker,
+    user_install_directory,
 )
 
 FREETV_PATH = Path(__file__).resolve().parents[2] / "freetv.py"
@@ -37,6 +40,148 @@ def test_bundled_runtime_detection_accepts_python_and_pythonw(tmp_path: Path) ->
         executable.touch()
         assert is_bundled_runtime(tmp_path, executable=executable, os_name="nt")
 
+
+
+def pending_installer(
+    root: Path, *, version: str = "v0.4.2", content: bytes = b"MZ-installer"
+) -> tuple[Path, Path, str]:
+    updates = root / "config" / "updates"
+    updates.mkdir(parents=True)
+    source = updates / "FreeTV-Setup-v0.4.2.exe"
+    source.write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+    marker = pending_installer_marker(root)
+    marker.write_text(
+        json.dumps({"version": version, "installer": str(source), "sha256": digest}),
+        encoding="utf-8",
+    )
+    return marker, source, digest
+
+
+def test_pending_installer_rejects_source_outside_update_dir(tmp_path: Path) -> None:
+    root = tmp_path / "installed"
+    marker, source, digest = pending_installer(root)
+    outside = tmp_path / "outside.exe"
+    outside.write_bytes(source.read_bytes())
+    marker.write_text(
+        json.dumps({"version": "v0.4.2", "installer": str(outside), "sha256": digest}),
+        encoding="utf-8",
+    )
+
+    assert not launch_pending_installer_update(
+        root,
+        popen=lambda *args, **kwargs: pytest.fail(f"unexpected launch: {args} {kwargs}"),
+        os_name="nt",
+    )
+    assert marker.exists()
+    assert outside.exists()
+
+
+def test_pending_installer_rejects_changed_digest(tmp_path: Path) -> None:
+    root = tmp_path / "installed"
+    marker, source, _ = pending_installer(root)
+    source.write_bytes(b"MZ-tampered")
+
+    assert not launch_pending_installer_update(
+        root,
+        popen=lambda *args, **kwargs: pytest.fail(f"unexpected launch: {args} {kwargs}"),
+        os_name="nt",
+    )
+    assert marker.exists()
+    assert source.exists()
+
+
+def test_pending_installer_rejects_oversized_source(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "installed"
+    marker, source, _ = pending_installer(root, content=b"MZ-oversized")
+    monkeypatch.setattr(installer, "MAX_INSTALLER_BYTES", 4)
+
+    assert not launch_pending_installer_update(
+        root,
+        popen=lambda *args, **kwargs: pytest.fail(f"unexpected launch: {args} {kwargs}"),
+        os_name="nt",
+    )
+    assert marker.exists()
+    assert source.exists()
+
+
+def test_pending_installer_launches_verified_copy_with_update_flags(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "installed"
+    marker, source, digest = pending_installer(root)
+    (root / "VERSION").write_text("0.4.1")
+    temporary = tmp_path / "temporary"
+    temporary.mkdir()
+    monkeypatch.setattr(installer.tempfile, "gettempdir", lambda: str(temporary))
+    launches: list[tuple[list[str], dict[str, object]]] = []
+
+    def capture(command: list[str], **kwargs: object) -> object:
+        launches.append((command, kwargs))
+        return object()
+
+    assert launch_pending_installer_update(root, popen=capture, os_name="nt")
+    command, options = launches[0]
+    copied = Path(command[0])
+
+    assert command[1:] == [
+        "/VERYSILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+        "/UPDATE=1",
+        '/MERGETASKS="!appliancepower"',
+    ]
+    assert copied.parent == temporary / "FreeTV-updates"
+    assert copied.name.startswith("FreeTV-update-")
+    assert hashlib.sha256(copied.read_bytes()).hexdigest() == digest
+    assert options["close_fds"] is True
+    assert options["creationflags"]
+    assert marker.exists()
+    assert source.exists()
+
+
+def test_pending_installer_launch_failure_keeps_retry_marker_and_source(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "installed"
+    marker, source, _ = pending_installer(root)
+    (root / "VERSION").write_text("0.4.1")
+    temporary = tmp_path / "temporary"
+    temporary.mkdir()
+    monkeypatch.setattr(installer.tempfile, "gettempdir", lambda: str(temporary))
+
+    def fail_launch(*args: object, **kwargs: object) -> object:
+        raise OSError("simulated launch failure")
+
+    assert not launch_pending_installer_update(root, popen=fail_launch, os_name="nt")
+    assert marker.exists()
+    assert source.exists()
+    assert source.read_bytes() == b"MZ-installer"
+
+
+def test_completed_installer_update_cleans_marker_source_and_old_temp_copies(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "installed"
+    marker, source, _ = pending_installer(root, version="v0.4.2")
+    (root / "VERSION").write_text("0.4.2")
+    temporary = tmp_path / "temporary"
+    old_updates = temporary / "FreeTV-updates"
+    old_updates.mkdir(parents=True)
+    old_copy = old_updates / "FreeTV-update-old.exe"
+    old_copy.write_bytes(b"old")
+    monkeypatch.setattr(installer.tempfile, "gettempdir", lambda: str(temporary))
+
+    assert not launch_pending_installer_update(
+        root,
+        popen=lambda *args, **kwargs: pytest.fail(f"unexpected launch: {args} {kwargs}"),
+        os_name="nt",
+    )
+    assert not marker.exists()
+    assert not source.exists()
+    assert not old_copy.exists()
 
 
 def test_copy_release_files_preserves_user_data(tmp_path: Path) -> None:

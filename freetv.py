@@ -21,6 +21,7 @@ assert _INSTALLER_SPEC and _INSTALLER_SPEC.loader
 _INSTALLER = importlib.util.module_from_spec(_INSTALLER_SPEC)
 _INSTALLER_SPEC.loader.exec_module(_INSTALLER)
 apply_pending_update = _INSTALLER.apply_pending_update
+launch_pending_installer_update = _INSTALLER.launch_pending_installer_update
 bundled_runtime_python = _INSTALLER.bundled_runtime_python
 copy_release_files = _INSTALLER.copy_release_files
 user_install_directory = _INSTALLER.user_install_directory
@@ -32,6 +33,8 @@ ROOT = Path(__file__).resolve().parent
 
 # Keep this import/bootstrap stdlib-only so updates can be applied before the
 # virtual environment (and its dependencies) are loaded.
+if launch_pending_installer_update(ROOT):
+    raise SystemExit(0)
 UPDATE_APPLIED = apply_pending_update(ROOT)
 
 

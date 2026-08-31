@@ -1,11 +1,14 @@
 """Stdlib-only release installation primitives."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 MANAGED_ROOT_FILES = {
@@ -26,6 +29,7 @@ MANAGED_SINGLE_FILES = (
     "config/channels.example.json",
     "config/news.example.json",
 )
+MAX_INSTALLER_BYTES = 250 * 1024 * 1024
 
 
 def bundled_runtime_python(
@@ -57,6 +61,132 @@ def _inside(path: Path, parent: Path) -> bool:
     except ValueError:
         return False
 
+
+
+def pending_installer_marker(root: Path) -> Path:
+    return root / "config" / "updates" / "pending-installer-update.json"
+
+
+def _hash_installer(path: Path) -> tuple[int, str]:
+    size = 0
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            size += len(chunk)
+            if size > MAX_INSTALLER_BYTES:
+                raise ValueError("installer is too large")
+            digest.update(chunk)
+    if size == 0:
+        raise ValueError("installer is empty")
+    return size, digest.hexdigest()
+
+
+def _version_parts(value: str) -> tuple[int, ...]:
+    parts = value.strip().lstrip("vV").split(".")
+    if not parts or any(not part.isdigit() for part in parts):
+        raise ValueError("invalid version")
+    return tuple(int(part) for part in parts)
+
+
+def _cleanup_temp_installers() -> None:
+    updates = Path(tempfile.gettempdir()) / "FreeTV-updates"
+    if updates.is_symlink() or not updates.is_dir():
+        return
+    for candidate in updates.glob("FreeTV-update-*.exe"):
+        try:
+            if candidate.is_file() and not candidate.is_symlink():
+                candidate.unlink()
+        except OSError:
+            pass
+
+
+def launch_pending_installer_update(
+    root: Path,
+    *,
+    popen: Callable[..., object] = subprocess.Popen,
+    os_name: str = os.name,
+) -> bool:
+    if os_name != "nt":
+        return False
+    config = root / "config"
+    updates = config / "updates"
+    marker = pending_installer_marker(root)
+    copied: Path | None = None
+    if (
+        config.is_symlink()
+        or updates.is_symlink()
+        or marker.is_symlink()
+        or not marker.is_file()
+    ):
+        return False
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        version = str(payload["version"]).strip()
+        expected_digest = str(payload["sha256"]).strip()
+        source = Path(str(payload["installer"])).expanduser()
+        source = source if source.is_absolute() else marker.parent / source
+        if (
+            not _inside(source, updates)
+            or source.is_symlink()
+            or not source.is_file()
+            or len(expected_digest) != 64
+            or any(character not in "0123456789abcdefABCDEF" for character in expected_digest)
+        ):
+            return False
+        source_size, source_digest = _hash_installer(source)
+        if source_digest.lower() != expected_digest.lower():
+            return False
+        installed_version = (root / "VERSION").read_text(encoding="utf-8").strip()
+        target_parts = _version_parts(version)
+        installed_parts = _version_parts(installed_version)
+        if target_parts == installed_parts:
+            try:
+                marker.unlink()
+            except OSError:
+                return False
+            try:
+                source.unlink()
+            except OSError:
+                pass
+            _cleanup_temp_installers()
+            return False
+        if target_parts <= installed_parts:
+            return False
+        temporary_updates = Path(tempfile.gettempdir()) / "FreeTV-updates"
+        if temporary_updates.is_symlink():
+            return False
+        temporary_updates.mkdir(parents=True, exist_ok=True)
+        descriptor, copied_name = tempfile.mkstemp(
+            prefix="FreeTV-update-",
+            suffix=".exe",
+            dir=temporary_updates,
+        )
+        os.close(descriptor)
+        copied = Path(copied_name)
+        shutil.copy2(source, copied, follow_symlinks=False)
+        copied_size, copied_digest = _hash_installer(copied)
+        if copied_size != source_size or copied_digest.lower() != source_digest.lower():
+            raise ValueError("copied installer checksum mismatch")
+        creationflags = getattr(subprocess, "DETACHED_PROCESS", 0x00000008) | getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
+        )
+        popen(
+            [
+                str(copied),
+                "/VERYSILENT",
+                "/SUPPRESSMSGBOXES",
+                "/NORESTART",
+                "/UPDATE=1",
+                '/MERGETASKS="!appliancepower"',
+            ],
+            close_fds=True,
+            creationflags=creationflags,
+        )
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
+        if copied is not None:
+            copied.unlink(missing_ok=True)
+        return False
 
 def managed_files(source: Path) -> list[str]:
     """Return release-managed relative paths, excluding user state."""

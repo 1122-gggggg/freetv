@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
+from typing import Literal
 
 import httpx
 
@@ -25,6 +26,7 @@ GITHUB_REPO = "1122-gggggg/freetv"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
+MAX_INSTALLER_BYTES = 250 * 1024 * 1024
 TRUSTED_UPDATE_HOSTS = frozenset(
     {
         "github.com",
@@ -51,6 +53,7 @@ class UpdateInfo:
     version: str
     release_name: str
     release_notes: str
+    artifact_kind: Literal["archive", "installer"] = "archive"
     download_url: str | None = None
     checksum_url: str | None = None
 
@@ -86,7 +89,21 @@ def _require_trusted_update_url(value: str) -> None:
         raise ValueError("更新下載位址不受信任")
 
 
-async def check_for_update(*, client: httpx.AsyncClient | None = None) -> UpdateInfo | None:
+async def check_for_update(
+    root: Path | None = None,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> UpdateInfo | None:
+    base = root or project_root()
+    installer_mode = (
+        (base / "runtime" / "python.exe").is_file()
+        and not (base / "runtime" / "python.exe").is_symlink()
+    )
+    artifact_kind: Literal["archive", "installer"] = (
+        "installer" if installer_mode else "archive"
+    )
+    artifact_name = "FreeTV-Setup.exe" if installer_mode else "pc-tv-box.zip"
+    checksum_name = f"{artifact_name}.sha256"
     own = client is None
     http = client or httpx.AsyncClient(timeout=8.0, headers={"User-Agent": "FreeTV-Appliance"})
     try:
@@ -102,22 +119,25 @@ async def check_for_update(*, client: httpx.AsyncClient | None = None) -> Update
             if isinstance(asset, dict) and asset.get("name") in (
                 "pc-tv-box.zip",
                 "pc-tv-box.zip.sha256",
+                "FreeTV-Setup.exe",
+                "FreeTV-Setup.exe.sha256",
             ):
                 found[asset["name"]] = str(asset.get("browser_download_url") or "")
         if (
             tag
             and parse_version(tag) > parse_version(CURRENT_VERSION)
-            and all(found.get(x) for x in ("pc-tv-box.zip", "pc-tv-box.zip.sha256"))
+            and all(found.get(name) for name in (artifact_name, checksum_name))
         ):
-            _require_trusted_update_url(found["pc-tv-box.zip"])
-            _require_trusted_update_url(found["pc-tv-box.zip.sha256"])
+            _require_trusted_update_url(found[artifact_name])
+            _require_trusted_update_url(found[checksum_name])
             return UpdateInfo(
-                True,
-                tag,
-                str(payload.get("name") or tag),
-                str(payload.get("body") or "")[:500],
-                found["pc-tv-box.zip"],
-                found["pc-tv-box.zip.sha256"],
+                available=True,
+                version=tag,
+                release_name=str(payload.get("name") or tag),
+                release_notes=str(payload.get("body") or "")[:500],
+                artifact_kind=artifact_kind,
+                download_url=found[artifact_name],
+                checksum_url=found[checksum_name],
             )
     except Exception as error:
         log_event(logger, "update_check_failed", error=str(error))
@@ -190,6 +210,39 @@ async def _download_limited(
     return bytes(payload)
 
 
+async def _download_file_limited(
+    client: httpx.AsyncClient,
+    url: str,
+    destination: Path,
+    *,
+    maximum_bytes: int,
+) -> tuple[int, str]:
+    size = 0
+    digest = hashlib.sha256()
+    _require_trusted_update_url(url)
+    async with client.stream("GET", url, follow_redirects=True) as response:
+        for redirect in response.history:
+            _require_trusted_update_url(str(redirect.url))
+        _require_trusted_update_url(str(response.url))
+        response.raise_for_status()
+        content_length = response.headers.get("content-length")
+        if content_length:
+            try:
+                declared_size = int(content_length)
+            except ValueError as error:
+                raise ValueError("更新下載資訊無效") from error
+            if declared_size < 0 or declared_size > maximum_bytes:
+                raise ValueError("更新檔過大")
+        with destination.open("wb") as output:
+            async for chunk in response.aiter_bytes():
+                size += len(chunk)
+                if size > maximum_bytes:
+                    raise ValueError("更新檔過大")
+                digest.update(chunk)
+                output.write(chunk)
+    return size, digest.hexdigest()
+
+
 async def apply_update(
     root: Path | None = None,
     *,
@@ -197,14 +250,76 @@ async def apply_update(
     info: UpdateInfo | None = None,
 ) -> UpdateResult:
     base = root or project_root()
-    info = info or await check_for_update(client=client)
+    info = info or await check_for_update(base, client=client)
     if not info or not info.download_url or not info.checksum_url:
         return UpdateResult(False, "找不到可用的正式版本更新。")
     own = client is None
     http = client or httpx.AsyncClient(timeout=30.0, follow_redirects=True)
     staging_container: Path | None = None
+    installer_temporary: Path | None = None
+    installer_destination: Path | None = None
     marker_tmp: Path | None = None
     try:
+        parent = base / "config" / "updates"
+        if (base / "config").is_symlink() or parent.is_symlink():
+            raise ValueError("更新暫存目錄不安全")
+        parent.mkdir(parents=True, exist_ok=True)
+        safe_version = (
+            "".join(c if c.isalnum() or c in ".-_" else "_" for c in info.version)[:80]
+            or "update"
+        )
+        if info.artifact_kind == "installer":
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=f"FreeTV-Setup-{safe_version}-",
+                suffix=".tmp",
+                dir=parent,
+            )
+            os.close(descriptor)
+            installer_temporary = Path(temporary_name)
+            size, digest = await _download_file_limited(
+                http,
+                info.download_url,
+                installer_temporary,
+                maximum_bytes=MAX_INSTALLER_BYTES,
+            )
+            checksum_payload = await _download_limited(
+                http,
+                info.checksum_url,
+                maximum_bytes=4_096,
+            )
+            checksum = checksum_payload.decode("ascii", errors="strict").strip().split()[0]
+            if (
+                size == 0
+                or len(checksum) != 64
+                or digest.lower() != checksum.lower()
+            ):
+                raise ValueError("更新檔校驗失敗")
+            installer_destination = installer_temporary.with_suffix(".exe")
+            os.replace(installer_temporary, installer_destination)
+            installer_temporary = None
+            marker = parent / "pending-installer-update.json"
+            marker_tmp = marker.with_suffix(".tmp")
+            marker_tmp.write_text(
+                json.dumps(
+                    {
+                        "version": info.version,
+                        "installer": str(installer_destination),
+                        "sha256": digest,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            os.replace(marker_tmp, marker)
+            marker_tmp = None
+            installer_destination = None
+            return UpdateResult(
+                True,
+                "更新已下載，將在重新啟動時執行安裝程式。",
+                info.version,
+                True,
+            )
+        if info.artifact_kind != "archive":
+            raise ValueError("更新檔類型無效")
         archive = await _download_limited(
             http,
             info.download_url,
@@ -223,13 +338,6 @@ async def apply_update(
         ):
             raise ValueError("更新檔校驗失敗")
         _validate_archive(archive)
-        parent = base / "config" / "updates"
-        if (base / "config").is_symlink() or parent.is_symlink():
-            raise ValueError("更新暫存目錄不安全")
-        parent.mkdir(parents=True, exist_ok=True)
-        safe_version = (
-            "".join(c if c.isalnum() or c in ".-_" else "_" for c in info.version)[:80] or "update"
-        )
         staging_container = Path(tempfile.mkdtemp(prefix=f"{safe_version}-", dir=parent))
         with zipfile.ZipFile(io.BytesIO(archive)) as zf:
             zf.extractall(staging_container)
@@ -244,12 +352,17 @@ async def apply_update(
             encoding="utf-8",
         )
         os.replace(marker_tmp, marker)
+        marker_tmp = None
         return UpdateResult(True, "更新已下載，將在重新啟動時套用。", info.version, True)
     except Exception as error:
         if staging_container is not None and staging_container.exists():
             import shutil
 
             shutil.rmtree(staging_container, ignore_errors=True)
+        if installer_temporary is not None:
+            installer_temporary.unlink(missing_ok=True)
+        if installer_destination is not None:
+            installer_destination.unlink(missing_ok=True)
         if marker_tmp is not None:
             marker_tmp.unlink(missing_ok=True)
         return UpdateResult(False, f"下載更新失敗：{error}", info.version)
