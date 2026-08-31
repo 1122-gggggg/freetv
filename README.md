@@ -24,9 +24,8 @@ Download **FreeTV-Setup.exe** and double-click it. Installation is per-user (`%L
 The offline installer:
 - Deploys the application under `%LOCALAPPDATA%\FreeTV` with an isolated Python 3.13 private runtime and prebuilt backend (no `.venv` created).
 - Bundles portable `mpv` for Live TV and `cloudflared` for remote tunnels.
-- Creates Start Menu and optional desktop shortcuts.
-- Configures logon autostart by default.
-- Provides an optional task to keep the laptop running when the lid is closed (disables sleep/hibernation on the active power plan; prompts for UAC only when selected).
+- Creates a Start Menu shortcut; desktop shortcut and logon autostart are both preselected by default and can be deselected during setup.
+- Provides an optional opt-in task to keep the laptop running when the lid is closed (disables automatic sleep/hibernation on the active power plan; unselected by default, prompts for UAC only when checked).
 - Preserves existing user configuration (`config`), pairings, and logs during updates.
 
 ### Other platforms and advanced downloads
@@ -105,7 +104,7 @@ Keep the laptop connected to power and place it where closing the lid does not o
 
 FreeTV checks GitHub Release metadata in the background. When a newer tagged release is available:
 
-- **Installed Windows instances (`FreeTV-Setup.exe`):** The controller downloads and verifies `FreeTV-Setup.exe` and `FreeTV-Setup.exe.sha256`, staging the installer under `config/updates`. Select **立即更新** from a paired client or restart FreeTV to run the installer update silently in the background. Application files and bundled runtimes are updated while personal configuration (`config`), pairings, and logs are preserved.
+- **Installed Windows instances (`FreeTV-Setup.exe`):** Updating is a two-step sequence. Select **立即更新** from a paired client to download, verify, and stage `FreeTV-Setup.exe` and `FreeTV-Setup.exe.sha256` under `config/updates`. Once staging completes, restart FreeTV; on the subsequent startup, FreeTV launches the staged full installer silently in the background to update application binaries and bundled runtimes while preserving personal configuration (`config`), pairings, and logs.
 - **Portable / Archive instances (`pc-tv-box.zip`):** The controller downloads and verifies `pc-tv-box.zip` and `pc-tv-box.zip.sha256`. Restart FreeTV to apply staged managed files; personal configuration, `.venv`, extensions, and logs are preserved.
 
 Invalid checksums, unsafe paths, oversized downloads, unauthenticated remotes, and concurrent update attempts are rejected.

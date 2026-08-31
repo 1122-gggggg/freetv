@@ -10,10 +10,10 @@ Download **FreeTV-Setup.exe** from the latest GitHub Release and double-click it
 - **Browser requirement:** Google Chrome or Chromium is required for YouTube/News TV playback and Netflix. Internet access is needed when using Chrome and online streaming services, but not for installing FreeTV.
 - **SmartScreen warning:** Because releases are not Authenticode-signed, Windows SmartScreen may show an unknown-publisher dialog. Click **More info** → **Run anyway** (verify `FreeTV-Setup.exe.sha256` when authenticity matters).
 - **Setup options:**
-  - **Desktop shortcut:** Creates a `FreeTV` desktop shortcut.
-  - **Logon autostart:** Configures FreeTV to start automatically in background supervised mode when signing in to Windows (via user Startup shortcut).
-  - **Lid-close power configuration (optional):** Configures the active Windows power plan so closing a laptop lid does not sleep or hibernate the machine (prompts for UAC only when selected).
-- **Updates:** FreeTV checks GitHub Releases for newer `FreeTV-Setup.exe` and `FreeTV-Setup.exe.sha256` assets. Updating via the web/native Remote stages the installer under `config/updates` and executes it silently on restart, updating application binaries while preserving `config`, pairings, and `logs`.
+  - **Desktop shortcut:** Preselected by default; creates a `FreeTV` desktop shortcut (can be deselected during setup).
+  - **Logon autostart:** Preselected by default; configures FreeTV to start automatically in background supervised mode when signing in to Windows via user Startup shortcut (can be deselected during setup).
+  - **Lid-close power configuration (optional):** Opt-in (unselected by default); configures the active Windows power plan so closing a laptop lid does not sleep or hibernate the machine (prompts for UAC only when checked).
+- **Updates:** FreeTV checks GitHub Releases for newer `FreeTV-Setup.exe` and `FreeTV-Setup.exe.sha256` assets. Updating is a two-step sequence: select **立即更新** from a paired client to download, verify, and stage the installer under `config/updates`. Once staging completes, restart FreeTV; on the subsequent startup, FreeTV launches the staged full installer silently in the background to update application binaries while preserving `config`, pairings, and `logs`.
 
 ### 2. Portable archive or developer checkout
 
