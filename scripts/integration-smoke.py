@@ -317,6 +317,31 @@ async def receive_json_message(ws: Any, timeout: float = 10.0) -> dict[str, Any]
         raw = raw.decode("utf-8")
     return json.loads(raw)
 
+async def receive_matching_state(
+    ws: Any,
+    *,
+    expected_key: str | None = None,
+    expected_value: Any = None,
+    expected_active_app: str | None = None,
+    timeout: float = 10.0,
+) -> dict[str, Any]:
+    """Receive state messages until the expected key-value pair is matched or timeout."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    last_msg: dict[str, Any] | None = None
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            if last_msg is not None:
+                validate_state(last_msg, expected_active_app=expected_active_app)
+                return last_msg
+            raise SmokeValidationError("Timed out waiting for matching state message")
+        msg = await receive_json_message(ws, timeout=remaining)
+        validate_state(msg, expected_active_app=expected_active_app)
+        last_msg = msg
+        if expected_key is None or msg.get(expected_key) == expected_value:
+            return msg
+
 
 async def run_smoke_test(config: SmokeConfig) -> SmokeResult:
     """Execute the end-to-end integration smoke workflow."""
@@ -480,12 +505,22 @@ async def run_smoke_test(config: SmokeConfig) -> SmokeResult:
                 result.nav_right_acknowledged = True
 
                 # Remote receives State
-                remote_nav_state = await receive_json_message(remote_ws, timeout=config.timeout)
-                validate_state(remote_nav_state, expected_active_app="launcher")
+                remote_nav_state = await receive_matching_state(
+                    remote_ws,
+                    expected_key="focused_tile",
+                    expected_value="netflix",
+                    expected_active_app="launcher",
+                    timeout=config.timeout,
+                )
 
                 # TV receives broadcasted State
-                tv_nav_state = await receive_json_message(tv_ws, timeout=config.timeout)
-                validate_state(tv_nav_state, expected_active_app="launcher")
+                tv_nav_state = await receive_matching_state(
+                    tv_ws,
+                    expected_key="focused_tile",
+                    expected_value="netflix",
+                    expected_active_app="launcher",
+                    timeout=config.timeout,
+                )
 
                 if remote_nav_state.get("focused_tile") != tv_nav_state.get("focused_tile"):
                     raise SmokeValidationError(
@@ -510,13 +545,18 @@ async def run_smoke_test(config: SmokeConfig) -> SmokeResult:
                 result.home_acknowledged = True
 
                 # Remote receives State
-                remote_home_state = await receive_json_message(remote_ws, timeout=config.timeout)
-                validate_state(remote_home_state, expected_active_app="launcher")
+                remote_home_state = await receive_matching_state(
+                    remote_ws,
+                    expected_active_app="launcher",
+                    timeout=config.timeout,
+                )
 
                 # TV receives broadcasted State
-                tv_home_state = await receive_json_message(tv_ws, timeout=config.timeout)
-                validate_state(tv_home_state, expected_active_app="launcher")
-
+                tv_home_state = await receive_matching_state(
+                    tv_ws,
+                    expected_active_app="launcher",
+                    timeout=config.timeout,
+                )
                 result.home_state_observed = True
                 logger.info(
                     "HOME verified. Remote and TV active app confirmed: %s",
