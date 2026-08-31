@@ -223,6 +223,7 @@ var
   Actions: Variant;
   Candidate: Variant;
   ExpectedArguments: String;
+  LegacyArguments: String;
   Found: Boolean;
   Index: Integer;
   Owned: Boolean;
@@ -261,10 +262,18 @@ begin
           '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden ' +
           '-File "{app}\scripts\start.ps1" -Supervise'
         );
+        LegacyArguments := Copy(
+          ExpectedArguments,
+          1,
+          Length(ExpectedArguments) - Length(' -Supervise')
+        );
         try
           Owned :=
             (CompareText(ExtractFileName(Action.Path), 'powershell.exe') = 0) and
-            (CompareText(Action.Arguments, ExpectedArguments) = 0);
+            (
+              (CompareText(Action.Arguments, ExpectedArguments) = 0) or
+              (CompareText(Action.Arguments, LegacyArguments) = 0)
+            );
         except
           Owned := False;
         end;

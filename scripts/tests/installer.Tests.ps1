@@ -63,8 +63,12 @@ BeforeAll {
 
                 $ExpectedArguments = (
                     '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden ' +
-                    '-File \"{0}\" -Supervise'
+                    '-File "{0}" -Supervise'
                 ) -f (Join-Path $InstallRoot 'scripts\start.ps1')
+                $LegacyArguments = $ExpectedArguments.Substring(
+                    0,
+                    $ExpectedArguments.Length - ' -Supervise'.Length
+                )
                 $Actions = $Task.Definition.Actions
                 $Owned = $false
                 if ($Actions.Count -eq 1) {
@@ -73,7 +77,10 @@ BeforeAll {
                         $Action.Type -eq 0 -and
                         [IO.Path]::GetFileName([string]$Action.Path) -ieq
                             'powershell.exe' -and
-                        [string]$Action.Arguments -ieq $ExpectedArguments
+                        (
+                            [string]$Action.Arguments -ieq $ExpectedArguments -or
+                            [string]$Action.Arguments -ieq $LegacyArguments
+                        )
                     )
                 }
                 return [pscustomobject]@{
