@@ -281,6 +281,49 @@ def test_bundled_runtime_install_finalizes_without_legacy_bootstrap(
     assert application_calls == [["setup"]]
 
 
+@pytest.mark.parametrize("arguments", [["start"], ["doctor"], ["autostart"]])
+def test_applied_update_in_bundled_runtime_finalizes_before_forwarding(
+    arguments: list[str], monkeypatch
+) -> None:
+    application_calls: list[list[str]] = []
+    monkeypatch.setattr(freetv, "UPDATE_APPLIED", True)
+    monkeypatch.setattr(freetv, "is_bundled_runtime", lambda root: True)
+    monkeypatch.setattr(
+        freetv,
+        "_run_application",
+        lambda raw_arguments: application_calls.append(raw_arguments) or 0,
+    )
+    monkeypatch.setattr(
+        freetv,
+        "_run",
+        lambda command: pytest.fail(f"unexpected legacy bootstrap command: {command}"),
+    )
+
+    assert freetv.main(arguments) == 0
+    assert application_calls == [["setup"], arguments]
+
+
+def test_applied_update_in_bundled_runtime_stops_when_finalization_fails(
+    monkeypatch,
+) -> None:
+    application_calls: list[list[str]] = []
+    monkeypatch.setattr(freetv, "UPDATE_APPLIED", True)
+    monkeypatch.setattr(freetv, "is_bundled_runtime", lambda root: True)
+    monkeypatch.setattr(
+        freetv,
+        "_run_application",
+        lambda raw_arguments: application_calls.append(raw_arguments) or 7,
+    )
+    monkeypatch.setattr(
+        freetv,
+        "_run",
+        lambda command: pytest.fail(f"unexpected legacy bootstrap command: {command}"),
+    )
+
+    assert freetv.main(["start"]) == 7
+    assert application_calls == [["setup"]]
+
+
 def test_applied_update_finishes_dependency_setup_before_start(monkeypatch) -> None:
     commands: list[list[str]] = []
     monkeypatch.setattr(freetv, "UPDATE_APPLIED", True)

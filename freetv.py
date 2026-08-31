@@ -81,6 +81,11 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parse_arguments(raw_arguments)
     command = arguments.command or "run"
     if is_bundled_runtime(ROOT):
+        if UPDATE_APPLIED and command in {"start", "doctor", "autostart"}:
+            print("Finishing the verified FreeTV update...")
+            code = _run_application(["setup"])
+            if code != 0:
+                return code
         return _run_application(["setup"] if command == "install" else raw_arguments)
     if command == "install":
         target = user_install_directory()
