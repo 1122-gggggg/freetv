@@ -102,9 +102,23 @@ def test_apply_update_rejects_checksum_mismatch_without_marker(tmp_path: Path) -
     assert not (tmp_path / "config" / "pending-update.json").exists()
 
 
-def test_apply_update_streams_verified_installer_for_next_restart(tmp_path: Path) -> None:
-    installer = b"MZ" + b"complete installer"
+def test_apply_update_streams_installer_incrementally_to_destination(
+    tmp_path: Path,
+) -> None:
+    first_chunk = b"MZ-first-"
+    second_chunk = b"second"
+    installer = first_chunk + second_chunk
     digest = hashlib.sha256(installer).hexdigest()
+    updates = tmp_path / "config" / "updates"
+
+    class IncrementalBody(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield first_chunk
+            staged = list(updates.glob("FreeTV-Setup-*.tmp"))
+            assert len(staged) == 1
+            assert staged[0].read_bytes() == first_chunk
+            yield second_chunk
+
     runtime = tmp_path / "runtime"
     runtime.mkdir()
     (runtime / "python.exe").touch()
@@ -112,7 +126,7 @@ def test_apply_update_streams_verified_installer_for_next_restart(tmp_path: Path
     def handle(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith(".sha256"):
             return httpx.Response(200, text=f"{digest}  FreeTV-Setup.exe\n")
-        return httpx.Response(200, content=installer)
+        return httpx.Response(200, stream=IncrementalBody())
 
     async def stage() -> object:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
@@ -121,7 +135,7 @@ def test_apply_update_streams_verified_installer_for_next_restart(tmp_path: Path
             )
 
     result = asyncio.run(stage())
-    marker_path = tmp_path / "config" / "updates" / "pending-installer-update.json"
+    marker_path = updates / "pending-installer-update.json"
     marker = json.loads(marker_path.read_text())
     staged_installer = Path(marker["installer"])
 
@@ -129,7 +143,7 @@ def test_apply_update_streams_verified_installer_for_next_restart(tmp_path: Path
     assert result.restart_required
     assert marker["version"] == "v0.4.2"
     assert marker["sha256"] == digest
-    assert staged_installer.is_relative_to(tmp_path / "config" / "updates")
+    assert staged_installer.is_relative_to(updates)
     assert staged_installer.read_bytes() == installer
 
 
@@ -216,6 +230,73 @@ def test_apply_update_rejects_untrusted_installer_redirect(tmp_path: Path) -> No
     assert not (
         tmp_path / "config" / "updates" / "pending-installer-update.json"
     ).exists()
+
+
+def test_installer_marker_staging_does_not_use_predictable_temp_name(
+    tmp_path: Path,
+) -> None:
+    installer = b"MZ-atomic-marker"
+    digest = hashlib.sha256(installer).hexdigest()
+    updates = tmp_path / "config" / "updates"
+    updates.mkdir(parents=True)
+    predictable = updates / "pending-installer-update.tmp"
+    predictable.write_text("must remain untouched")
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith(".sha256"):
+            return httpx.Response(200, text=f"{digest}  FreeTV-Setup.exe\n")
+        return httpx.Response(200, content=installer)
+
+    async def stage() -> object:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            return await updater.apply_update(
+                tmp_path, client=client, info=installer_update_info()
+            )
+
+    result = asyncio.run(stage())
+
+    assert result.success
+    assert predictable.read_text() == "must remain untouched"
+
+
+def test_repeated_installer_stage_removes_superseded_valid_source(tmp_path: Path) -> None:
+    installer = b"MZ-repeated-update"
+    digest = hashlib.sha256(installer).hexdigest()
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith(".sha256"):
+            return httpx.Response(200, text=f"{digest}  FreeTV-Setup.exe\n")
+        return httpx.Response(200, content=installer)
+
+    async def stage_twice() -> tuple[object, object]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            first = await updater.apply_update(
+                tmp_path, client=client, info=installer_update_info()
+            )
+            second_info = replace(
+                installer_update_info(),
+                version="v0.4.3",
+                download_url="https://github.com/1122-gggggg/freetv/releases/download/v0.4.3/FreeTV-Setup.exe",
+                checksum_url="https://github.com/1122-gggggg/freetv/releases/download/v0.4.3/FreeTV-Setup.exe.sha256",
+            )
+            second = await updater.apply_update(
+                tmp_path, client=client, info=second_info
+            )
+            return first, second
+
+    first, second = asyncio.run(stage_twice())
+    marker = json.loads(
+        (
+            tmp_path / "config" / "updates" / "pending-installer-update.json"
+        ).read_text()
+    )
+    current_source = Path(marker["installer"])
+    staged_sources = list((tmp_path / "config" / "updates").glob("*.exe"))
+
+    assert first.success
+    assert second.success
+    assert marker["version"] == "v0.4.3"
+    assert staged_sources == [current_source]
 
 
 def test_apply_update_follows_github_style_asset_redirects(tmp_path: Path) -> None:

@@ -233,7 +233,7 @@ async def _download_file_limited(
                 raise ValueError("更新下載資訊無效") from error
             if declared_size < 0 or declared_size > maximum_bytes:
                 raise ValueError("更新檔過大")
-        with destination.open("wb") as output:
+        with destination.open("wb", buffering=0) as output:
             async for chunk in response.aiter_bytes():
                 size += len(chunk)
                 if size > maximum_bytes:
@@ -242,6 +242,55 @@ async def _download_file_limited(
                 output.write(chunk)
     return size, digest.hexdigest()
 
+
+
+def _prior_installer_source(
+    marker: Path, updates: Path
+) -> tuple[Path, os.stat_result] | None:
+    try:
+        if marker.is_symlink() or not marker.is_file():
+            return None
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        if not str(payload["version"]).strip():
+            return None
+        expected_digest = str(payload["sha256"]).strip()
+        if (
+            len(expected_digest) != 64
+            or any(
+                character not in "0123456789abcdefABCDEF"
+                for character in expected_digest
+            )
+        ):
+            return None
+        source = Path(str(payload["installer"])).expanduser()
+        source = source if source.is_absolute() else marker.parent / source
+        source.resolve().relative_to(updates.resolve())
+        source_stat = source.stat(follow_symlinks=False)
+        if (
+            source.is_symlink()
+            or not stat.S_ISREG(source_stat.st_mode)
+            or source_stat.st_size <= 0
+            or source_stat.st_size > MAX_INSTALLER_BYTES
+        ):
+            return None
+        digest = hashlib.sha256()
+        with source.open("rb") as input_file:
+            while chunk := input_file.read(1024 * 1024):
+                digest.update(chunk)
+        if digest.hexdigest().lower() != expected_digest.lower():
+            return None
+        return source, source_stat
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _unlink_best_effort(path: Path | None) -> None:
+    if path is None:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 async def apply_update(
     root: Path | None = None,
@@ -259,6 +308,7 @@ async def apply_update(
     installer_temporary: Path | None = None
     installer_destination: Path | None = None
     marker_tmp: Path | None = None
+    prior_installer: tuple[Path, os.stat_result] | None = None
     try:
         parent = base / "config" / "updates"
         if (base / "config").is_symlink() or parent.is_symlink():
@@ -298,19 +348,46 @@ async def apply_update(
             os.replace(installer_temporary, installer_destination)
             installer_temporary = None
             marker = parent / "pending-installer-update.json"
-            marker_tmp = marker.with_suffix(".tmp")
-            marker_tmp.write_text(
-                json.dumps(
-                    {
-                        "version": info.version,
-                        "installer": str(installer_destination),
-                        "sha256": digest,
-                    }
-                ),
-                encoding="utf-8",
+            prior_installer = _prior_installer_source(marker, parent)
+            descriptor, marker_name = tempfile.mkstemp(
+                prefix=".pending-installer-update-",
+                suffix=".tmp",
+                dir=parent,
             )
+            marker_tmp = Path(marker_name)
+            marker_payload = {
+                "version": info.version,
+                "installer": str(installer_destination),
+                "sha256": digest,
+            }
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                    json.dump(marker_payload, output)
+            except Exception:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+                raise
+            marker_stat = marker_tmp.stat(follow_symlinks=False)
+            if marker_tmp.is_symlink() or not stat.S_ISREG(marker_stat.st_mode):
+                raise ValueError("更新標記檔不安全")
             os.replace(marker_tmp, marker)
             marker_tmp = None
+            if prior_installer is not None:
+                prior_source, prior_stat = prior_installer
+                try:
+                    unchanged = os.path.samestat(
+                        prior_stat, prior_source.stat(follow_symlinks=False)
+                    )
+                    if (
+                        unchanged
+                        and not prior_source.is_symlink()
+                        and prior_source.resolve() != installer_destination.resolve()
+                    ):
+                        prior_source.unlink()
+                except OSError:
+                    pass
             installer_destination = None
             return UpdateResult(
                 True,
@@ -359,12 +436,9 @@ async def apply_update(
             import shutil
 
             shutil.rmtree(staging_container, ignore_errors=True)
-        if installer_temporary is not None:
-            installer_temporary.unlink(missing_ok=True)
-        if installer_destination is not None:
-            installer_destination.unlink(missing_ok=True)
-        if marker_tmp is not None:
-            marker_tmp.unlink(missing_ok=True)
+        _unlink_best_effort(installer_temporary)
+        _unlink_best_effort(installer_destination)
+        _unlink_best_effort(marker_tmp)
         return UpdateResult(False, f"下載更新失敗：{error}", info.version)
     finally:
         if own:

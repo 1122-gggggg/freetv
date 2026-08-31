@@ -58,6 +58,62 @@ def pending_installer(
     return marker, source, digest
 
 
+def test_pending_installer_rejects_malformed_marker(tmp_path: Path) -> None:
+    root = tmp_path / "installed"
+    marker = pending_installer_marker(root)
+    marker.parent.mkdir(parents=True)
+    marker.write_text("{not-json", encoding="utf-8")
+
+    assert not launch_pending_installer_update(
+        root,
+        popen=lambda *args, **kwargs: pytest.fail(f"unexpected launch: {args} {kwargs}"),
+        os_name="nt",
+    )
+    assert marker.exists()
+
+
+def test_pending_installer_rejects_reparse_update_boundary(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "installed"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    config = root / "config"
+    config.mkdir(parents=True)
+    updates = config / "updates"
+    try:
+        updates.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory links are unavailable")
+    source = outside / "FreeTV-Setup.exe"
+    source.write_bytes(b"MZ-reparse")
+    marker = outside / "pending-installer-update.json"
+    marker.write_text(
+        json.dumps(
+            {
+                "version": "v0.4.2",
+                "installer": str(source),
+                "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "VERSION").write_text("0.4.1")
+    real_is_symlink = Path.is_symlink
+    monkeypatch.setattr(
+        Path,
+        "is_symlink",
+        lambda path: False if path == updates else real_is_symlink(path),
+    )
+
+    assert not launch_pending_installer_update(
+        root,
+        popen=lambda *args, **kwargs: pytest.fail(f"unexpected launch: {args} {kwargs}"),
+        os_name="nt",
+    )
+    assert marker.exists()
+
+
 def test_pending_installer_rejects_source_outside_update_dir(tmp_path: Path) -> None:
     root = tmp_path / "installed"
     marker, source, digest = pending_installer(root)
@@ -97,6 +153,20 @@ def test_pending_installer_rejects_oversized_source(
     root = tmp_path / "installed"
     marker, source, _ = pending_installer(root, content=b"MZ-oversized")
     monkeypatch.setattr(installer, "MAX_INSTALLER_BYTES", 4)
+
+    assert not launch_pending_installer_update(
+        root,
+        popen=lambda *args, **kwargs: pytest.fail(f"unexpected launch: {args} {kwargs}"),
+        os_name="nt",
+    )
+    assert marker.exists()
+    assert source.exists()
+
+
+def test_pending_installer_rejects_non_newer_target(tmp_path: Path) -> None:
+    root = tmp_path / "installed"
+    marker, source, _ = pending_installer(root, version="v0.4.0")
+    (root / "VERSION").write_text("0.4.1")
 
     assert not launch_pending_installer_update(
         root,
@@ -161,6 +231,67 @@ def test_pending_installer_launch_failure_keeps_retry_marker_and_source(
     assert source.read_bytes() == b"MZ-installer"
 
 
+def test_pending_installer_copy_hash_failure_keeps_retry_state(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "installed"
+    marker, source, _ = pending_installer(root)
+    (root / "VERSION").write_text("0.4.1")
+    temporary = tmp_path / "temporary"
+    temporary.mkdir()
+    monkeypatch.setattr(installer.tempfile, "gettempdir", lambda: str(temporary))
+    real_hash = installer._hash_installer
+
+    def mismatch_copy(path: Path) -> tuple[int, str]:
+        size, digest = real_hash(path)
+        return (size, digest) if path == source else (size, "0" * 64)
+
+    monkeypatch.setattr(installer, "_hash_installer", mismatch_copy)
+
+    assert not launch_pending_installer_update(
+        root,
+        popen=lambda *args, **kwargs: pytest.fail(f"unexpected launch: {args} {kwargs}"),
+        os_name="nt",
+    )
+    assert marker.exists()
+    assert source.exists()
+
+
+def test_pending_installer_copy_and_cleanup_failures_do_not_crash_bootstrap(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "installed"
+    marker, source, _ = pending_installer(root)
+    (root / "VERSION").write_text("0.4.1")
+    temporary = tmp_path / "temporary"
+    temporary.mkdir()
+    monkeypatch.setattr(installer.tempfile, "gettempdir", lambda: str(temporary))
+    copied: Path | None = None
+
+    def fail_copy(source_path: Path, destination: Path, **kwargs: object) -> None:
+        nonlocal copied
+        copied = Path(destination)
+        raise OSError("simulated copy failure")
+
+    real_unlink = Path.unlink
+
+    def fail_temp_cleanup(path: Path, *args: object, **kwargs: object) -> None:
+        if copied is not None and path == copied:
+            raise OSError("simulated cleanup failure")
+        real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(installer.shutil, "copy2", fail_copy)
+    monkeypatch.setattr(Path, "unlink", fail_temp_cleanup)
+
+    assert not launch_pending_installer_update(
+        root,
+        popen=lambda *args, **kwargs: pytest.fail(f"unexpected launch: {args} {kwargs}"),
+        os_name="nt",
+    )
+    assert marker.exists()
+    assert source.exists()
+
+
 def test_completed_installer_update_cleans_marker_source_and_old_temp_copies(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -182,6 +313,36 @@ def test_completed_installer_update_cleans_marker_source_and_old_temp_copies(
     assert not marker.exists()
     assert not source.exists()
     assert not old_copy.exists()
+
+
+def test_completed_installer_cleanup_retries_source_before_removing_marker(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "installed"
+    marker, source, _ = pending_installer(root, version="v0.4.2")
+    (root / "VERSION").write_text("0.4.2")
+    real_unlink = Path.unlink
+    failures = 0
+
+    def fail_source_once(path: Path, *args: object, **kwargs: object) -> None:
+        nonlocal failures
+        if path == source and failures == 0:
+            failures += 1
+            raise OSError("simulated locked source")
+        real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_source_once)
+    no_launch = lambda *args, **kwargs: pytest.fail(
+        f"unexpected launch: {args} {kwargs}"
+    )
+
+    assert not launch_pending_installer_update(root, popen=no_launch, os_name="nt")
+    assert marker.exists()
+    assert source.exists()
+
+    assert not launch_pending_installer_update(root, popen=no_launch, os_name="nt")
+    assert not marker.exists()
+    assert not source.exists()
 
 
 def test_copy_release_files_preserves_user_data(tmp_path: Path) -> None:

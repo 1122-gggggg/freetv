@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import stat
 import sys
 import tempfile
 from collections.abc import Callable
@@ -63,6 +64,33 @@ def _inside(path: Path, parent: Path) -> bool:
 
 
 
+def _is_reparse_point(path: Path) -> bool:
+    try:
+        attributes = getattr(path.lstat(), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(
+        attributes
+        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x00000400)
+    )
+
+
+def _safe_update_boundaries(root: Path, config: Path, updates: Path) -> bool:
+    try:
+        return (
+            config.is_dir()
+            and updates.is_dir()
+            and not config.is_symlink()
+            and not updates.is_symlink()
+            and not _is_reparse_point(config)
+            and not _is_reparse_point(updates)
+            and _inside(config, root)
+            and _inside(updates, root)
+        )
+    except OSError:
+        return False
+
+
 def pending_installer_marker(root: Path) -> Path:
     return root / "config" / "updates" / "pending-installer-update.json"
 
@@ -90,7 +118,11 @@ def _version_parts(value: str) -> tuple[int, ...]:
 
 def _cleanup_temp_installers() -> None:
     updates = Path(tempfile.gettempdir()) / "FreeTV-updates"
-    if updates.is_symlink() or not updates.is_dir():
+    if (
+        updates.is_symlink()
+        or _is_reparse_point(updates)
+        or not updates.is_dir()
+    ):
         return
     for candidate in updates.glob("FreeTV-update-*.exe"):
         try:
@@ -113,9 +145,9 @@ def launch_pending_installer_update(
     marker = pending_installer_marker(root)
     copied: Path | None = None
     if (
-        config.is_symlink()
-        or updates.is_symlink()
+        not _safe_update_boundaries(root, config, updates)
         or marker.is_symlink()
+        or _is_reparse_point(marker)
         or not marker.is_file()
     ):
         return False
@@ -128,6 +160,7 @@ def launch_pending_installer_update(
         if (
             not _inside(source, updates)
             or source.is_symlink()
+            or _is_reparse_point(source)
             or not source.is_file()
             or len(expected_digest) != 64
             or any(character not in "0123456789abcdefABCDEF" for character in expected_digest)
@@ -141,19 +174,19 @@ def launch_pending_installer_update(
         installed_parts = _version_parts(installed_version)
         if target_parts == installed_parts:
             try:
-                marker.unlink()
+                source.unlink()
             except OSError:
                 return False
             try:
-                source.unlink()
+                marker.unlink()
             except OSError:
-                pass
+                return False
             _cleanup_temp_installers()
             return False
         if target_parts <= installed_parts:
             return False
         temporary_updates = Path(tempfile.gettempdir()) / "FreeTV-updates"
-        if temporary_updates.is_symlink():
+        if temporary_updates.is_symlink() or _is_reparse_point(temporary_updates):
             return False
         temporary_updates.mkdir(parents=True, exist_ok=True)
         descriptor, copied_name = tempfile.mkstemp(
@@ -185,7 +218,10 @@ def launch_pending_installer_update(
         return True
     except (OSError, ValueError, KeyError, TypeError):
         if copied is not None:
-            copied.unlink(missing_ok=True)
+            try:
+                copied.unlink(missing_ok=True)
+            except OSError:
+                pass
         return False
 
 def managed_files(source: Path) -> list[str]:
