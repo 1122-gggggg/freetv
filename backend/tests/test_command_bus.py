@@ -193,9 +193,13 @@ class FakeInput:
 @dataclass
 class FakePower:
     sleep_calls: int = 0
+    shutdown_calls: int = 0
 
     async def sleep(self) -> None:
         self.sleep_calls += 1
+
+    async def shutdown(self) -> None:
+        self.shutdown_calls += 1
 
 
 @dataclass
@@ -234,6 +238,7 @@ def make_bus(
     news: FakeNews | None = None,
     *,
     initial: ControllerState | None = None,
+    power: FakePower | None = None,
 ) -> tuple[CommandBus, FakeApplications, FakePlayer, FakeInput]:
     applications = FakeApplications()
     player = FakePlayer()
@@ -245,7 +250,7 @@ def make_bus(
         volume=FakeVolume(),
         brightness=FakeBrightness(),
         input_controller=input_controller,
-        power=FakePower(),
+        power=power or FakePower(),
         news=news or FakeNews(),
     )
     return bus, applications, player, input_controller
@@ -295,6 +300,20 @@ def test_brightness_commands_adjust_level_and_show_osd() -> None:
         assert up.state.brightness == 100
         assert up.state.status_message == "亮度 100%"
         assert applications.show_osd_calls[-1] == "亮度 100%"
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_command_powers_off_the_computer() -> None:
+    async def scenario() -> None:
+        power = FakePower()
+        bus, _, _, _ = make_bus(power=power)
+
+        outcome = await bus.dispatch_command(Command.POWER_SHUTDOWN)
+
+        assert outcome.success
+        assert power.shutdown_calls == 1
+        assert outcome.state.status_message == "電腦將在 5 秒後關機。"
 
     asyncio.run(scenario())
 

@@ -164,6 +164,9 @@ class FakePower:
     async def sleep(self) -> None:
         return None
 
+    async def shutdown(self) -> None:
+        return None
+
 
 @dataclass
 class FakeNews:
@@ -935,6 +938,7 @@ def test_authenticated_remote_can_read_and_set_youtube_quality(tmp_path) -> None
     assert selected.json()["current"] == "hd720"
     assert app.state.runtime.applications.quality_selections == ["hd720"]
 
+
 def test_authenticated_tunnel_quality_get_allows_browser_request_without_origin(
     tmp_path, monkeypatch
 ) -> None:
@@ -959,7 +963,6 @@ def test_authenticated_tunnel_quality_get_allows_browser_request_without_origin(
     assert response.status_code == 200
 
 
-
 def test_youtube_quality_api_rejects_invalid_quality_and_token(tmp_path) -> None:
     app = make_app(tmp_path)
     token = app.state.runtime.pairing.pair("482731")
@@ -977,6 +980,7 @@ def test_youtube_quality_api_rejects_invalid_quality_and_token(tmp_path) -> None
 
     assert invalid_token.status_code == 401
     assert invalid_quality.status_code == 422
+
 
 def test_update_apply_requires_a_valid_remote_bearer_token(tmp_path, monkeypatch) -> None:
     app = make_app(tmp_path)

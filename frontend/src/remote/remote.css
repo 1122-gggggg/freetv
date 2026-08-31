@@ -61,6 +61,7 @@
 }
 
 .remote-update-card button:focus-visible,
+.remote-power-toggle:focus-visible,
 .remote-shell .forget-button:focus-visible {
   outline: 3px solid #f2c45e;
   outline-offset: 2px;
@@ -128,7 +129,8 @@
 .remote-shell .search-card,
 .remote-shell .netflix-context-card,
 .remote-shell .remote-direction-pad,
-.remote-shell .remote-sliders-row {
+.remote-shell .remote-sliders-row,
+.remote-shell .remote-power-card {
   margin-block: 0.75rem;
 }
 
@@ -299,6 +301,74 @@
 .remote-shell .netflix-context-card input {
   min-height: 3.25rem;
   border-radius: 0.75rem;
+}
+.remote-power-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid rgba(239, 68, 68, 0.42);
+  border-radius: 0.9rem;
+  background: rgba(127, 29, 29, 0.18);
+}
+
+.remote-power-card h2 {
+  margin: 0.15rem 0 0.25rem;
+  color: #fef2f2;
+  font-size: 1.05rem;
+}
+
+.remote-power-card p:last-child {
+  margin: 0;
+  color: #fecaca;
+  font-size: 0.82rem;
+}
+
+.remote-power-toggle {
+  display: grid;
+  justify-items: center;
+  gap: 0.35rem;
+  min-width: 5.5rem;
+  min-height: 3.5rem;
+  padding: 0.5rem;
+  border: 0;
+  border-radius: 0.8rem;
+  background: transparent;
+  color: #fef2f2;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.remote-power-track {
+  position: relative;
+  width: 3.2rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+  transition: background 160ms ease;
+}
+
+.remote-power-track.is-off {
+  background: #7f1d1d;
+}
+
+.remote-power-track.is-off .remote-power-thumb {
+  right: 1.65rem;
+}
+
+.remote-power-thumb {
+  position: absolute;
+  top: 0.2rem;
+  right: 0.2rem;
+  transition: right 160ms ease;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.35);
 }
 
 .remote-shell .remote-feedback {

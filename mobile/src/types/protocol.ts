@@ -30,6 +30,7 @@ export type Command =
   | 'OPEN_BROWSER'
   | 'OPEN_NEWS'
   | 'POWER_SLEEP'
+  | 'POWER_SHUTDOWN'
   | 'QUALITY'
   | 'SUBTITLES'
 export type PointerAction = 'move' | 'tap' | 'double_tap' | 'scroll'

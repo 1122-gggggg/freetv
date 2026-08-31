@@ -1,7 +1,9 @@
-import React, { useRef } from 'react'
+import React, { useRef, useState } from 'react'
 import {
+  Alert,
   PanResponder,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -26,10 +28,31 @@ export function MediaControls({
   volume = 50,
   brightness = 100,
 }: MediaControlsProps): React.ReactElement {
+  const [shuttingDown, setShuttingDown] = useState(false)
+
   const trigger = (command: Command) => {
     if (disabled) return
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
     onCommand(command)
+  }
+
+  const confirmShutdown = () => {
+    if (disabled || shuttingDown) return
+    Alert.alert(
+      '關閉機上盒',
+      '確定要關閉機上盒電源嗎？電腦將在 5 秒後關機。',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '關機',
+          style: 'destructive',
+          onPress: () => {
+            setShuttingDown(true)
+            trigger('POWER_SHUTDOWN')
+          },
+        },
+      ],
+    )
   }
 
   // Create drag responders for Volume, Speed, and Brightness
@@ -352,6 +375,35 @@ export function MediaControls({
           <Text style={styles.actionBtnText}>頻道 ▲</Text>
         </TouchableOpacity>
       </View>
+
+      <View
+        style={[
+          styles.powerSwitchRow,
+          (disabled || shuttingDown) && styles.disabledControl,
+        ]}
+      >
+        <View style={styles.powerSwitchCopy}>
+          <Text style={styles.powerSwitchTitle}>機上盒電源</Text>
+          <Text style={styles.powerSwitchDescription}>
+            {shuttingDown ? '電腦將在 5 秒後關機' : '切到關閉會關閉這台電腦'}
+          </Text>
+        </View>
+        <Switch
+          value={!shuttingDown}
+          disabled={disabled || shuttingDown}
+          onValueChange={(enabled) => {
+            if (!enabled) confirmShutdown()
+          }}
+          accessibilityLabel="機上盒電源"
+          accessibilityHint="切到關閉後，機上盒電腦會在五秒後關機。"
+          accessibilityState={{
+            checked: !shuttingDown,
+            disabled: Boolean(disabled || shuttingDown),
+          }}
+          trackColor={{ false: '#7f1d1d', true: '#22c55e' }}
+          thumbColor="#ffffff"
+        />
+      </View>
     </View>
   )
 }
@@ -556,5 +608,31 @@ const styles = StyleSheet.create({
     color: '#fda4af',
     fontSize: 13,
     fontWeight: '700',
+  },
+  powerSwitchRow: {
+    minHeight: 66,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderColor: '#7f1d1d',
+    borderWidth: 1,
+    borderRadius: 16,
+    backgroundColor: '#2b171b',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  powerSwitchCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  powerSwitchTitle: {
+    color: '#fef2f2',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  powerSwitchDescription: {
+    color: '#fca5a5',
+    fontSize: 12,
   },
 })

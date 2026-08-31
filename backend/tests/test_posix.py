@@ -84,6 +84,21 @@ def test_posix_power_uses_systemctl_on_linux(monkeypatch: pytest.MonkeyPatch) ->
     assert calls == [["systemctl", "suspend"]]
 
 
+def test_posix_power_uses_systemctl_to_power_off_linux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr("app.system.posix.sys.platform", "linux")
+    controller = PosixPowerController(
+        runner=lambda arguments: calls.append(list(arguments)) or "",
+        lookup=_lookup("systemctl"),
+    )
+
+    asyncio.run(controller.shutdown())
+
+    assert calls == [["systemctl", "poweroff"]]
+
+
 def test_posix_window_uses_pid_as_handle(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.system.posix.pid_is_running", lambda pid: pid == 4242)
     windows = PosixWindowController(lookup=_lookup())

@@ -184,6 +184,7 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
   const [updateStatus, setUpdateStatus] = useState<string | null>(null)
   const [updating, setUpdating] = useState(false)
   const [stagedUpdateVersion, setStagedUpdateVersion] = useState<string | null>(null)
+  const [shuttingDown, setShuttingDown] = useState(false)
   const liveTextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const controlsDisabled = status !== 'connected'
   const canTypeIntoApp =
@@ -260,6 +261,18 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
 
   const command = (value: Command) => {
     if (!sendCommand(value)) navigator.vibrate?.([16, 35, 16])
+  }
+
+  const shutdownComputer = () => {
+    if (
+      controlsDisabled ||
+      shuttingDown ||
+      !window.confirm('確定要關閉機上盒電源嗎？電腦將在 5 秒後關機。')
+    ) {
+      return
+    }
+    setShuttingDown(true)
+    command('POWER_SHUTDOWN')
   }
 
 
@@ -650,6 +663,31 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       </section>
       ) : null}
 
+
+      <section className="remote-power-card" aria-labelledby="remote-power-title">
+        <div>
+          <p className="eyebrow">系統電源</p>
+          <h2 id="remote-power-title">關閉電腦</h2>
+          <p>將開關切到關閉後，機上盒電腦會在 5 秒後關機。</p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-label="機上盒電源"
+          aria-checked={!shuttingDown}
+          className="remote-power-toggle"
+          disabled={controlsDisabled || shuttingDown}
+          onClick={shutdownComputer}
+        >
+          <span
+            className={`remote-power-track ${shuttingDown ? 'is-off' : ''}`}
+            aria-hidden="true"
+          >
+            <span className="remote-power-thumb" />
+          </span>
+          <span>{shuttingDown ? '關機中…' : '運行中'}</span>
+        </button>
+      </section>
 
       <footer className="remote-feedback" aria-live="polite">
         {forgetError ?? state?.error_message ?? state?.status_message ?? lastError?.message ?? lastAcknowledgement?.message ?? (lastAcknowledgement?.success ? '指令已送出。' : '就緒。')}

@@ -44,8 +44,11 @@ class Command(StrEnum):
     OPEN_BROWSER = "OPEN_BROWSER"
     OPEN_NEWS = "OPEN_NEWS"
     POWER_SLEEP = "POWER_SLEEP"
+    POWER_SHUTDOWN = "POWER_SHUTDOWN"
     QUALITY = "QUALITY"
     SUBTITLES = "SUBTITLES"
+
+
 class NetflixStage(StrEnum):
     LOGIN = "login"
     VERIFICATION = "verification"

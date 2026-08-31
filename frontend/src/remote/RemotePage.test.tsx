@@ -142,6 +142,26 @@ describe('RemotePage', () => {
     expect(screen.queryByLabelText(/觸控板/)).toBeNull()
   })
 
+  it('requires confirmation before the power switch shuts down the computer', () => {
+    const confirmShutdown = vi.fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true)
+    vi.stubGlobal('confirm', confirmShutdown)
+    render(remoteElement())
+
+    const powerSwitch = screen.getByRole('switch', { name: '機上盒電源' })
+    expect(powerSwitch.getAttribute('aria-checked')).toBe('true')
+
+    fireEvent.click(powerSwitch)
+    expect(confirmShutdown).toHaveBeenCalledOnce()
+    expect(socketMock.sendCommand).not.toHaveBeenCalledWith('POWER_SHUTDOWN')
+
+    fireEvent.click(powerSwitch)
+    expect(confirmShutdown).toHaveBeenCalledTimes(2)
+    expect(socketMock.sendCommand).toHaveBeenCalledWith('POWER_SHUTDOWN')
+    expect(powerSwitch.getAttribute('aria-checked')).toBe('false')
+  })
+
   it('hides controls that do not apply to the active video app', () => {
     socketMock.state = netflixState({
       stage: 'browse',

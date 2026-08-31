@@ -85,7 +85,10 @@ Allowed command values:
 - `PLAY_PAUSE`, `FULLSCREEN`, `NEXT`, `PREVIOUS`
 - `VOLUME_UP`, `VOLUME_DOWN`, `MUTE`
 - `CHANNEL_UP`, `CHANNEL_DOWN`
-- `OPEN_YOUTUBE`, `OPEN_NETFLIX`, `OPEN_NEWS`, `OPEN_LIVE_TV`, `OPEN_BROWSER`, `POWER_SLEEP`
+- `OPEN_YOUTUBE`, `OPEN_NETFLIX`, `OPEN_NEWS`, `OPEN_LIVE_TV`, `OPEN_BROWSER`
+- `POWER_SLEEP`, `POWER_SHUTDOWN`
+
+`POWER_SHUTDOWN` is accepted only over the same authenticated Remote channel as every other command. The web and native Remote require destructive-action confirmation before sending it, and the controller schedules operating-system shutdown after a five-second acknowledgement window.
 
 There is no raw keyboard, shell, script, URL, process, path, or arbitrary command message.
 

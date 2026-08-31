@@ -235,6 +235,11 @@ class CommandBus:
             state = await self._success_state(status_message="電腦即將進入休眠。")
             return CommandOutcome(True, state)
 
+        if command is Command.POWER_SHUTDOWN:
+            await self._power.shutdown()
+            state = await self._success_state(status_message="電腦將在 5 秒後關機。")
+            return CommandOutcome(True, state)
+
         if command in _LAUNCH_TARGETS:
             target = _LAUNCH_TARGETS[command]
             context = None

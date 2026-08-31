@@ -350,6 +350,45 @@ describe('RemoteScreen', () => {
     expect(root.findByProps({ accessibilityLabel: '快轉五秒' })).toBeTruthy()
   })
 
+  it('confirms the power switch before shutting down the computer', async () => {
+    await act(async () => {
+      renderer = ReactTestRenderer.create(
+        <RemoteScreen device={mockDevice} onDisconnect={mockOnDisconnect} />,
+      )
+    })
+    const root = renderer!.root
+    act(() => {
+      latestMockSocket!.simulateStatusChange('authenticated')
+    })
+
+    const powerSwitch = root.findByProps({ accessibilityLabel: '機上盒電源' })
+    expect(powerSwitch.props.value).toBe(true)
+    act(() => {
+      powerSwitch.props.onValueChange(false)
+    })
+
+    expect(alertSpy).toHaveBeenCalledWith(
+      '關閉機上盒',
+      expect.stringContaining('5 秒後關機'),
+      expect.any(Array),
+    )
+    const alertButtons = alertSpy.mock.calls[0][2] as Array<{
+      text: string
+      style?: string
+      onPress?: () => void
+    }>
+    const shutdownButton = alertButtons.find(
+      (button) => button.style === 'destructive' || button.text === '關機',
+    )
+
+    await act(async () => {
+      shutdownButton?.onPress?.()
+    })
+
+    expect(latestMockSocket!.sendCommand).toHaveBeenCalledWith('POWER_SHUTDOWN')
+    expect(root.findByProps({ accessibilityLabel: '機上盒電源' }).props.value).toBe(false)
+  })
+
   it('surfaces failed command ACK in error banner and clears on success', async () => {
 
     await act(async () => {

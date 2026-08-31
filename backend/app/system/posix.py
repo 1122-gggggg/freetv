@@ -317,6 +317,24 @@ class PosixPowerController:
                 return
         raise CommandExecutionError("sleep_failed", "這個系統沒有可用的休眠指令。")
 
+    async def shutdown(self) -> None:
+        if sys.platform == "darwin":
+            if self._lookup("osascript"):
+                self._run(
+                    [
+                        "osascript",
+                        "-e",
+                        'tell application "System Events" to shut down',
+                    ]
+                )
+                return
+            raise CommandExecutionError("shutdown_failed", "找不到 osascript，無法關閉這台 Mac。")
+        for command in (("systemctl", "poweroff"), ("loginctl", "poweroff")):
+            if self._lookup(command[0]):
+                self._run(list(command))
+                return
+        raise CommandExecutionError("shutdown_failed", "這個系統沒有可用的關機指令。")
+
 
 class PosixWindowController:
     """Treats PIDs as window handles so HOME/launch work without Win32 HWND."""
