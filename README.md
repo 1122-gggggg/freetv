@@ -19,10 +19,20 @@ A local controller that turns an HDMI-connected Windows, macOS, or Linux PC into
 
 Download the installer entry for your platform from the latest GitHub Release:
 
-- **Windows 10/11:** download and double-click `Install-FreeTV.cmd`. It verifies and installs the official release under `%LOCALAPPDATA%\FreeTV`, creates a current-user Start Menu launcher, and starts FreeTV. If Python is missing, this explicit installer action may use `winget` with `--scope user`.
+- **Windows 10/11 x64:** download and double-click `FreeTV-Setup.exe`. The per-user installer deploys FreeTV under `%LOCALAPPDATA%\FreeTV`, creates Start Menu and optional desktop shortcuts, enables logon autostart, and starts the fullscreen TV interface. If Python is missing, installation may use `winget` with `--scope user`.
 - **macOS/Linux:** download `install.sh`, then run `sh install.sh`. It verifies the release checksum, installs under the current user's application-data directory, creates a user launcher, and starts FreeTV. Python 3.11+, `curl`, and `unzip` must already be available.
 
 The installer never replaces `config`, `.venv`, `vendor`, or `logs` during upgrades. Chrome/Chromium remains required for browser playback; mpv and cloudflared remain optional capabilities rather than silently installed system dependencies.
+
+### Keep running with a laptop lid closed (Windows)
+
+Windows normally puts a laptop to sleep when its lid closes. Sleep or hibernation stops FreeTV, its network connection, and the phone remote even though logon autostart is enabled. Before using a laptop as a set-top box:
+
+1. Open **Control Panel → Hardware and Sound → Power Options → Choose what closing the lid does**.
+2. Set **When I close the lid** to **Do nothing** for **Plugged in**. Change the battery setting only if you intentionally need unplugged operation.
+3. Open **Settings → System → Power & battery → Screen and sleep** and set plugged-in sleep to **Never**. The display itself may still turn off.
+
+Keep the laptop connected to power and place it where closing the lid does not obstruct cooling vents.
 
 ### Portable folder
 
@@ -314,8 +324,8 @@ For HTTPS mode, verify the same instance with its generated controller CA:
 
 ## Known limitations
 
-- The current installers are user-scoped bootstrap scripts, not signed MSI/PKG/AppImage bundles. Windows can bootstrap Python through `winget`; macOS/Linux still require Python 3.11+, `curl`, and `unzip`. SHA-256 detects download corruption, while publisher trust remains rooted in the HTTPS GitHub Release account rather than a separately pinned signing key.
-- The TV Launcher is a browser window, not a native OS shell replacement. Use `python freetv.py autostart` and Chrome/Chromium fullscreen for the closest appliance flow. Linux D-pad/volume need xdotool/ydotool and wpctl/pactl.
+- The Windows installer is a user-scoped, unsigned Inno Setup executable rather than a signed MSI. macOS/Linux still use bootstrap scripts and require Python 3.11+, `curl`, and `unzip`. SHA-256 detects download corruption, while publisher trust remains rooted in the HTTPS GitHub Release account rather than a separately pinned signing key.
+- The TV Launcher is a browser window, not a native OS shell replacement. The Windows installer enables current-user logon autostart and opens Chrome/Chromium fullscreen for the appliance flow. Portable installs can run `python freetv.py autostart`. Linux D-pad/volume need xdotool/ydotool and wpctl/pactl.
 - HTTP mode cannot install the Remote as a PWA (service workers require a secure context). HTTPS mode requires explicit trust of the controller local CA; the certificate contains literal current IP addresses, so `start.ps1` refreshes it after LAN-address changes.
 - Native Remote pairing uses QR or a manually entered numeric IP and remains HTTPS-only. The controller advertises mDNS metadata only in HTTPS mode, but the current native app does not yet provide automatic mDNS discovery.
 - Native iOS builds require macOS/Xcode or an authenticated Expo EAS account.
