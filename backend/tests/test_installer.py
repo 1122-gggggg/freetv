@@ -7,11 +7,13 @@ import pytest
 
 from app import installer
 from app.installer import (
+    bundled_runtime_python,
     apply_pending_update,
     copy_release_files,
     create_user_launcher,
     managed_files,
     user_install_directory,
+    is_bundled_runtime,
 )
 
 FREETV_PATH = Path(__file__).resolve().parents[2] / "freetv.py"
@@ -19,6 +21,22 @@ FREETV_SPEC = importlib.util.spec_from_file_location("freetv_bootstrap_test", FR
 assert FREETV_SPEC is not None and FREETV_SPEC.loader is not None
 freetv = importlib.util.module_from_spec(FREETV_SPEC)
 FREETV_SPEC.loader.exec_module(freetv)
+
+def test_bundled_runtime_paths_are_private_to_install_root(tmp_path: Path) -> None:
+    assert bundled_runtime_python(tmp_path, os_name="nt") == tmp_path / "runtime" / "python.exe"
+    assert bundled_runtime_python(tmp_path, windowed=True, os_name="nt") == (
+        tmp_path / "runtime" / "pythonw.exe"
+    )
+
+
+def test_bundled_runtime_detection_accepts_python_and_pythonw(tmp_path: Path) -> None:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    for name in ("python.exe", "pythonw.exe"):
+        executable = runtime / name
+        executable.touch()
+        assert is_bundled_runtime(tmp_path, executable=executable, os_name="nt")
+
 
 
 def test_copy_release_files_preserves_user_data(tmp_path: Path) -> None:
@@ -217,6 +235,25 @@ def test_setup_repairs_an_existing_partial_virtual_environment(
     assert commands[0][1:4] == ["-m", "pip", "install"]
     assert commands[1][1:5] == ["-m", "pip", "install", "-r"]
     assert commands[2] == [str(python), str(freetv.ROOT / "freetv.py"), "setup"]
+
+def test_bundled_runtime_runs_application_without_venv_bootstrap(monkeypatch) -> None:
+    application_calls: list[list[str]] = []
+    monkeypatch.setattr(freetv, "is_bundled_runtime", lambda root: True)
+    monkeypatch.setattr(
+        freetv,
+        "_run_application",
+        lambda arguments: application_calls.append(arguments) or 0,
+    )
+    monkeypatch.setattr(
+        freetv,
+        "_run",
+        lambda command: pytest.fail(f"unexpected bootstrap command: {command}"),
+    )
+
+    assert freetv.main(["setup"]) == 0
+    assert application_calls == [["setup"]]
+
+
 
 def test_applied_update_finishes_dependency_setup_before_start(monkeypatch) -> None:
     commands: list[list[str]] = []

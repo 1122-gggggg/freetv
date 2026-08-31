@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -25,6 +26,28 @@ MANAGED_SINGLE_FILES = (
     "config/channels.example.json",
     "config/news.example.json",
 )
+
+
+def bundled_runtime_python(
+    root: Path, *, windowed: bool = False, os_name: str = os.name
+) -> Path:
+    name = "pythonw.exe" if windowed else "python.exe"
+    return root / "runtime" / name if os_name == "nt" else root / "runtime" / "bin" / "python"
+
+
+def is_bundled_runtime(
+    root: Path,
+    *,
+    executable: Path | None = None,
+    os_name: str = os.name,
+) -> bool:
+    if os_name != "nt":
+        return False
+    current = (executable or Path(sys.executable)).resolve()
+    return current in {
+        bundled_runtime_python(root, os_name=os_name).resolve(),
+        bundled_runtime_python(root, windowed=True, os_name=os_name).resolve(),
+    }
 
 
 def _inside(path: Path, parent: Path) -> bool:

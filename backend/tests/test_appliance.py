@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from app.appliance import (
+    application_python,
     _systemd_quote,
     chrome_launcher_args,
     clear_public_origin,
@@ -33,6 +34,14 @@ def test_ensure_example_configs_copies_missing_files(tmp_path: Path) -> None:
 def test_venv_python_uses_platform_layout(tmp_path: Path) -> None:
     assert venv_python(tmp_path, os_name="nt") == tmp_path / ".venv" / "Scripts" / "python.exe"
     assert venv_python(tmp_path, os_name="posix") == tmp_path / ".venv" / "bin" / "python"
+
+def test_application_python_prefers_bundled_runtime(tmp_path: Path) -> None:
+    bundled = tmp_path / "runtime" / "python.exe"
+    bundled.parent.mkdir()
+    bundled.touch()
+
+    assert application_python(tmp_path, os_name="nt") == bundled
+
 
 
 def test_chrome_launcher_args_add_linux_flags(tmp_path: Path) -> None:

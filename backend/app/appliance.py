@@ -13,6 +13,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from app.config import load_settings, project_root, resolve_application_paths
+from app.installer import bundled_runtime_python, is_bundled_runtime
 
 MINIMUM_PYTHON = (3, 11)
 CONTROLLER_MODULE = "app.main:app"
@@ -23,6 +24,12 @@ def venv_python(root: Path | None = None, *, os_name: str = os.name) -> Path:
     if os_name == "nt":
         return base / ".venv" / "Scripts" / "python.exe"
     return base / ".venv" / "bin" / "python"
+
+
+def application_python(root: Path | None = None, *, os_name: str = os.name) -> Path:
+    base = root or project_root()
+    bundled = bundled_runtime_python(base, os_name=os_name)
+    return bundled if bundled.is_file() else venv_python(base, os_name=os_name)
 
 
 def venv_directory(root: Path | None = None) -> Path:
@@ -138,14 +145,17 @@ def _require_python_version() -> None:
 def setup_appliance(root: Path | None = None) -> None:
     _require_python_version()
     base = root or project_root()
-    python = venv_python(base)
-    env_dir = venv_directory(base)
-    if not python.is_file():
-        print(f"Creating virtual environment at {env_dir}...")
-        _run([sys.executable, "-m", "venv", str(env_dir)])
-    print("Installing backend dependencies...")
-    _run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
-    _run([str(python), "-m", "pip", "install", "-r", str(base / "backend" / "requirements.txt")])
+    python = application_python(base)
+    if not is_bundled_runtime(base):
+        env_dir = venv_directory(base)
+        if not python.is_file():
+            print(f"Creating virtual environment at {env_dir}...")
+            _run([sys.executable, "-m", "venv", str(env_dir)])
+        print("Installing backend dependencies...")
+        _run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
+        _run(
+            [str(python), "-m", "pip", "install", "-r", str(base / "backend" / "requirements.txt")]
+        )
     print("Installing AdBlock extensions...")
     _run(
         [
@@ -186,7 +196,7 @@ def print_doctor(root: Path | None = None) -> None:
     base = root or project_root()
     settings = load_settings(base / "config" / "settings.json")
     paths = resolve_application_paths(settings)
-    python = venv_python(base)
+    python = application_python(base)
     print(f"OS: {sys.platform} ({os.name})")
     print(f"Python: {sys.version.split()[0]} ({sys.executable})")
     print(f"Venv: {'ok' if python.is_file() else 'missing'} ({python})")
@@ -226,7 +236,7 @@ def start_appliance(
 ) -> int:
     _require_python_version()
     base = root or project_root()
-    python = venv_python(base)
+    python = application_python(base)
     if not python.is_file():
         raise RuntimeError("找不到虛擬環境。請先執行 python freetv.py setup。")
     if not frontend_index(base).is_file():
@@ -393,7 +403,7 @@ def install_autostart(*, root: Path | None = None, remove: bool = False) -> None
             arguments.append("-Remove")
         _run(arguments)
         return
-    python = venv_python(base)
+    python = application_python(base)
     start_command = [
         str(python),
         str(base / "freetv.py"),

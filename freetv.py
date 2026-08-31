@@ -21,9 +21,11 @@ assert _INSTALLER_SPEC and _INSTALLER_SPEC.loader
 _INSTALLER = importlib.util.module_from_spec(_INSTALLER_SPEC)
 _INSTALLER_SPEC.loader.exec_module(_INSTALLER)
 apply_pending_update = _INSTALLER.apply_pending_update
+bundled_runtime_python = _INSTALLER.bundled_runtime_python
 copy_release_files = _INSTALLER.copy_release_files
 user_install_directory = _INSTALLER.user_install_directory
 create_user_launcher = _INSTALLER.create_user_launcher
+is_bundled_runtime = _INSTALLER.is_bundled_runtime
 
 MINIMUM_PYTHON = (3, 11)
 ROOT = Path(__file__).resolve().parent
@@ -59,6 +61,16 @@ def _run(arguments: list[str]) -> int:
     return completed.returncode
 
 
+def _run_application(raw_arguments: list[str]) -> int:
+    sys.path.insert(0, str(ROOT / "backend"))
+    try:
+        from app.appliance import main as appliance_main
+    except ImportError:
+        sys.stderr.write("FreeTV 執行環境不完整。請重新安裝 FreeTV。\n")
+        return 1
+    return appliance_main(raw_arguments)
+
+
 def main(argv: list[str] | None = None) -> int:
     if sys.version_info < MINIMUM_PYTHON:
         sys.stderr.write(
@@ -86,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
         code = _run([sys.executable, str(ROOT / "freetv.py"), "setup"])
         if code != 0:
             return code
+    if is_bundled_runtime(ROOT):
+        return _run_application(raw_arguments)
     python = venv_python()
 
     if sys.prefix == getattr(sys, "base_prefix", sys.prefix):
@@ -116,14 +130,7 @@ def main(argv: list[str] | None = None) -> int:
                 return code
         return _run([str(python), str(ROOT / "freetv.py"), *raw_arguments])
 
-    sys.path.insert(0, str(ROOT / "backend"))
-    try:
-        from app.appliance import main as appliance_main
-    except ImportError:
-        sys.stderr.write("虛擬環境不完整。請重新執行 python freetv.py setup。\n")
-        return 1
-
-    return appliance_main(raw_arguments)
+    return _run_application(raw_arguments)
 
 
 if __name__ == "__main__":
