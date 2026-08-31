@@ -159,6 +159,7 @@ def test_start_appliance_skips_tunnel_launcher_when_cloudflare_is_offline(
     runtime = tmp_path / "runtime" / "python.exe"
     runtime.parent.mkdir()
     runtime.touch()
+    monkeypatch.setattr(appliance, "application_python", lambda root: runtime)
     frontend = tmp_path / "frontend" / "dist" / "index.html"
     frontend.parent.mkdir(parents=True)
     frontend.touch()

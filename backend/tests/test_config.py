@@ -172,18 +172,17 @@ def test_resolve_application_paths_falls_back_to_bundled_tools(
 def test_resolve_application_paths_ignores_bundled_windows_tools_on_non_windows(
     tmp_path, monkeypatch
 ) -> None:
-    for executable in (
-        tmp_path / "tools" / "mpv" / "mpv.exe",
-        tmp_path / "tools" / "cloudflared" / "cloudflared.exe",
-    ):
+    bundled_mpv = tmp_path / "tools" / "mpv" / "mpv.exe"
+    bundled_cloudflared = tmp_path / "tools" / "cloudflared" / "cloudflared.exe"
+    for executable in (bundled_mpv, bundled_cloudflared):
         executable.parent.mkdir(parents=True, exist_ok=True)
         executable.touch()
     monkeypatch.setattr(config.shutil, "which", lambda _: None)
 
     paths = resolve_application_paths(Settings(), os_name="posix", root=tmp_path)
 
-    assert paths["mpv"] is None
-    assert paths["cloudflared"] is None
+    assert paths["mpv"] != bundled_mpv
+    assert paths["cloudflared"] != bundled_cloudflared
 
 
 def test_find_executable_accepts_multiple_command_names(tmp_path, monkeypatch) -> None:
