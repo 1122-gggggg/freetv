@@ -33,4 +33,4 @@ def test_health_reports_controller_and_dependency_availability() -> None:
         "edge_available": True,
         "mpv_available": False,
     }
-    assert app.version == "0.5.0"
+    assert app.version == "0.5.1"

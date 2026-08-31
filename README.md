@@ -28,6 +28,8 @@ The offline installer:
 - Provides an optional opt-in task to keep the laptop running when the lid is closed (disables automatic sleep/hibernation on the active power plan; unselected by default, prompts for UAC only when checked).
 - Preserves existing user configuration (`config`), pairings, and logs during updates.
 
+The v0.5.1 patch validates complete-installer updates from an installed v0.5.0 client.
+
 ### Other platforms and advanced downloads
 
 #### macOS/Linux one-click install
