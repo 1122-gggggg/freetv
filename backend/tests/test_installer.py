@@ -345,6 +345,36 @@ def test_completed_installer_cleanup_retries_source_before_removing_marker(
     assert not source.exists()
 
 
+def test_completed_installer_cleanup_retries_marker_after_source_is_gone(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "installed"
+    marker, source, _ = pending_installer(root, version="v0.4.2")
+    (root / "VERSION").write_text("0.4.2")
+    real_unlink = Path.unlink
+    marker_failures = 0
+
+    def fail_marker_once(path: Path, *args: object, **kwargs: object) -> None:
+        nonlocal marker_failures
+        if path == marker and marker_failures == 0:
+            marker_failures += 1
+            raise OSError("simulated locked marker")
+        real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_marker_once)
+    no_launch = lambda *args, **kwargs: pytest.fail(
+        f"unexpected launch: {args} {kwargs}"
+    )
+
+    assert not launch_pending_installer_update(root, popen=no_launch, os_name="nt")
+    assert marker.exists()
+    assert not source.exists()
+
+    assert not launch_pending_installer_update(root, popen=no_launch, os_name="nt")
+    assert not marker.exists()
+    assert not source.exists()
+
+
 def test_copy_release_files_preserves_user_data(tmp_path: Path) -> None:
     source, target = tmp_path / "package", tmp_path / "installed"
     (source / "config").mkdir(parents=True)

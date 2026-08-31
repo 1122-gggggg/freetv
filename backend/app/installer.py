@@ -161,29 +161,40 @@ def launch_pending_installer_update(
             not _inside(source, updates)
             or source.is_symlink()
             or _is_reparse_point(source)
-            or not source.is_file()
             or len(expected_digest) != 64
             or any(character not in "0123456789abcdefABCDEF" for character in expected_digest)
         ):
             return False
-        source_size, source_digest = _hash_installer(source)
-        if source_digest.lower() != expected_digest.lower():
-            return False
         installed_version = (root / "VERSION").read_text(encoding="utf-8").strip()
         target_parts = _version_parts(version)
         installed_parts = _version_parts(installed_version)
+        try:
+            source_stat = source.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            source_stat = None
         if target_parts == installed_parts:
-            try:
-                source.unlink()
-            except OSError:
-                return False
+            if source_stat is not None:
+                if not stat.S_ISREG(source_stat.st_mode):
+                    return False
+                _, source_digest = _hash_installer(source)
+                if source_digest.lower() != expected_digest.lower():
+                    return False
+                try:
+                    source.unlink()
+                except OSError:
+                    return False
             try:
                 marker.unlink()
             except OSError:
                 return False
             _cleanup_temp_installers()
             return False
-        if target_parts <= installed_parts:
+        if target_parts <= installed_parts or source_stat is None:
+            return False
+        if not stat.S_ISREG(source_stat.st_mode):
+            return False
+        source_size, source_digest = _hash_installer(source)
+        if source_digest.lower() != expected_digest.lower():
             return False
         temporary_updates = Path(tempfile.gettempdir()) / "FreeTV-updates"
         if temporary_updates.is_symlink() or _is_reparse_point(temporary_updates):
