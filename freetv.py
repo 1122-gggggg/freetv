@@ -65,7 +65,8 @@ def main(argv: list[str] | None = None) -> int:
             f"FreeTV 需要 Python {MINIMUM_PYTHON[0]}.{MINIMUM_PYTHON[1]} 或更新版本。\n"
         )
         return 2
-    arguments = parse_arguments(list(argv) if argv is not None else sys.argv[1:])
+    raw_arguments = list(argv) if argv is not None else sys.argv[1:]
+    arguments = parse_arguments(raw_arguments)
     command = arguments.command or "run"
     if command == "install":
         target = user_install_directory()
@@ -73,10 +74,13 @@ def main(argv: list[str] | None = None) -> int:
         if ROOT.resolve() != target.resolve():
             copy_release_files(ROOT, target)
         code = _run([sys.executable, str(target / "freetv.py"), "setup"])
-        if code == 0:
-            print(f"Launcher: {create_user_launcher(target)}")
-            return _run([sys.executable, str(target / "freetv.py"), "start"])
-        return code
+        if code != 0:
+            return code
+        print(f"Launcher: {create_user_launcher(target)}")
+        code = _run([sys.executable, str(target / "freetv.py"), "autostart"])
+        if code != 0:
+            return code
+        return _run([sys.executable, str(target / "freetv.py"), "start"])
     if UPDATE_APPLIED and command != "setup":
         print("Finishing the verified FreeTV update...")
         code = _run([sys.executable, str(ROOT / "freetv.py"), "setup"])
@@ -85,7 +89,8 @@ def main(argv: list[str] | None = None) -> int:
     python = venv_python()
 
     if sys.prefix == getattr(sys, "base_prefix", sys.prefix):
-        if not python.is_file():
+        environment_missing = not python.is_file()
+        if environment_missing:
             if command not in {"setup", "run"}:
                 sys.stderr.write("找不到虛擬環境。請先執行 python freetv.py setup。\n")
                 return 1
@@ -93,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
             code = _run([sys.executable, "-m", "venv", str(ROOT / ".venv")])
             if code != 0:
                 return code
+        if environment_missing or command in {"setup", "run"}:
             print("Installing backend dependencies...")
             code = _run([str(python), "-m", "pip", "install", "--upgrade", "pip"])
             if code == 0:
@@ -108,8 +114,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             if code != 0:
                 return code
-        code = _run([str(python), str(ROOT / "freetv.py"), *sys.argv[1:]])
-        return code
+        return _run([str(python), str(ROOT / "freetv.py"), *raw_arguments])
 
     sys.path.insert(0, str(ROOT / "backend"))
     try:
@@ -118,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("虛擬環境不完整。請重新執行 python freetv.py setup。\n")
         return 1
 
-    return appliance_main(sys.argv[1:])
+    return appliance_main(raw_arguments)
 
 
 if __name__ == "__main__":

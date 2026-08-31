@@ -194,8 +194,29 @@ def test_install_command_sets_up_launcher_and_starts_installed_copy(
     assert freetv.main(["install"]) == 0
     assert copied == [(freetv.ROOT, target)]
     assert launched == [target]
-    assert [command[-1] for command in commands] == ["setup", "start"]
+    assert [command[-1] for command in commands] == ["setup", "autostart", "start"]
 
+
+
+def test_setup_repairs_an_existing_partial_virtual_environment(
+    tmp_path: Path, monkeypatch
+) -> None:
+    python = tmp_path / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    commands: list[list[str]] = []
+    monkeypatch.setattr(freetv, "venv_python", lambda: python)
+    monkeypatch.setattr(freetv.sys, "prefix", freetv.sys.base_prefix)
+    monkeypatch.setattr(
+        freetv,
+        "_run",
+        lambda command: commands.append(command) or 0,
+    )
+
+    assert freetv.main(["setup"]) == 0
+    assert commands[0][1:4] == ["-m", "pip", "install"]
+    assert commands[1][1:5] == ["-m", "pip", "install", "-r"]
+    assert commands[2] == [str(python), str(freetv.ROOT / "freetv.py"), "setup"]
 
 def test_applied_update_finishes_dependency_setup_before_start(monkeypatch) -> None:
     commands: list[list[str]] = []

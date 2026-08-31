@@ -37,6 +37,8 @@ logs/
 # Appliance packages
 pc-tv-box.zip
 pc-tv-box-stage/
+FreeTV-Setup.exe
+FreeTV-Setup.exe.sha256
 
 # Windows and editors
 .vscode/

@@ -127,6 +127,22 @@ jobs:
             $manifest,
             [System.Text.UTF8Encoding]::new($false)
           )
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./scripts/build-installer.ps1 `
+            -PackagePath ./pc-tv-box.zip `
+            -OutputPath ./FreeTV-Setup.exe
+          $hash = (Get-FileHash -LiteralPath ./FreeTV-Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD 'FreeTV-Setup.exe.sha256'),
+            "$hash  FreeTV-Setup.exe`n",
+            [System.Text.UTF8Encoding]::new($false)
+          )
       - name: Upload appliance zip
         uses: actions/upload-artifact@v7
         with:
@@ -137,6 +153,8 @@ jobs:
             release-manifest.json
             Install-FreeTV.cmd
             Install-FreeTV.ps1
+            FreeTV-Setup.exe
+            FreeTV-Setup.exe.sha256
             install.sh
           if-no-files-found: error
           retention-days: 7
@@ -247,9 +265,68 @@ jobs:
               Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
             }
 
+  installer-smoke:
+    name: Smoke-test Windows installer
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v8
+        with:
+          name: pc-tv-box-${{ github.sha }}
+          path: release-artifact
+      - name: Install and verify FreeTV
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./release-artifact/FreeTV-Setup.exe `
+            /VERYSILENT `
+            /SUPPRESSMSGBOXES `
+            /NORESTART `
+            /LOG=FreeTV-Setup.log
+          if ($LASTEXITCODE -ne 0) {
+            throw "FreeTV installer failed with exit code $LASTEXITCODE."
+          }
+
+          $installed = Join-Path $env:LOCALAPPDATA 'FreeTV'
+          $python = Join-Path $installed '.venv\Scripts\python.exe'
+          $smoke = Join-Path $installed 'scripts\integration-smoke.py'
+          if (-not (Test-Path -LiteralPath $python) -or -not (Test-Path -LiteralPath $smoke)) {
+            throw 'FreeTV installer did not create a runnable application.'
+          }
+          $task = Get-ScheduledTask -TaskName 'PC TV Box' -ErrorAction Stop
+          if ($task.State -eq 'Disabled') {
+            throw 'FreeTV autostart task is disabled.'
+          }
+          & $python $smoke --transport http --port 8765 --lan-ip 127.0.0.1
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installed FreeTV integration smoke failed with exit code $LASTEXITCODE."
+          }
+      - name: Clean up installed FreeTV
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          $installed = Join-Path $env:LOCALAPPDATA 'FreeTV'
+          $rootPattern = [regex]::Escape($installed)
+          Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.CommandLine -and
+              $_.CommandLine -match $rootPattern
+            } |
+            ForEach-Object {
+              Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+          $uninstaller = Join-Path $installed 'unins000.exe'
+          if (Test-Path -LiteralPath $uninstaller) {
+            & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+          }
+          Get-ScheduledTask -TaskName 'PC TV Box' -ErrorAction SilentlyContinue |
+            Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
+
   publish:
     name: Publish GitHub Release
-    needs: smoke
+    needs: [smoke, installer-smoke]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -287,6 +364,8 @@ jobs:
             release-artifact/release-manifest.json \
             release-artifact/Install-FreeTV.cmd \
             release-artifact/Install-FreeTV.ps1 \
+            release-artifact/FreeTV-Setup.exe \
+            release-artifact/FreeTV-Setup.exe.sha256 \
             release-artifact/install.sh \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
