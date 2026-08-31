@@ -70,6 +70,14 @@ def port_is_listening(port: int, host: str = "127.0.0.1") -> bool:
         return probe.connect_ex((host, port)) == 0
 
 
+def cloudflare_network_available(*, timeout_seconds: float = 0.75) -> bool:
+    try:
+        with socket.create_connection(("1.1.1.1", 443), timeout=timeout_seconds):
+            return True
+    except OSError:
+        return False
+
+
 def chrome_launcher_args(
     executable: Path, url: str, user_data_dir: Path, *, os_name: str = os.name
 ) -> list[str]:
@@ -156,19 +164,6 @@ def setup_appliance(root: Path | None = None) -> None:
         _run(
             [str(python), "-m", "pip", "install", "-r", str(base / "backend" / "requirements.txt")]
         )
-    print("Installing AdBlock extensions...")
-    _run(
-        [
-            str(python),
-            "-m",
-            "app.applications.adblock",
-            "--directory",
-            str(base / "vendor" / "adblock"),
-            "--youtube-directory",
-            str(base / "vendor" / "adblock-youtube"),
-        ],
-        cwd=base / "backend",
-    )
     if os.name == "nt":
         _run([str(python), "-m", "app.applications.chrome_policy"], cwd=base / "backend")
     dist = frontend_index(base)
@@ -195,17 +190,15 @@ def setup_appliance(root: Path | None = None) -> None:
 def print_doctor(root: Path | None = None) -> None:
     base = root or project_root()
     settings = load_settings(base / "config" / "settings.json")
-    paths = resolve_application_paths(settings)
+    paths = resolve_application_paths(settings, root=base)
     python = application_python(base)
     print(f"OS: {sys.platform} ({os.name})")
     print(f"Python: {sys.version.split()[0]} ({sys.executable})")
     print(f"Venv: {'ok' if python.is_file() else 'missing'} ({python})")
     print(f"Frontend: {'ok' if frontend_index(base).is_file() else 'missing'}")
-    for name in ("chrome", "brave", "edge", "mpv"):
+    for name in ("chrome", "brave", "edge", "mpv", "cloudflared"):
         found = paths.get(name)
         print(f"{name}: {found if found else 'not found'}")
-    cloudflared = shutil.which("cloudflared")
-    print(f"cloudflared: {cloudflared if cloudflared else 'not found'}")
     print(f"xdotool: {shutil.which('xdotool') or 'not found'}")
 
 
@@ -244,6 +237,7 @@ def start_appliance(
     ensure_example_configs(base)
     clear_public_origin(base)
     settings = load_settings(base / "config" / "settings.json")
+    paths = resolve_application_paths(settings, root=base)
     if settings.server.host != "0.0.0.0":
         raise RuntimeError("server.host 必須是 0.0.0.0，遙控器與 loopback 政策才會分開。")
     backend = base / "backend"
@@ -300,9 +294,11 @@ def start_appliance(
 
     origin_file = base / "config" / "tunnel-origin.txt"
     if not no_tunnel:
-        cloudflared = shutil.which("cloudflared")
+        cloudflared = paths["cloudflared"]
         if cloudflared is None:
             print("cloudflared 未安裝。區網外遙控不可用。")
+        elif not cloudflare_network_available():
+            print("Cloudflare 網路目前無法連線。已略過區網外遙控。")
         else:
             public_origin = _start_cloudflare_tunnel(
                 cloudflared,
@@ -336,7 +332,9 @@ def start_appliance(
     return 0
 
 
-def _start_cloudflare_tunnel(cloudflared: str, *, port: int, log_directory: Path) -> str | None:
+def _start_cloudflare_tunnel(
+    cloudflared: Path, *, port: int, log_directory: Path
+) -> str | None:
     from app.main import parse_cloudflared_origin
 
     log_directory.mkdir(parents=True, exist_ok=True)
@@ -370,7 +368,7 @@ def _start_cloudflare_tunnel(cloudflared: str, *, port: int, log_directory: Path
 
 def _open_tv_launcher(root: Path, url: str) -> None:
     settings = load_settings(root / "config" / "settings.json")
-    chrome = resolve_application_paths(settings).get("chrome")
+    chrome = resolve_application_paths(settings, root=root).get("chrome")
     if chrome is None:
         print("找不到 Chrome，改用系統預設瀏覽器開啟電視啟動器。")
         webbrowser.open(url)

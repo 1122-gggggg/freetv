@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
+from app import config
 from app.config import (
     ApplicationSettings,
     Settings,
@@ -130,6 +131,42 @@ def test_resolve_application_paths_finds_winget_mpv(tmp_path, monkeypatch) -> No
 
     paths = resolve_application_paths(Settings(), os_name="nt")
     assert paths["mpv"] == mpv_exe
+
+
+def test_resolve_application_paths_prefers_system_mpv_over_bundle(
+    tmp_path, monkeypatch
+) -> None:
+    bundled = tmp_path / "tools" / "mpv" / "mpv.exe"
+    bundled.parent.mkdir(parents=True)
+    bundled.touch()
+    system = tmp_path / "system" / "mpv.exe"
+    system.parent.mkdir()
+    system.touch()
+    monkeypatch.setattr(
+        config.shutil,
+        "which",
+        lambda name: str(system) if name == "mpv.exe" else None,
+    )
+
+    paths = resolve_application_paths(Settings(), os_name="nt", root=tmp_path)
+
+    assert paths["mpv"] == system
+
+
+def test_resolve_application_paths_falls_back_to_bundled_tools(
+    tmp_path, monkeypatch
+) -> None:
+    mpv = tmp_path / "tools" / "mpv" / "mpv.exe"
+    cloudflared = tmp_path / "tools" / "cloudflared" / "cloudflared.exe"
+    for executable in (mpv, cloudflared):
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        executable.touch()
+    monkeypatch.setattr(config.shutil, "which", lambda _: None)
+
+    paths = resolve_application_paths(Settings(), os_name="nt", root=tmp_path)
+
+    assert paths["mpv"] == mpv
+    assert paths["cloudflared"] == cloudflared
 
 
 def test_find_executable_accepts_multiple_command_names(tmp_path, monkeypatch) -> None:

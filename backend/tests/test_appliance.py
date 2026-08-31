@@ -66,10 +66,15 @@ def test_bundled_setup_keeps_non_pip_setup_work(
 
     appliance.setup_appliance(tmp_path)
 
-    assert any(
+    assert not any(
         arguments[:3] == [str(runtime), "-m", "app.applications.adblock"]
         for arguments, _ in commands
     )
+    if os.name == "nt":
+        assert any(
+            arguments[:3] == [str(runtime), "-m", "app.applications.chrome_policy"]
+            for arguments, _ in commands
+        )
     assert all(
         "pip" not in arguments and "venv" not in arguments for arguments, _ in commands
     )
@@ -117,6 +122,15 @@ def test_clear_public_origin_drops_stale_tunnel_url(
 
     assert not origin.exists()
     assert "PC_TV_PUBLIC_ORIGIN" not in os.environ
+
+
+def test_cloudflare_network_probe_fails_fast_offline(monkeypatch) -> None:
+    def offline(*args, **kwargs):
+        raise OSError("offline")
+
+    monkeypatch.setattr(appliance.socket, "create_connection", offline)
+
+    assert not appliance.cloudflare_network_available(timeout_seconds=0.01)
 
 
 def test_systemd_quote_wraps_paths_with_spaces() -> None:

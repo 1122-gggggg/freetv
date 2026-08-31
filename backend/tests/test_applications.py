@@ -241,21 +241,11 @@ class FakeYoutubeFullscreen:
         self.set_quality_calls.append((port, quality))
         return {**self.quality, "current": quality}
 
-def _ready_adblock(tmp_path: Path) -> Path:
-    adblock = tmp_path / "adblock"
-    adblock.mkdir()
-    (adblock / "manifest.json").write_text("{}", encoding="utf-8")
-    youtube = tmp_path / "adblock-youtube"
-    youtube.mkdir()
-    (youtube / "manifest.json").write_text("{}", encoding="utf-8")
-    return adblock
 
 
 def make_manager(
     *,
     chrome: Path | None = Path("C:/Apps/chrome.exe"),
-    adblock_dir: Path | None = None,
-    adblock_youtube_dir: Path | None = None,
     netflix_page: FakeNetflixPageController | None = None,
     youtube_fullscreen: FakeYoutubeFullscreen | None = None,
     debug_port: int = 9333,
@@ -280,8 +270,6 @@ def make_manager(
         process_launcher=launcher,
         windows=windows,
         input_controller=input_controller,
-        adblock_dir=adblock_dir,
-        adblock_youtube_dir=adblock_youtube_dir,
         adfilter=FakeAdFilter(),
         netflix_page=netflix_page or FakeNetflixPageController(),
         youtube_fullscreen=youtube_fullscreen or FakeYoutubeFullscreen(),
@@ -515,9 +503,9 @@ def test_opening_youtube_closes_netflix_before_launching() -> None:
     asyncio.run(scenario())
 
 
-def test_leave_to_desktop_closes_youtube_and_launcher(tmp_path: Path) -> None:
+def test_leave_to_desktop_closes_youtube_and_launcher() -> None:
     async def scenario() -> None:
-        manager, launcher, windows, _ = make_manager(adblock_dir=_ready_adblock(tmp_path))
+        manager, launcher, windows, _ = make_manager()
         await manager.open(ActiveApp.YOUTUBE)
         await manager.leave_to_desktop()
         assert launcher.process.poll() is not None
@@ -528,9 +516,8 @@ def test_leave_to_desktop_closes_youtube_and_launcher(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
-def test_open_news_opens_kiosk_chrome_with_live_url(tmp_path: Path) -> None:
-    adblock = _ready_adblock(tmp_path)
-    manager, launcher, _, _ = make_manager(adblock_dir=adblock)
+def test_open_news_opens_kiosk_chrome_with_live_url() -> None:
+    manager, launcher, _, _ = make_manager()
     news_url = "https://www.youtube.com/watch?v=live_stream_id"
     asyncio.run(manager.open_news(news_url))
     argv = launcher.calls[0]
@@ -1207,12 +1194,11 @@ def test_failed_application_launch_keeps_the_existing_tracked_window_visible() -
 
 @pytest.mark.parametrize("window_handle,window_owned", [(None, True), (900, False)])
 def test_open_rejects_an_unowned_or_missing_browser_window(
-    tmp_path: Path,
     window_handle: int | None,
     window_owned: bool,
 ) -> None:
     async def scenario() -> None:
-        manager, launcher, windows, _ = make_manager(adblock_dir=_ready_adblock(tmp_path))
+        manager, launcher, windows, _ = make_manager()
         windows.window_for_pid = window_handle
         windows.window_owned_by_process = window_owned
 
@@ -1228,9 +1214,9 @@ def test_open_rejects_an_unowned_or_missing_browser_window(
     asyncio.run(scenario())
 
 
-def test_unowned_browser_uses_kill_fallback_after_terminate_timeout(tmp_path: Path) -> None:
+def test_unowned_browser_uses_kill_fallback_after_terminate_timeout() -> None:
     async def scenario() -> None:
-        manager, launcher, windows, _ = make_manager(adblock_dir=_ready_adblock(tmp_path))
+        manager, launcher, windows, _ = make_manager()
         launcher.process.wait_timeouts_remaining = 1
         windows.window_for_pid = None
 
@@ -1244,11 +1230,9 @@ def test_unowned_browser_uses_kill_fallback_after_terminate_timeout(tmp_path: Pa
     asyncio.run(scenario())
 
 
-def test_window_that_disappears_while_maximizing_is_not_committed_as_active(
-    tmp_path: Path,
-) -> None:
+def test_window_that_disappears_while_maximizing_is_not_committed_as_active() -> None:
     async def scenario() -> None:
-        manager, launcher, windows, _ = make_manager(adblock_dir=_ready_adblock(tmp_path))
+        manager, launcher, windows, _ = make_manager()
         windows.ownership_results = [True, False]
 
         with pytest.raises(CommandExecutionError) as caught:
@@ -1262,9 +1246,9 @@ def test_window_that_disappears_while_maximizing_is_not_committed_as_active(
     asyncio.run(scenario())
 
 
-def test_failed_orphan_cleanup_is_retried_during_shutdown(tmp_path: Path) -> None:
+def test_failed_orphan_cleanup_is_retried_during_shutdown() -> None:
     async def scenario() -> None:
-        manager, launcher, windows, _ = make_manager(adblock_dir=_ready_adblock(tmp_path))
+        manager, launcher, windows, _ = make_manager()
         launcher.process.terminate_failures_remaining = 1
         windows.window_for_pid = None
 
@@ -1382,9 +1366,9 @@ def test_home_does_not_minimize_a_reused_tracked_window_handle() -> None:
     asyncio.run(scenario())
 
 
-def test_forwarding_accepts_input_for_news_target(tmp_path: Path) -> None:
+def test_forwarding_accepts_input_for_news_target() -> None:
     async def scenario() -> None:
-        manager, _, windows, input_controller = make_manager(adblock_dir=_ready_adblock(tmp_path))
+        manager, _, windows, input_controller = make_manager()
         await manager.open_news("https://www.youtube.com/watch?v=live123")
 
         await manager.forward_command(Command.NAV_DOWN)

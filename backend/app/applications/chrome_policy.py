@@ -5,7 +5,7 @@ import os
 import sys
 from collections.abc import Callable
 
-from app.applications.adblock import ADBLOCK_EXTENSION_ID, ADBLOCK_YOUTUBE_EXTENSION_ID
+ADBLOCK_EXTENSION_ID = "gighmmpiobklfepjocnamgkkbiglidom"
 
 STORE_UPDATE_URL = "https://clients2.google.com/service/update2/crx"
 POLICY_KEY = r"Software\Policies\Google\Chrome\ExtensionInstallForcelist"
@@ -17,7 +17,6 @@ TV_CHROME_NOTIFICATION_FLAGS = [
 
 FORCE_INSTALL_EXTENSIONS: tuple[tuple[str, str], ...] = (
     (ADBLOCK_EXTENSION_ID, STORE_UPDATE_URL),
-    (ADBLOCK_YOUTUBE_EXTENSION_ID, STORE_UPDATE_URL),
 )
 
 

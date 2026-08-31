@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from app.applications.adblock import ADBLOCK_EXTENSION_ID, ADBLOCK_YOUTUBE_EXTENSION_ID
 from app.applications.chrome_policy import (
+    ADBLOCK_EXTENSION_ID,
+    STORE_UPDATE_URL,
     TV_CHROME_NOTIFICATION_FLAGS,
     apply_force_install,
     force_install_entries,
@@ -15,16 +16,14 @@ def test_tv_notification_flags_are_fixed_and_minimal() -> None:
     ]
 
 
-def test_force_install_entries_cover_both_store_ids() -> None:
+def test_force_install_entries_contains_only_primary_store_id() -> None:
     entries = dict(force_install_entries())
-    assert entries["1"].startswith(f"{ADBLOCK_EXTENSION_ID};")
-    assert entries["2"].startswith(f"{ADBLOCK_YOUTUBE_EXTENSION_ID};")
-    assert entries["1"].endswith("https://clients2.google.com/service/update2/crx")
+    assert entries == {"1": f"{ADBLOCK_EXTENSION_ID};{STORE_UPDATE_URL}"}
 
 
-def test_apply_force_install_writes_each_entry() -> None:
+def test_apply_force_install_writes_only_primary_entry() -> None:
     written: dict[str, str] = {}
     result = apply_force_install(writer=written.__setitem__)
-    assert dict(result) == written
-    assert ADBLOCK_EXTENSION_ID in written["1"]
-    assert ADBLOCK_YOUTUBE_EXTENSION_ID in written["2"]
+    assert dict(result) == written == {
+        "1": f"{ADBLOCK_EXTENSION_ID};{STORE_UPDATE_URL}"
+    }

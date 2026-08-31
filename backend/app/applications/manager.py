@@ -115,8 +115,6 @@ class ApplicationManager:
         process_launcher: Callable[[list[str]], ChildProcess] | None = None,
         windows: WindowController,
         input_controller: CommandInputController,
-        adblock_dir: Path | None = None,
-        adblock_youtube_dir: Path | None = None,
         profile_dir: Path | None = None,
         netflix_profile_dir: Path | None = None,
         adfilter: YoutubeAdFilter | None = None,
@@ -132,10 +130,6 @@ class ApplicationManager:
         self._launch_process = process_launcher or self._default_process_launcher
         self._windows = windows
         self._input = input_controller
-        self._adblock_dir = adblock_dir or (project_root() / "vendor" / "adblock")
-        self._adblock_youtube_dir = adblock_youtube_dir or (
-            self._adblock_dir.parent / "adblock-youtube"
-        )
         self._profile_dir = profile_dir or (project_root() / "config" / "chrome-tv-profile")
         self._netflix_profile_dir = netflix_profile_dir or (
             project_root() / "config" / "chrome-netflix-profile"

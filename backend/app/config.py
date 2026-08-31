@@ -25,6 +25,7 @@ class ApplicationSettings(BaseModel):
     brave_path: str = ""
     edge_path: str = ""
     mpv_path: str = ""
+    cloudflared_path: str = ""
     browser_path: str = ""
 
 
@@ -182,8 +183,14 @@ def _mpv_candidates(*, os_name: str = os.name) -> tuple[Path, ...]:
 
 
 def resolve_application_paths(
-    settings: Settings, *, os_name: str = os.name
+    settings: Settings,
+    *,
+    os_name: str = os.name,
+    root: Path | None = None,
 ) -> dict[str, Path | None]:
+    base = root or project_root()
+    bundled_mpv = base / "tools" / "mpv" / "mpv.exe"
+    bundled_cloudflared = base / "tools" / "cloudflared" / "cloudflared.exe"
     chrome_commands = (
         ("chrome.exe",)
         if os_name == "nt"
@@ -194,6 +201,7 @@ def resolve_application_paths(
         ("msedge.exe",) if os_name == "nt" else ("microsoft-edge-stable", "microsoft-edge")
     )
     mpv_commands = ("mpv.exe",) if os_name == "nt" else ("mpv",)
+    cloudflared_commands = ("cloudflared.exe",) if os_name == "nt" else ("cloudflared",)
     browser_commands = ("msedge.exe",) if os_name == "nt" else ("microsoft-edge", "firefox")
     return {
         "chrome": find_executable(
@@ -206,7 +214,14 @@ def resolve_application_paths(
             settings.applications.edge_path, _edge_candidates(os_name=os_name), edge_commands
         ),
         "mpv": find_executable(
-            settings.applications.mpv_path, _mpv_candidates(os_name=os_name), mpv_commands
+            settings.applications.mpv_path,
+            (*_mpv_candidates(os_name=os_name), bundled_mpv),
+            mpv_commands,
+        ),
+        "cloudflared": find_executable(
+            settings.applications.cloudflared_path,
+            (bundled_cloudflared,),
+            cloudflared_commands,
         ),
         "browser": find_executable(settings.applications.browser_path, (), browser_commands),
     }

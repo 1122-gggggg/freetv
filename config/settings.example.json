@@ -9,6 +9,7 @@
     "brave_path": "",
     "edge_path": "",
     "mpv_path": "",
+    "cloudflared_path": "",
     "browser_path": ""
   },
   "urls": {

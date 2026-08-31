@@ -181,12 +181,8 @@ Assert-NativeSuccess 'Upgrading pip'
 & $VenvPython -m pip install -r (Join-Path $Root 'backend\requirements.txt')
 Assert-NativeSuccess 'Installing backend dependencies'
 
-$AdblockDirectory = Join-Path $Root 'vendor\adblock'
-$AdblockYoutubeDirectory = Join-Path $Root 'vendor\adblock-youtube'
 Push-Location (Join-Path $Root 'backend')
 try {
-    & $VenvPython -m app.applications.adblock --directory $AdblockDirectory --youtube-directory $AdblockYoutubeDirectory
-    Assert-NativeSuccess 'Installing AdBlock extensions'
     & $VenvPython -m app.applications.chrome_policy
     Assert-NativeSuccess 'Applying Chrome AdBlock policy'
 } finally {
