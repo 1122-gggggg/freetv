@@ -8,6 +8,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Net.Http -ErrorAction Stop
 
 $Root = Split-Path -Parent $PSScriptRoot
 $LockPath = Join-Path $Root 'installer\windows-bundle.lock.json'
@@ -32,14 +33,70 @@ function Assert-AllowedArtifactUri {
     }
 }
 
+function Invoke-ArtifactRequest {
+    param(
+        [Parameter(Mandatory = $true)][uri]$Uri,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+
+    $Handler = [System.Net.Http.HttpClientHandler]::new()
+    $Handler.AllowAutoRedirect = $false
+    $Client = [System.Net.Http.HttpClient]::new($Handler)
+    try {
+        $Response = $Client.GetAsync(
+            $Uri,
+            [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead
+        ).GetAwaiter().GetResult()
+        try {
+            $StatusCode = [int]$Response.StatusCode
+            $Location = $null
+            if ($null -ne $Response.Headers.Location) {
+                $Location = [string]$Response.Headers.Location
+            }
+            if ($StatusCode -in @(301, 302, 303, 307, 308)) {
+                return [pscustomobject]@{
+                    StatusCode = $StatusCode
+                    Location = $Location
+                }
+            }
+            if ($StatusCode -lt 200 -or $StatusCode -gt 299) {
+                throw "Artifact request failed with HTTP status $StatusCode for $Uri."
+            }
+
+            $OutputStream = [System.IO.File]::Open(
+                $Destination,
+                [System.IO.FileMode]::Create,
+                [System.IO.FileAccess]::Write,
+                [System.IO.FileShare]::None
+            )
+            try {
+                $null = $Response.Content.CopyToAsync($OutputStream).GetAwaiter().GetResult()
+            }
+            finally {
+                $OutputStream.Dispose()
+            }
+            return [pscustomobject]@{
+                StatusCode = $StatusCode
+                Location = $null
+            }
+        }
+        finally {
+            $Response.Dispose()
+        }
+    }
+    finally {
+        $Client.Dispose()
+    }
+}
+
 function Get-VerifiedArtifact {
     param(
         [Parameter(Mandatory = $true)][object]$Component,
         [Parameter(Mandatory = $true)][string]$Destination
     )
 
-    $SourceUri = [uri][string]$Component.url
-    Assert-AllowedArtifactUri -Uri $SourceUri
+    $CurrentUri = [uri][string]$Component.url
+    Assert-AllowedArtifactUri -Uri $CurrentUri
 
     $DestinationDirectory = Split-Path -Parent $Destination
     if (-not (Test-Path -LiteralPath $DestinationDirectory)) {
@@ -49,15 +106,28 @@ function Get-VerifiedArtifact {
         Remove-Item -LiteralPath $Destination -Force
     }
 
-    $Response = Invoke-WebRequest -UseBasicParsing -Uri $Component.url -OutFile $Destination
-    if ($null -ne $Response) {
-        $BaseResponseProperty = $Response.PSObject.Properties['BaseResponse']
-        if ($null -ne $BaseResponseProperty -and $null -ne $BaseResponseProperty.Value) {
-            $ResponseUriProperty = $BaseResponseProperty.Value.PSObject.Properties['ResponseUri']
-            if ($null -ne $ResponseUriProperty -and $null -ne $ResponseUriProperty.Value) {
-                Assert-AllowedArtifactUri -Uri ([uri]$ResponseUriProperty.Value)
-            }
+    $MaximumRedirects = 5
+    $RedirectCount = 0
+    while ($true) {
+        $Result = Invoke-ArtifactRequest -Uri $CurrentUri -Destination $Destination
+        if ([int]$Result.StatusCode -notin @(301, 302, 303, 307, 308)) {
+            break
         }
+        if ($RedirectCount -ge $MaximumRedirects) {
+            throw "Artifact redirect limit exceeded for $($Component.url)."
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$Result.Location)) {
+            throw "Artifact redirect is missing a Location header for $CurrentUri."
+        }
+        try {
+            $NextUri = [uri]::new($CurrentUri, [string]$Result.Location)
+        }
+        catch {
+            throw "Artifact redirect Location is invalid for $CurrentUri."
+        }
+        Assert-AllowedArtifactUri -Uri $NextUri
+        $CurrentUri = $NextUri
+        $RedirectCount += 1
     }
 
     $Item = Get-Item -LiteralPath $Destination
