@@ -421,6 +421,33 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         </section>
       ) : null}
 
+      {channelControlsVisible ? (
+        <section
+          id="remote-panel-channel"
+          className="remote-grid two-column channel-row"
+          aria-label="頻道切換"
+        >
+          <CommandButton
+            command="CHANNEL_DOWN"
+            label={state?.active_app === 'news' && state.previous_channel_name
+              ? `上一台：${state.previous_channel_name}`
+              : '頻道 −'}
+            onCommand={command}
+            disabled={controlsDisabled}
+            repeatOnHold
+          />
+          <CommandButton
+            command="CHANNEL_UP"
+            label={state?.active_app === 'news' && state.next_channel_name
+              ? `下一台：${state.next_channel_name}`
+              : '頻道 +'}
+            onCommand={command}
+            disabled={controlsDisabled}
+            repeatOnHold
+          />
+        </section>
+      ) : null}
+
       <h2 className="remote-section-title">首頁</h2>
       <section id="remote-panel-home" aria-label="首頁應用程式" className="remote-grid three-column apps-row">
         <CommandButton command="OPEN_YOUTUBE" label="YouTube" onCommand={command} disabled={controlsDisabled} />
@@ -507,7 +534,24 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
       <section id="remote-panel-remote" aria-label="方向鍵" className="remote-direction-pad">
         <CommandButton command="BACK" label="返回" onCommand={command} className="direction-back" disabled={controlsDisabled} />
         <CommandButton command="NAV_UP" label="上" onCommand={command} className="direction-up" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
-        <CommandButton command="PLAY_PAUSE" label="播放／暫停" onCommand={command} className="direction-play" disabled={controlsDisabled} />
+        <CommandButton
+          command="PLAY_PAUSE"
+          label="播放／暫停"
+          onCommand={command}
+          className="direction-play"
+          disabled={controlsDisabled}
+        >
+          <svg
+            aria-hidden="true"
+            className="play-pause-icon"
+            focusable="false"
+            viewBox="0 0 48 24"
+          >
+            <rect x="2" y="3" width="5" height="18" rx="1" />
+            <rect x="11" y="3" width="5" height="18" rx="1" />
+            <path d="M23 2.5 46 12 23 21.5Z" />
+          </svg>
+        </CommandButton>
         <CommandButton command="NAV_LEFT" label="左" onCommand={command} className="direction-left" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
         <CommandButton command="OK" label="確定" onCommand={command} className="direction-ok" disabled={controlsDisabled} />
         <CommandButton command="NAV_RIGHT" label="右" onCommand={command} className="direction-right" disabled={controlsDisabled} repeatOnHold={repeatDirectionalNavigation} />
@@ -558,33 +602,6 @@ function RemoteControl({ token, onForget, onAuthenticationFailed }: RemoteContro
         />
       ) : null}
 
-
-      {channelControlsVisible ? (
-        <section
-          id="remote-panel-channel"
-          className="remote-grid two-column channel-row"
-          aria-label="頻道切換"
-        >
-          <CommandButton
-            command="CHANNEL_DOWN"
-            label={state?.active_app === 'news' && state.previous_channel_name
-              ? `上一台：${state.previous_channel_name}`
-              : '頻道 −'}
-            onCommand={command}
-            disabled={controlsDisabled}
-            repeatOnHold
-          />
-          <CommandButton
-            command="CHANNEL_UP"
-            label={state?.active_app === 'news' && state.next_channel_name
-              ? `下一台：${state.next_channel_name}`
-              : '頻道 +'}
-            onCommand={command}
-            disabled={controlsDisabled}
-            repeatOnHold
-          />
-        </section>
-      ) : null}
 
       {fallbackKeyboardVisible ? (
       <section id="remote-panel-input" className="search-card">

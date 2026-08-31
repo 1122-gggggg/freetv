@@ -158,6 +158,12 @@
   color: #111827;
 }
 
+.remote-shell .play-pause-icon {
+  width: 2.5rem;
+  height: 1.4rem;
+  fill: currentColor;
+}
+
 .remote-shell .remote-sliders-row {
   display: grid;
   grid-template-columns: 1fr;

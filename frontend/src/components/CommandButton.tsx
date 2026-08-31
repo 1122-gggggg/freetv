@@ -26,6 +26,7 @@ interface CommandButtonProps extends Omit<
 export function CommandButton({
   command,
   label,
+  children,
   onCommand,
   compact = false,
   repeatOnHold = false,
@@ -104,6 +105,7 @@ export function CommandButton({
   return (
     <button
       {...props}
+      aria-label={label}
       className={`remote-button ${compact ? 'is-compact' : ''} ${className}`.trim()}
       disabled={disabled}
       type="button"
@@ -113,7 +115,7 @@ export function CommandButton({
       onPointerCancel={handlePointerCancel}
       onLostPointerCapture={() => stopRepeating()}
     >
-      {label}
+      {children ?? label}
     </button>
   )
 }

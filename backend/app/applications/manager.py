@@ -219,7 +219,9 @@ class ApplicationManager:
             )
 
         if app is ActiveApp.YOUTUBE:
-            await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
+            await self._close_apps(
+                ActiveApp.YOUTUBE, ActiveApp.NEWS, ActiveApp.NETFLIX
+            )
             arguments = self._chrome_kiosk_args(self._settings.urls.youtube)
             await self._launch_and_track(app, arguments, "YouTube")
             return None
@@ -246,12 +248,16 @@ class ApplicationManager:
         return None
 
     async def open_news(self, url: str) -> None:
-        await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
+        await self._close_apps(
+            ActiveApp.YOUTUBE, ActiveApp.NEWS, ActiveApp.NETFLIX
+        )
         arguments = self._chrome_kiosk_args(url)
         await self._launch_and_track(ActiveApp.NEWS, arguments, "新聞")
 
     async def search_youtube(self, query: str) -> None:
-        await self._close_apps(ActiveApp.YOUTUBE, ActiveApp.NEWS)
+        await self._close_apps(
+            ActiveApp.YOUTUBE, ActiveApp.NEWS, ActiveApp.NETFLIX
+        )
         url = f"https://www.youtube.com/tv#/search?q={quote_plus(query)}"
         arguments = self._chrome_kiosk_args(url)
         await self._launch_and_track(ActiveApp.YOUTUBE, arguments, "YouTube")

@@ -499,20 +499,18 @@ def test_opening_netflix_closes_playing_youtube() -> None:
     asyncio.run(scenario())
 
 
-def test_home_closes_youtube_but_keeps_netflix() -> None:
+def test_opening_youtube_closes_netflix_before_launching() -> None:
     async def scenario() -> None:
         manager, launcher, windows, _ = make_manager()
         await manager.open(ActiveApp.NETFLIX)
         netflix = launcher.processes[0]
+
         await manager.open(ActiveApp.YOUTUBE)
-        youtube = launcher.processes[1]
-        await manager.return_home()
-        assert youtube.poll() is not None
-        assert netflix.poll() is None
-        assert manager.active_app is ActiveApp.LAUNCHER
-        await manager.open(ActiveApp.NETFLIX)
+
+        assert netflix.poll() is not None
+        assert windows.closed_windows == [900]
         assert len(launcher.calls) == 2
-        assert manager.active_app is ActiveApp.NETFLIX
+        assert manager.active_app is ActiveApp.YOUTUBE
 
     asyncio.run(scenario())
 

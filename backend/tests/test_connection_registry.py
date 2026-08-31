@@ -94,6 +94,8 @@ def test_state_broadcast_continues_when_a_peer_disconnects() -> None:
                 "brightness": 100,
                 "channel_number": None,
                 "channel_name": None,
+                "previous_channel_name": None,
+                "next_channel_name": None,
                 "status_message": None,
                 "error_message": None,
                 "netflix_context": None,
