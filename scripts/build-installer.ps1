@@ -48,12 +48,14 @@ try {
         $PackagePath = (Resolve-Path -LiteralPath $PackagePath -ErrorAction Stop).Path
     }
 
-    $ExpandedRoot = Join-Path $StageRoot 'package'
-    Expand-Archive -LiteralPath $PackagePath -DestinationPath $ExpandedRoot
-    $SourceRoot = Join-Path $ExpandedRoot 'pc-tv-box'
-    if (-not (Test-Path -LiteralPath (Join-Path $SourceRoot 'freetv.py'))) {
-        throw 'The package archive does not contain pc-tv-box\freetv.py.'
+    $BundleRoot = Join-Path $StageRoot 'offline-bundle'
+    & (Join-Path $PSScriptRoot 'build-offline-bundle.ps1') `
+        -PackagePath $PackagePath `
+        -OutputPath $BundleRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Offline bundle assembly failed.'
     }
+    $SourceRoot = $BundleRoot
 
     $CompilerOutput = Join-Path $StageRoot 'output'
     New-Item -ItemType Directory -Force -Path $CompilerOutput | Out-Null
